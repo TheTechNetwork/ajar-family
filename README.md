@@ -6,10 +6,14 @@ let a parent approve **one specific video** in seconds — permanently or
 temporarily — without granting all of YouTube, and **without a VPN or TLS
 interception on Apple platforms and without enterprise MDM**.
 
-> **Repository status: Phase 0 (architecture research + proof-of-concept
-> scaffolds).** No production feature code yet. The enforcement mechanisms are
-> being validated on real hardware before implementation. Start with
-> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+> **Repository status: Phase 0 complete + Phase 1 backend alpha underway.** The
+> architecture research and PoC scaffolds are in place, and the platform-agnostic
+> **cloud backend is implemented and tested** (family model, policy engine,
+> temporary approvals, access requests, Ed25519-signed policy sync) running on an
+> in-memory store with CI + a Cloudflare Workers deploy target. The device-side
+> enforcement mechanisms are still being validated on real hardware. Start with
+> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); to run the backend see
+> [`backend/README.md`](backend/README.md).
 
 ## The one question Phase 0 must answer
 
@@ -28,6 +32,10 @@ interception on Apple platforms and without enterprise MDM**.
 | `docs/MACOS_SAFARI_POC.md` | **PoC B** — macOS Safari Web Extension (per-video, unresolved). Never block Safari. |
 | `docs/WINDOWS_FILTER_POC.md` | **PoC C** — Windows policy-installed browser extension + hardened service (no MITM by default). |
 | `docs/APPLE_URL_FILTER_POC.md` | **PoC D (supplementary)** — `NEURLFilter` Bloom/PIR large-scale blocklist. |
+| `docs/DEPLOYMENT.md` | Backend → Cloudflare Workers via GitHub Actions; secrets + signing-key generation. |
+| `docs/APPLE_ACCOUNT_SETUP.md` | Apple Developer account prep runbook (enrollment, App IDs, entitlements, Family Controls request, APNs). |
+| `docs/RELEASE_CHECKLIST.md` | The gate for merging PR #1 — "alpha ready → merge." |
+| `backend/` | **Cloud backend (implemented, tested)** — TypeScript, in-memory store (alpha), node:http + Workers adapters. |
 | `shared/policy/policy-model.ts` | Platform-agnostic policy model + evaluation order + reference evaluator (**the source of truth**). |
 | `shared/youtube/youtube-normalize.ts` | Canonical YouTube object normalization (**the source of truth**). |
 | `apple/poc-contentfilter/` | PoC A scaffold (Xcode 26 / iOS 26, on-device). |
@@ -35,7 +43,6 @@ interception on Apple platforms and without enterprise MDM**.
 | `apple/child-agent/`, `apple/parent-app/` | Later-phase placeholders. |
 | `macos/safari-extension/` | PoC B skeleton (Safari Web Extension). |
 | `windows/agent/`, `windows/extension/` | PoC C skeleton (service + MV3 extension). |
-| `backend/` | Later-phase cloud backend (TypeScript + PostgreSQL). Placeholder. |
 
 ## Enforcement, per platform (research summary)
 
