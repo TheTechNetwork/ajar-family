@@ -186,9 +186,16 @@ specific bad videos). It is **not** the per-video-approval engine. Validated in
   maintains rules and calls `notifyRulesChanged()`; the data provider consults
   the shared, signed policy cache (App Group) to allow/deny each flow.
 - **Remediation "Request Access" page**: `NEFilterControlProvider.remediationMap`
-  + `NEFilterDataVerdict.remediateVerdict(...)` render a block page in the WebKit
-  view with a tappable link the app handles via `handleRemediation(for:)`. This
-  is the native hook for the block → Request-Access flow on iOS Safari.
+  + `NEFilterNewFlowVerdict.remediateVerdict(withRemediationURLMapKey:remediationButtonTextMapKey:)`
+  render a block page in the WebKit view. **SDK-header fact (`NEFilterProvider.h`,
+  confirmed while building PoC A, ADR-011):** the remediation URL **must use the
+  `http`/`https` scheme** — so the Request-Access page is a **remotely hosted page
+  (served by our backend), not an app-local screen**, and the `NE_FLOW_URL`
+  substitution token carries the blocked URL into it. Getting from that page back
+  into the containing app to create the request needs a **universal link or custom
+  URL scheme**. The block → Request-Access flow on iOS Safari must account for this
+  hosting + return-path dependency; it is not a purely on-device hop. (`remediationMap`
+  is also typed `[String:[String:NSObject]]`, so values are bridged `as NSString`.)
 - **Anti-tamper anchor**: FamilyControls `.child` "prevents the child user from
   deleting the app that provides parental controls" and blocks iCloud sign-out
   (<https://developer.apple.com/documentation/familycontrols>). This is the only
