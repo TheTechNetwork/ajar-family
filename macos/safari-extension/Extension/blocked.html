@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Access blocked — request access</title>
+  <!--
+    blocked.html — the Request-Access page for the macOS Safari Web Extension (PoC B).
+
+    background.js redirects a blocked YouTube navigation here with:
+        blocked.html?u=<encoded original URL>&k=<canonical policy key>
+    This page shows the blocked resource and lets the child submit a request that
+    round-trips the blocked canonical id to the app/backend (docs/MACOS_SAFARI_POC.md B2).
+
+    Self-contained: all CSS/JS inline, no external assets (extension pages load
+    under a strict context). This gates ONE resource; Safari itself is untouched.
+  -->
+  <style>
+    :root {
+      --bg: #f5f6f8; --card: #ffffff; --fg: #1c1d21; --muted: #6b6f76;
+      --accent: #2f6df6; --accent-fg: #ffffff; --border: #e2e4e9; --chip: #eef1f6;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16171b; --card: #1e2026; --fg: #f2f3f5; --muted: #a2a7b0;
+        --accent: #4d86ff; --accent-fg: #0b0c0f; --border: #2c2f37; --chip: #262a32;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: var(--bg); color: var(--fg);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+      max-width: 520px; width: 100%; padding: 28px 28px 24px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px; font-weight: 600;
+      font-size: 13px; color: var(--muted); letter-spacing: .02em; text-transform: uppercase;
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #e5484d; }
+    h1 { font-size: 21px; margin: 12px 0 6px; }
+    p.sub { color: var(--muted); margin: 0 0 18px; }
+    .resource {
+      background: var(--chip); border-radius: 10px; padding: 12px 14px; margin-bottom: 18px;
+      word-break: break-all; font-size: 13px;
+    }
+    .resource .key { font-weight: 600; color: var(--fg); }
+    .resource .url { color: var(--muted); margin-top: 4px; }
+    label { display: block; font-size: 13px; font-weight: 600; margin: 0 0 6px; }
+    textarea {
+      width: 100%; min-height: 74px; resize: vertical; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--bg); color: var(--fg);
+      padding: 10px 12px; font: inherit; font-size: 14px;
+    }
+    .row { display: flex; gap: 10px; margin-top: 18px; }
+    button {
+      flex: 1; border: 0; border-radius: 10px; padding: 12px 16px; font: inherit;
+      font-weight: 600; cursor: pointer;
+    }
+    .primary { background: var(--accent); color: var(--accent-fg); }
+    .secondary { background: var(--chip); color: var(--fg); }
+    button:disabled { opacity: .55; cursor: default; }
+    .status { margin-top: 16px; font-size: 13px; color: var(--muted); min-height: 18px; }
+    .status.ok { color: #2f9e44; }
+    .status.err { color: #e5484d; }
+    footer { margin-top: 18px; font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main class="card" role="main">
+    <span class="badge"><span class="dot"></span> Blocked by parental controls</span>
+    <h1>This video isn't available right now</h1>
+    <p class="sub">You can ask a parent to allow it. They'll get your request and can approve just this video.</p>
+
+    <div class="resource">
+      <div class="key" id="keyLine">YOUTUBE_VIDEO:…</div>
+      <div class="url" id="urlLine">…</div>
+    </div>
+
+    <label for="reason">Why do you want to watch it? (optional)</label>
+    <textarea id="reason" placeholder="e.g. It's for my science homework"></textarea>
+
+    <div class="row">
+      <button class="secondary" id="backBtn" type="button">Go back</button>
+      <button class="primary" id="requestBtn" type="button">Request access</button>
+    </div>
+
+    <div class="status" id="status" aria-live="polite"></div>
+
+    <footer>
+      Safari is still fully available — only this specific video is being held for
+      approval. Your parent decides whether to allow it.
+    </footer>
+  </main>
+
+  <script>
+    // Parse the resource this page was redirected for.
+    const params = new URLSearchParams(location.search);
+    const originalUrl = params.get("u") || "";
+    const canonicalKey = params.get("k") || "";
+
+    const keyLine = document.getElementById("keyLine");
+    const urlLine = document.getElementById("urlLine");
+    const statusEl = document.getElementById("status");
+    const requestBtn = document.getElementById("requestBtn");
+    const backBtn = document.getElementById("backBtn");
+    const reasonEl = document.getElementById("reason");
+
+    keyLine.textContent = canonicalKey || "(unrecognized YouTube resource)";
+    urlLine.textContent = originalUrl || "(no URL)";
+
+    backBtn.addEventListener("click", () => history.back());
+
+    function setStatus(msg, kind) {
+      statusEl.textContent = msg;
+      statusEl.className = "status" + (kind ? " " + kind : "");
+    }
+
+    requestBtn.addEventListener("click", async () => {
+      requestBtn.disabled = true;
+      setStatus("Sending your request…");
+
+      const payload = {
+        type: "REQUEST_ACCESS",
+        key: canonicalKey,
+        url: originalUrl,
+        reason: reasonEl.value.trim(),
+      };
+
+      // Primary path: hand the blocked canonical id to the background worker,
+      // which forwards it to the native messaging host / child agent, which
+      // posts the AccessRequest to the backend (B2). This keeps the request on
+      // the trusted, signed channel rather than the page making its own call.
+      let delivered = false;
+      try {
+        if (typeof browser !== "undefined" && browser.runtime && browser.runtime.sendMessage) {
+          const res = await browser.runtime.sendMessage(payload);
+          delivered = !!(res && res.ok);
+        }
+      } catch (e) {
+        console.warn("[guard] background message failed:", e);
+      }
+
+      // Fallback / illustration: a direct POST to the backend. STUBBED — the
+      // real endpoint, auth (per-device keypair), and signing are backend work
+      // (ARCHITECTURE §7). Left here to show the round-trip shape.
+      if (!delivered) {
+        try {
+          await fetch("https://api.example.invalid/v1/access-requests", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          delivered = true; // NOTE: stub host is unreachable; treat as best-effort.
+        } catch (e) {
+          console.warn("[guard] stub backend POST failed (expected in PoC):", e);
+        }
+      }
+
+      if (delivered) {
+        setStatus("Request sent. A parent will review it soon.", "ok");
+      } else {
+        setStatus("Couldn't send the request. Check the parental-controls app is running.", "err");
+        requestBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -388,5 +388,3 @@ the honesty of the block UX is part of the product.
 - Windows Firewall — <https://learn.microsoft.com/windows/security/operating-system-security/network-security/windows-firewall/>
 - Chrome policy list (QuicAllowed, DnsOverHttpsMode, EncryptedClientHelloEnabled, IncognitoModeAvailability, DeveloperToolsAvailability) — <https://chromeenterprise.google/policies/>
 - Edge browser policies — <https://learn.microsoft.com/deployedge/microsoft-edge-browser-policies/>
-</content>
-</invoke>
