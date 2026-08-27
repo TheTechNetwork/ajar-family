@@ -90,13 +90,29 @@ again automatically** at expiry. Repeat with the device in **airplane mode**
 after the grant is cached, to prove local expiry without connectivity. Try to
 extend by changing the device clock/timezone forward and confirm the grant does
 **not** extend (UTC + monotonic + skew detection, ADR-009).
+Then test the **stronger** answer (ADR-014): with a `ManagedSettingsStore`
+asserting `DateAndTimeSettings.requireAutomaticDateAndTime`, confirm the child
+**cannot change the clock at all** — prevention beats detection. Record both the
+detection-only behavior and the prevention behavior.
 
-### A6 — What the child can/can't disable under `.child`
-With `.child` active, attempt as the child: delete the app; sign out of iCloud;
+### A6 — What the child can/can't disable under `.child` (test BOTH postures — ADR-014)
+The point of A6 is to learn which protections are **inherent** to `.child` and
+which the product must **assert** via ManagedSettings. Run each attempt in two
+postures and record both columns:
+
+- **Posture A — `.child` alone**: what the authorization gives you by default.
+- **Posture B — `.child` + asserted `ManagedSettingsStore`**: `ApplicationSettings.denyAppRemoval`,
+  `ApplicationSettings.denyAppInstallation`, `AccountSettings.lockAccounts`,
+  `DateAndTimeSettings.requireAutomaticDateAndTime`.
+
+As the child, attempt: delete the app; sign out of iCloud; change the clock/timezone;
 disable the filter in Settings; install a configuration profile / third-party DoH
-app; add a VPN. Record which are blocked vs. allowed. (Expected: app-delete and
-iCloud-signout blocked; DNS/VPN behavior undocumented → this is the empirical
-point.)
+app; add a VPN. Record blocked vs. allowed **in each posture**.
+**Known open question (SDK-confirmed, ADR-014):** there is **no** ManagedSettings
+key that locks the content-filter/URL-filter toggle in Settings — so "disable the
+filter in Settings" is the single most important A6 result and can only be answered
+here, on hardware. (Expected elsewhere: app-delete and iCloud-signout blocked at
+least in Posture B; DNS/VPN behavior undocumented → empirical.)
 
 ## Build status (verified 2026-08-27)
 
@@ -134,10 +150,13 @@ For a real device build, drop `CODE_SIGNING_ALLOWED=NO` and pass
 | A4 remove-allow propagation time | ≤ few seconds | | | ___ s |
 | A5 temp grant plays then auto-expires | Blocks at expiry | | | |
 | A5 offline expiry (airplane mode) | Blocks at expiry | | | |
-| A5 clock/timezone tamper does not extend | No extension | | | |
-| A6 app delete under `.child` | Blocked | | | |
-| A6 iCloud sign-out under `.child` | Blocked | | | |
-| A6 disable filter in Settings | ? | | | **key unknown** |
+| A5 clock tamper (detection only, ADR-009) | No extension | | | |
+| A5 clock tamper (`requireAutomaticDateAndTime`, ADR-014) | Cannot change clock | | | prevention |
+| A6 app delete — Posture A (`.child` alone) | ? | | | inherent? |
+| A6 app delete — Posture B (`denyAppRemoval`) | Blocked | | | asserted |
+| A6 iCloud sign-out — Posture A | ? | | | inherent? |
+| A6 iCloud sign-out — Posture B (`lockAccounts`) | Blocked | | | asserted |
+| A6 disable filter in Settings (either posture) | ? | | | **key unknown — no ManagedSettings key locks it (ADR-014)** |
 | A6 DNS/VPN/profile bypass | ? | | | **key unknown** |
 
 ## Success criterion
