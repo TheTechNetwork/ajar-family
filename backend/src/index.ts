@@ -4,10 +4,18 @@
  */
 import { App } from "./app.js";
 import { createNodeServer } from "./http/node-server.js";
+import { createNodeSqlite } from "./store/sql/database.js";
+import { SqlStore } from "./store/sql/sql-store.js";
 
 const port = Number(process.env.PORT ?? 8787);
 
+// DATABASE_FILE → durable SQLite (survives restart). Unset → in-memory (dev).
+const repo = process.env.DATABASE_FILE
+  ? await SqlStore.create(await createNodeSqlite(process.env.DATABASE_FILE))
+  : undefined;
+
 const app = await App.create({
+  repo,
   config: {
     authSecret: process.env.AUTH_SECRET ?? "dev-insecure-secret-change-me",
     signingPublicKeyB64: process.env.SIGNING_PUBLIC_KEY_B64,

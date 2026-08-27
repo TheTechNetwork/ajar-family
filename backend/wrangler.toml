@@ -12,9 +12,11 @@ compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
 
 # ---------------------------------------------------------------------------
-# PERSISTENCE (follow-up, not in the alpha): the in-memory store is per-isolate
-# and NOT durable on Workers. Bind D1 (SQLite) here and add a D1-backed
-# Repository implementation behind the same interface. See docs/DEPLOYMENT.md.
+# PERSISTENCE: the durable store (SqlStore over D1) is implemented. Bind a D1
+# database as `DB` to switch the Worker from per-isolate in-memory to durable,
+# cross-isolate storage — the schema is created automatically on first use
+# (IF NOT EXISTS). Create it: `wrangler d1 create contentfilter`, then uncomment
+# and paste the id. See docs/DEPLOYMENT.md.
 # ---------------------------------------------------------------------------
 # [[d1_databases]]
 # binding = "DB"

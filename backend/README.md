@@ -6,11 +6,12 @@ decisions, push abstraction, and **signed, versioned policy sync**. Reuses the
 `@contentfilter/shared` policy model + YouTube canonicalization as the source of
 truth. See `docs/ARCHITECTURE.md §7–§8`.
 
-> **Alpha status:** runs on an **in-memory store** (zero external services) and is
-> fully tested. The durable path is a Postgres or Cloudflare D1 `Repository`
-> implementation behind the same interface (`src/store/repository.ts`) — a
-> follow-up, not required to run the alpha. No secrets or browsing history are
-> stored by default.
+> **Alpha status:** runs on an **in-memory store** by default (zero external
+> services) and is fully tested. A **durable SQLite/D1 store** is also implemented
+> (`src/store/sql/`): set `DATABASE_FILE` for a file-backed SQLite DB on a Node
+> host, or bind a D1 database as `DB` on Workers — same `Repository` interface,
+> same SQLite schema, verified by a durability test. No secrets or browsing
+> history are stored by default.
 
 ## Run locally
 

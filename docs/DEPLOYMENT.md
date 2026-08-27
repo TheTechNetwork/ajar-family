@@ -29,13 +29,14 @@
   and down freely, so writes are not shared or persisted. This is fine for a
   **single-isolate demo / health-and-signing smoke test**, and wrong for anything
   stateful.
-  - **Next step (follow-up, not the alpha):** a **D1 (SQLite)** or KV-backed
-    `Repository` implementation behind the existing interface
-    (`backend/src/store/repository.ts`). Services depend only on that interface,
-    so the swap is localized. `backend/wrangler.toml` already carries a commented
-    **`[[d1_databases]]`** binding (`binding = "DB"`) to uncomment; the work is
-    **writing a `Repository` impl over D1** and selecting it from `env` in
-    `worker.ts`. D1: <https://developers.cloudflare.com/d1/>.
+  - **Durable store (implemented):** `SqlStore` (`backend/src/store/sql/`) is a
+    `Repository` over SQLite, with a **node:sqlite** adapter (Node host, via
+    `DATABASE_FILE`) and a **D1** adapter (Workers). Same interface, same schema,
+    covered by a durability test. To make the Worker durable: `wrangler d1 create
+    contentfilter`, uncomment the **`[[d1_databases]]`** binding (`binding = "DB"`)
+    in `backend/wrangler.toml` with the returned id, and redeploy — `worker.ts`
+    auto-selects D1 when `env.DB` is bound and creates the schema on first use.
+    D1: <https://developers.cloudflare.com/d1/>.
 
 ---
 

@@ -12,11 +12,15 @@
 import { App } from "./app.js";
 import { buildRouter } from "./http/api.js";
 import type { HttpRequest, Router } from "./http/router.js";
+import { createD1, type D1Like } from "./store/sql/database.js";
+import { SqlStore } from "./store/sql/sql-store.js";
 
 export interface Env {
   AUTH_SECRET?: string;
   SIGNING_PUBLIC_KEY_B64?: string;
   SIGNING_PRIVATE_KEY_B64?: string;
+  /** Bind a D1 database as `DB` in wrangler.toml for durable, cross-isolate state. */
+  DB?: D1Like;
 }
 
 let appPromise: Promise<App> | null = null;
@@ -24,13 +28,18 @@ let router: Router | null = null;
 
 async function getRouter(env: Env): Promise<Router> {
   if (!appPromise) {
-    appPromise = App.create({
-      config: {
-        authSecret: env.AUTH_SECRET ?? "dev-insecure-secret-change-me",
-        signingPublicKeyB64: env.SIGNING_PUBLIC_KEY_B64,
-        signingPrivateKeyB64: env.SIGNING_PRIVATE_KEY_B64,
-      },
-    });
+    appPromise = (async () => {
+      // Prefer durable D1 when bound; otherwise per-isolate in-memory (demo only).
+      const repo = env.DB ? await SqlStore.create(createD1(env.DB)) : undefined;
+      return App.create({
+        repo,
+        config: {
+          authSecret: env.AUTH_SECRET ?? "dev-insecure-secret-change-me",
+          signingPublicKeyB64: env.SIGNING_PUBLIC_KEY_B64,
+          signingPrivateKeyB64: env.SIGNING_PRIVATE_KEY_B64,
+        },
+      });
+    })();
   }
   if (!router) router = buildRouter(await appPromise);
   return router;
