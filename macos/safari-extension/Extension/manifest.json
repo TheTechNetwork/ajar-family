@@ -1,0 +1,78 @@
+{
+  "_about": "PoC B — macOS Safari Web Extension manifest. UNRESOLVED direction (ADR-004). Safari supports MV3. JSON has no comment syntax, so notes live in _-prefixed keys (ignored by the WebExtension loader). See docs/MACOS_SAFARI_POC.md and ../README.md.",
+  "_absolute_rule": "NEVER block Safari to gain enforcement. This extension gates per-video inside Safari and redirects blocked navigations to blocked.html; Safari itself stays fully functional.",
+
+  "manifest_version": 3,
+  "name": "YouTube Guard (PoC B)",
+  "version": "0.0.1",
+  "description": "Per-video YouTube enforcement in Safari, consuming the shared parental-control policy model. Experiment scaffold — not production.",
+
+  "background": {
+    "_note_safari": "Safari supports MV3 background service workers. Safari may unload the worker aggressively (B4/B5): background.js must tolerate reconnects to the native host and can fall back to polling browser.storage. Safari uses 'service_worker' like Chrome; 'scripts'/persistent pages are the older Firefox style and are not relied on here.",
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "_note": "Runs on the YouTube app surfaces. document_start so the SPA history patch installs before YouTube's own router. YouTube is an SPA — route changes via history.pushState do NOT hit the network, so content.js must catch them and ask the background worker to re-evaluate (B3).",
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://youtu.be/*",
+        "*://m.youtube.com/*",
+        "*://*.youtube-nocookie.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+
+  "permissions": [
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess",
+    "webNavigation",
+    "storage",
+    "nativeMessaging"
+  ],
+  "_permissions_notes": {
+    "declarativeNetRequest": "Static/dynamic rules for coarse host or URL blocking that can be expressed declaratively. NOTE: DNR alone cannot express 'default-deny YouTube except this one canonical video id' — that decision needs the evaluator in background.js. DNR is used only for support-host allow-listing / obvious blocks; per-video gating is done in JS.",
+    "declarativeNetRequestWithHostAccess": "Allows DNR rules that redirect/modify only on hosts we already have access to (the youtube host_permissions), rather than requesting the broad 'declarativeNetRequestFeedback'/all-URL grant.",
+    "webNavigation": "onBeforeNavigate / onCommitted give the full navigation URL so background.js can normalize+evaluate and redirect blocked top-level navigations to blocked.html.",
+    "storage": "Holds the synced, signed DevicePolicySnapshot delivered by the native messaging host, plus the 'any video currently approved?' flag used to keep googlevideo.com reachable.",
+    "nativeMessaging": "browser.runtime.connectNative to the signed native host (child agent): receives signed policy snapshots, sends AccessRequests. Safari routes native messaging through the containing app's SafariWebExtensionHandler."
+  },
+
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "*://youtu.be/*",
+    "*://m.youtube.com/*",
+    "*://*.youtube-nocookie.com/*",
+    "*://youtubei.googleapis.com/*"
+  ],
+  "_host_permissions_note": "Scoped to YouTube surfaces (+ the InnerTube API host). We deliberately do NOT request all-URLs. The media CDN *.googlevideo.com and other YOUTUBE_PLAYBACK_SUPPORT_HOSTS are NOT gated here — they must stay reachable while any video is approved (B7); gating happens at the watch page / SPA route, which is per-video.",
+
+  "web_accessible_resources": [
+    {
+      "_note": "blocked.html is the Request-Access page the extension redirects blocked navigations to. It must be web-accessible so a redirect from a youtube.com navigation can load it.",
+      "resources": ["blocked.html"],
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://youtu.be/*",
+        "*://m.youtube.com/*",
+        "*://*.youtube-nocookie.com/*"
+      ]
+    }
+  ],
+
+  "action": {
+    "default_title": "YouTube Guard"
+  },
+
+  "_safari_caveats": [
+    "Safari supports MV3, declarativeNetRequest, and background service workers, but its DNR quotas, rule-count limits, and webRequest support differ from Chrome/Firefox — verify with the safari-web-extension-converter output and the Safari console on device.",
+    "browser.* is the promise-based API namespace; chrome.* callbacks also work. This scaffold uses browser.* (WebExtension standard).",
+    "Native messaging in Safari goes through the containing app (SafariWebExtensionHandler), not a standalone host manifest in a well-known directory as on Chrome/Firefox.",
+    "The user must ENABLE this extension in Safari Settings → Extensions and grant host access. On consumer macOS (no MDM) the app very likely cannot force-enable or lock it — this is PoC B's crux finding (B5)."
+  ]
+}

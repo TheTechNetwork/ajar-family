@@ -1,0 +1,18 @@
+{
+  "_comment": [
+    "PIRProcessDatabase configuration for the NEURLFilter blocklist PoC (PoC D).",
+    "EXAMPLE ONLY, not production. Mirrors the Keyword-PIR processing config from",
+    "apple/swift-homomorphic-encryption. Produces the sharded PIR database +",
+    "PIR parameters that PIRService serves. databaseType `keyword` matches the",
+    "input.txtpb `rows { keyword ... value ... }` shape."
+  ],
+  "inputDatabase": "data/input.txtpb",
+  "outputDatabase": "data/url-SHARD_ID.bin",
+  "outputPirParameters": "data/url-SHARD_ID.params.txtpb",
+  "rlweParameters": "n_4096_logq_27_28_28_logt_5",
+  "sharding": {
+    "entryCountPerShard": 50000
+  },
+  "trialsPerShard": 5,
+  "databaseType": "keyword"
+}

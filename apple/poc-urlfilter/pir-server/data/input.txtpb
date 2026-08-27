@@ -1,0 +1,24 @@
+# Keyword-PIR database (text-proto) for the NEURLFilter blocklist PoC (PoC D).
+#
+# Consumed by PIRProcessDatabase (apple/swift-homomorphic-encryption) to produce
+# the sharded PIR database that PIRService (apple/pir-service-example) serves.
+#
+# NEURLFilter is BLOCKLIST-ONLY: every value is the placeholder "1". There is no
+# author-able allow verdict. A URL is ALLOWED by being ABSENT from this set.
+# (ARCHITECTURE.md §3.1, DECISIONS ADR-002.)
+#
+# Keywords are the canonical (scheme-stripped, Punycoded) URL form emitted by
+# tools/build-bloom/build_bloom.py. The EXACT canonical shape that matches the
+# on-device enumerator is an UNRESOLVED PoC item — see the doc "Key unresolved".
+#
+# PoC test URLs:
+#   BLOCKED (present below): youtube.com/watch?v=9bZkp7q19f0
+#   ALLOWED (deliberately ABSENT): youtube.com/watch?v=dQw4w9WgXcQ
+#     -> proves same-host allow-by-absence: one YouTube video blocked, another
+#        on the same host allowed, purely by presence/absence in the dataset.
+
+rows { keyword: "www.youtube.com/watch?v=9bZkp7q19f0" value: "1" }
+rows { keyword: "malware-example.test/" value: "1" }
+
+# (Intentionally NOT present, so it resolves to allow:)
+# rows { keyword: "www.youtube.com/watch?v=dQw4w9WgXcQ" value: "1" }
