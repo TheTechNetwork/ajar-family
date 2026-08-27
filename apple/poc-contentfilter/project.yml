@@ -1,0 +1,99 @@
+# XcodeGen definition for PoC A (docs/APPLE_CONTENT_FILTER_POC.md).
+#
+#   brew install xcodegen && xcodegen generate
+#
+# Signing: pass your team on the command line or set it in Xcode, e.g.
+#   xcodebuild -project ParentFilterPoC.xcodeproj -scheme ParentFilterPoC \
+#     -destination 'generic/platform=iOS' DEVELOPMENT_TEAM=ABCDE12345 build
+# The Family Controls + Network Extension entitlements require a real team;
+# a compile/link-only check can use CODE_SIGNING_ALLOWED=NO.
+
+name: ParentFilterPoC
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    # Supplied at build time (xcodebuild DEVELOPMENT_TEAM=... or Xcode UI).
+    DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+
+targets:
+
+  ParentFilterPoC:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: Shared          # compiled into every target (no embedded framework)
+    dependencies:
+      - target: FilterDataProvider
+      - target: FilterControlProvider
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.parentfilterpoc
+        CODE_SIGN_ENTITLEMENTS: App/ParentFilterPoC.entitlements
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: ParentFilter PoC
+        UIApplicationSupportsIndirectInputEvents: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+
+  # Content filter DATA provider — sees every flow, returns allow/drop/remediate.
+  FilterDataProvider:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: FilterDataProvider
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.parentfilterpoc.FilterDataProvider
+        CODE_SIGN_ENTITLEMENTS: FilterDataProvider/FilterDataProvider.entitlements
+    info:
+      path: FilterDataProvider/Info.plist
+      properties:
+        CFBundleDisplayName: ParentFilter Data Provider
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.networkextension.filter-data
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FilterDataProvider
+
+  # Content filter CONTROL provider — owns remediationMap + notifyRulesChanged().
+  FilterControlProvider:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: FilterControlProvider
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.parentfilterpoc.FilterControlProvider
+        CODE_SIGN_ENTITLEMENTS: FilterControlProvider/FilterControlProvider.entitlements
+    info:
+      path: FilterControlProvider/Info.plist
+      properties:
+        CFBundleDisplayName: ParentFilter Control Provider
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.networkextension.filter-control
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FilterControlProvider
+
+schemes:
+  ParentFilterPoC:
+    build:
+      targets:
+        ParentFilterPoC: all
+    run:
+      config: Debug

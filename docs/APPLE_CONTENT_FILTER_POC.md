@@ -6,10 +6,21 @@
 > play it while every other unapproved video stays blocked — **on an
 > unsupervised consumer iPhone, no VPN, no TLS interception, no MDM**?
 >
-> **This environment (Linux, no Xcode, no Apple SDK, no iOS 26 hardware) cannot
-> compile or run this.** The scaffold under `apple/poc-contentfilter/` is written
-> to be opened in Xcode 26 and run on a real device by a human, who records
-> results in the **Observed Results** tables below and in `docs/DECISIONS.md`.
+> **Status (2026-08-27): BUILD-GREEN, TESTS NOT RUN.**
+> `apple/poc-contentfilter/project.yml` (XcodeGen) now produces a real
+> `ParentFilterPoC.xcodeproj` whose three targets — app, filter-**data** `.appex`,
+> filter-**control** `.appex` — compile and link clean for `arm64` device against
+> the Xcode 27.0 iPhoneOS SDK at deployment target iOS 26.0. Three SDK API
+> corrections were required; see ADR-011.
+>
+> **A1–A6 have not been executed.** They need a physical iOS 26 device (the
+> Simulator cannot run a content filter, `NEURLFilter`, or FamilyControls
+> `.child`) plus an Apple Developer team that can issue the Family Controls and
+> `content-filter-provider` entitlements. Neither was available: the build host is
+> an Apple VM with no paired device and zero code-signing identities (ADR-012).
+> **The Observed Results table below is intentionally left empty.** Do not fill it
+> with the Expected column — the point of this PoC is measurement, not
+> restatement.
 
 ## What this PoC proves (and why it's the right first test)
 
@@ -23,7 +34,8 @@ product workflow before building anything else.
 
 ## Prerequisites (on real hardware)
 
-- Xcode 26, an iPhone/iPad on **iOS/iPadOS 26**.
+- Xcode 26 or later (verified building under **Xcode 27.0**, iPhoneOS 27.0 SDK,
+  deployment target iOS 26.0), an iPhone/iPad on **iOS/iPadOS 26**.
 - A **child Apple ID** (under-18) that is a member of a **Family Sharing** group
   whose organizer is the test "parent" Apple ID, signed in on the test device.
   (This is the `.child` posture from `ARCHITECTURE.md §4`; `.individual` will not
@@ -86,7 +98,30 @@ app; add a VPN. Record which are blocked vs. allowed. (Expected: app-delete and
 iCloud-signout blocked; DNS/VPN behavior undocumented → this is the empirical
 point.)
 
-## Observed Results (fill on hardware)
+## Build status (verified 2026-08-27)
+
+| Item | Result |
+|---|---|
+| `xcodegen generate` → `ParentFilterPoC.xcodeproj` | OK (XcodeGen 2.46.0) |
+| App + 2 extensions compile/link, `-destination generic/platform=iOS` | **BUILD SUCCEEDED**, arm64, 0 warnings |
+| `FilterDataProvider.appex` `NSExtensionPointIdentifier` | `com.apple.networkextension.filter-data` |
+| `FilterControlProvider.appex` `NSExtensionPointIdentifier` | `com.apple.networkextension.filter-control` |
+| Both `.appex` embedded in `ParentFilterPoC.app/PlugIns/` | OK |
+| SDK API corrections needed | 3 — see ADR-011 |
+| Code-signed / installed / launched on a device | **NO — blocked, see ADR-012** |
+
+Reproduce (compile check, no signing identity needed):
+
+```sh
+cd apple/poc-contentfilter && xcodegen generate
+xcodebuild -project ParentFilterPoC.xcodeproj -scheme ParentFilterPoC \
+  -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO clean build
+```
+
+For a real device build, drop `CODE_SIGNING_ALLOWED=NO` and pass
+`DEVELOPMENT_TEAM=<your team id>`.
+
+## Observed Results (NOT YET RUN — requires hardware, see ADR-012)
 
 | Test | Expected | Observed | Pass/Fail | Notes |
 |---|---|---|---|---|

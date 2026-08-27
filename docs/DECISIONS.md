@@ -23,7 +23,21 @@ override) and has **no remediation/Request-Access UX**. The classic
 `.child`. `NEURLFilter` is relegated to the supplementary blocklist layer.
 **Consequences:** iOS requires a genuine child Apple ID in Family Sharing; the
 `.individual` posture is explicitly not marketed as parental control.
-**Evidence:** _pending PoC A._
+**Evidence:** _partial — compile-time only; the runtime claim is still unproven._
+On 2026-08-27 the PoC A scaffold was assembled into a real Xcode project
+(`apple/poc-contentfilter/project.yml`, XcodeGen 2.46.0) and **builds clean for
+`arm64` device** against the iPhoneOS SDK shipped with Xcode 27.0, deployment
+target iOS 26.0 (app + filter-data `.appex` + filter-control `.appex`, App Group
+`group.com.example.parentfilterpoc`). That confirms the API surface the decision
+rests on *exists and type-checks* — `NEFilterDataProvider.handleNewFlow`,
+`NEFilterBrowserFlow`, `NEFilterNewFlowVerdict.remediateVerdict(...)`,
+`NEFilterControlProvider.remediationMap` / `notifyRulesChanged()`,
+`NEFilterManager` + `NEFilterProviderConfiguration.filterBrowsers`, and
+`AuthorizationCenter.shared.requestAuthorization(for: .child)`.
+It does **not** confirm any behavioural claim. Tests A1–A6 have **not been run**:
+no iOS device and no signing identity were available (see ADR-012). The
+propagation number, the A6 tamper findings, and the §0 workflow all remain
+**unproven**. Do not treat this ADR as Accepted.
 
 ### ADR-002 — `NEURLFilter` is a supplementary large-scale blocklist, not the core
 **Status:** Proposed (confirm in PoC D)
@@ -112,3 +126,43 @@ delivered inside an Ed25519-signed `DevicePolicySnapshot`, and adapters reject
 unsigned/altered snapshots (fail closed).
 **Evidence:** snapshot signature field defined in `shared/`; backend + adapter
 verification is a Phase-1 task.
+
+### ADR-011 — iOS 26/27 SDK corrections to the PoC A scaffold
+**Status:** Accepted (compiler-verified against the Xcode 27.0 iPhoneOS SDK)
+**Context:** The Phase-0 scaffold was written from documentation without an SDK
+to compile against. Building it for real surfaced three places where the SDK
+disagrees with what was written. Recorded here because two of them are load-
+bearing for the remediation ("Request Access") design, not cosmetic.
+**Corrections applied:**
+1. `NEFilterNewFlowVerdict.remediateVerdict(remediationURLMapKey:remediationButtonTextMapKey:)`
+   does not exist. The Swift label is **`withRemediationURLMapKey:`**
+   (from ObjC `+remediateVerdictWithRemediationURLMapKey:remediationButtonTextMapKey:`).
+2. `NEFilterControlProvider.remediationMap` is typed
+   `[String: [String: NSObject]]?`, **not** `[String: [String: String]]`. The
+   inner values must be bridged explicitly (`... as NSString`); a plain Swift
+   `String` literal is a type error.
+3. `NEFilterProvider.handleReport(_:)` was **obsoleted in Swift 3** and is
+   renamed to **`handle(_:)`**. Overriding `handleReport` fails to compile.
+**Consequence:** none architectural — the capabilities ADR-001 depends on are all
+present under corrected names. `apple/poc-contentfilter` now compiles as written.
+
+### ADR-012 — PoC A is build-verified but **not** hardware-verified
+**Status:** Open blocker (not a decision — a gap that must be closed)
+**Context:** PoC A is the load-bearing proof for the whole iOS story. Executing
+it requires a physical iOS 26 device: the Simulator cannot run a content filter,
+`NEURLFilter`, or FamilyControls `.child`, and `.child` itself requires a real
+child Apple ID inside a Family Sharing group.
+**What is actually blocked (2026-08-27):** the development host is an Apple
+Virtual Machine (`VirtualMac2,1`) with **no paired iOS device**
+(`xcrun devicectl list devices` → none), **zero code-signing identities**
+(`security find-identity -p codesigning` → 0), no provisioning profiles, and no
+Apple Developer team configured in Xcode. The Family Controls and
+`content-filter-provider` entitlements cannot be issued without a team, so the
+app cannot be signed, installed, or run.
+**Decision:** record PoC A as **build-green / test-not-run**. The Observed
+Results table in `docs/APPLE_CONTENT_FILTER_POC.md` is deliberately left empty
+rather than filled with expected values — no number in this repo should be one
+nobody measured.
+**To close:** a Mac with USB access to an iOS 26 device, an Apple Developer team
+with the Family Controls entitlement, and a child Apple ID in a Family Sharing
+group. Then run A1–A6 verbatim and update ADR-001 and ARCHITECTURE.md §13.

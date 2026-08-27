@@ -14,14 +14,18 @@ final class FilterControlProvider: NEFilterControlProvider {
     override func startFilter(completionHandler: @escaping (Error?) -> Void) {
         // Register the remediation entries referenced by the data provider's
         // `.remediateVerdict(remediationURLMapKey:remediationButtonTextMapKey:)`.
+        // SDK: remediationMap is [String: [String: NSObject]] — values must be
+        // NSObject, so the strings are bridged explicitly (see DECISIONS ADR-001).
+        // The remediation URL must use the http/https scheme (NEFilterProvider.h);
+        // NE_FLOW_URL is substituted by the system with the blocked flow URL.
         remediationMap = [
             NEFilterProviderRemediationMapRemediationURLs: [
                 // The block page. Query params carry the blocked flow URL so the
                 // app can normalize it to a canonical YouTube id (test A3).
-                "requestAccess": "https://parentfilter.example/blocked?u=\(NEFilterProviderRemediationURLFlowURL)"
+                "requestAccess": "https://parentfilter.example/blocked?u=\(NEFilterProviderRemediationURLFlowURL)" as NSString
             ],
             NEFilterProviderRemediationMapRemediationButtonTexts: [
-                "requestAccessButton": "Request Access"
+                "requestAccessButton": "Request Access" as NSString
             ],
         ]
         completionHandler(nil)
@@ -40,7 +44,7 @@ final class FilterControlProvider: NEFilterControlProvider {
         notifyRulesChanged()
     }
 
-    override func handleReport(_ report: NEFilterReport) {
+    override func handle(_ report: NEFilterReport) {
         // Optional: observe verdicts for the PoC propagation measurement.
     }
 }

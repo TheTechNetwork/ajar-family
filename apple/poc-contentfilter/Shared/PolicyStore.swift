@@ -50,7 +50,6 @@ public final class PolicyStore {
         }
 
         let yt = YouTube.normalize(urlString)
-        let ytKey = yt.isYouTube ? YouTube.policyKey(yt) : nil
         let host = URLComponents(string: urlString)?.host.map(YouTube.stripWww)
         let now = nowUTC()
 

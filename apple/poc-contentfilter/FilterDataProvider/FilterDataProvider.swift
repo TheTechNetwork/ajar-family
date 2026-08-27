@@ -52,7 +52,7 @@ final class FilterDataProvider: NEFilterDataProvider {
             // The keys map to entries the control provider registered in
             // `remediationMap`; the flow URL is passed through so the app can
             // reconstruct the blocked canonical id when the child taps the link.
-            return .remediateVerdict(remediationURLMapKey: "requestAccess",
+            return .remediateVerdict(withRemediationURLMapKey: "requestAccess",
                                      remediationButtonTextMapKey: "requestAccessButton")
         }
     }

@@ -438,12 +438,18 @@ These block production. Each is owned by a PoC doc; results get recorded there
 and in `docs/DECISIONS.md`.
 
 **PoC A — iOS `NEFilterDataProvider` + FamilyControls `.child` (PRIMARY):**
-1. Default-deny YouTube while allowing exactly one video (another stays blocked) in Safari.
-2. Full URL/query visibility on WebKit flows in practice (incl. real YouTube URLs with extra params).
-3. Remediation "Request Access" block page actually renders in Safari and round-trips to the app.
-4. Dynamic allowlist update via `notifyRulesChanged()` — measured propagation time (target: seconds).
-5. Temporary approval enforced and **auto-expires** locally, including offline.
-6. Exactly what the child can/can't disable/uninstall/bypass under `.child` (DNS, VPN config, profile install).
+_Status 2026-08-27: the scaffold **builds clean for arm64 device** (Xcode 27.0 /
+iPhoneOS 27 SDK, deployment target iOS 26.0) as app + filter-data `.appex` +
+filter-control `.appex` — see `apple/poc-contentfilter/project.yml` and ADR-011.
+**Every numbered item below is still unproven**: no test was executed, because no
+iOS device and no signing identity were available (ADR-012). Compiling is not
+evidence of behaviour._
+1. Default-deny YouTube while allowing exactly one video (another stays blocked) in Safari. — **UNPROVEN**
+2. Full URL/query visibility on WebKit flows in practice (incl. real YouTube URLs with extra params). — **UNPROVEN at runtime.** SDK-level support only: `NEFilterFlow.URL` is declared on the *base* `NEFilterFlow` class (`NEFilterFlow.h`, iOS 9.0+) documented as "The flow's HTTP request URL. Will be nil if the flow did not originate from WebKit." That matches the design assumption but says nothing about what YouTube's real navigations actually surface.
+3. Remediation "Request Access" block page actually renders in Safari and round-trips to the app. — **UNPROVEN**, and note a constraint found in the SDK headers: the remediation URL "should follow the scheme http or https" (`NEFilterProvider.h`). The block page is therefore a **remotely hosted** page, not an app-local one; the `NE_FLOW_URL` substitution carries the blocked URL to it, and the hop back into the containing app must be a universal link or custom scheme from that page. This adds a hosting dependency to the Request-Access flow that the §0 workflow should account for.
+4. Dynamic allowlist update via `notifyRulesChanged()` — measured propagation time (target: seconds). — **NOT MEASURED. No number exists yet.**
+5. Temporary approval enforced and **auto-expires** locally, including offline. — **UNPROVEN**
+6. Exactly what the child can/can't disable/uninstall/bypass under `.child` (DNS, VPN config, profile install). — **UNPROVEN.** This is the highest-risk unknown: if `.child` does *not* lock the filter toggle in Settings, the enforcement story changes materially and ADR-001 needs revisiting.
 
 **PoC B — macOS Safari Web Extension (+ native tamper controls):**
 7. Per-video allow/deny + Request-Access page in Safari without blocking Safari; force-install feasibility on consumer macOS; standard-account tamper resistance.
