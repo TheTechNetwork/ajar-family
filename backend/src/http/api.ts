@@ -164,6 +164,26 @@ export function buildRouter(app: App): Router {
     return ok(await app.policy.buildSnapshot(dev.familyId, dev.childId, dev.deviceId));
   });
 
+  // Long-poll: returns the new signed snapshot the moment an approval bumps the
+  // version (woken via the hub), or { upToDate: true } after the timeout. Lets a
+  // child pick up an approval in seconds without tight polling. Works on Node and
+  // Workers (no streaming). `timeout` ms is capped server-side.
+  r.get("/v1/devices/:deviceId/policy/wait", async (req) => {
+    const dev = await requireDevice(app, req);
+    if (dev.deviceId !== req.params.deviceId) return err(403, "device mismatch", "FORBIDDEN");
+    const since = Number(req.query.get("since") ?? "0");
+    const timeout = Math.min(Math.max(Number(req.query.get("timeout") ?? "25000"), 0), 60000);
+    const deadline = Date.now() + timeout;
+    // Wake on this device's nudges; loop to absorb spurious wakes until deadline.
+    for (;;) {
+      const snap = await app.policy.syncSince(dev.familyId, dev.childId, dev.deviceId, since);
+      if (snap) return ok(snap);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return ok({ upToDate: true });
+      await app.hub.wait(`device:${dev.deviceId}`, remaining);
+    }
+  });
+
   // --- notification endpoints ---
   r.post("/v1/me/endpoints", async (req) => {
     const userId = await requireUser(app, req);

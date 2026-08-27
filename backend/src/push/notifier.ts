@@ -5,6 +5,7 @@
  * "you have a request" / "sync now" nudge.
  */
 import type { NotificationEndpoint } from "../domain/model.js";
+import type { EventHub } from "./hub.js";
 
 export interface PushMessage {
   title: string;
@@ -14,6 +15,19 @@ export interface PushMessage {
 
 export interface Notifier {
   send(endpoint: NotificationEndpoint, msg: PushMessage): Promise<void>;
+}
+
+/**
+ * Composes a base notifier and, for device-targeted (WEBSOCKET) nudges, wakes the
+ * device's long-poll waiter on the hub so the approved policy arrives in seconds.
+ * `endpoint.token` for a device nudge is the deviceId (see ApprovalService.decide).
+ */
+export class HubNotifier implements Notifier {
+  constructor(private base: Notifier, private hub: EventHub) {}
+  async send(endpoint: NotificationEndpoint, msg: PushMessage): Promise<void> {
+    await this.base.send(endpoint, msg);
+    if (endpoint.kind === "WEBSOCKET") this.hub.notify(`device:${endpoint.token}`);
+  }
 }
 
 /** Records sent messages; used by tests and local dev. */

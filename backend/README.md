@@ -61,4 +61,5 @@ Signing and tokens use **WebCrypto**, which both runtimes support. Deploy: see
 - `POST /v1/families/:id/enroll` → `{ code }`; `POST /v1/enroll/redeem` (device) → `{ device, deviceToken, signingPublicKeyB64 }`
 - `POST /v1/requests` (device) · `GET /v1/families/:id/requests` · `POST /v1/families/:id/requests/:reqId/decide`
 - `GET /v1/devices/:deviceId/policy[?since=N]` (device) → signed snapshot / `{ upToDate: true }`
+- `GET /v1/devices/:deviceId/policy/wait?since=N[&timeout=ms]` (device) → **long-poll**: returns the new signed snapshot the moment an approval bumps the version (woken via the in-process event hub), else `{ upToDate: true }` after the timeout. Gives seconds-level approval delivery on Node **and** Workers with no streaming.
 - `GET /v1/signing-key` → `{ publicKeyB64 }` (devices verify snapshots) · `GET /v1/health`

@@ -4,7 +4,8 @@
  */
 import type { Repository } from "./store/repository.js";
 import { MemoryStore } from "./store/memory.js";
-import { ConsoleNotifier, type Notifier } from "./push/notifier.js";
+import { ConsoleNotifier, HubNotifier, type Notifier } from "./push/notifier.js";
+import { EventHub } from "./push/hub.js";
 import { generateSigningKeyPair } from "./domain/signing.js";
 import {
   FamilyService, EnrollmentService, PolicyService, ApprovalService,
@@ -21,6 +22,7 @@ export interface AppConfig {
 export class App {
   readonly repo: Repository;
   readonly notifier: Notifier;
+  readonly hub: EventHub;
   readonly authSecret: string;
   readonly signingPublicKeyB64: string;
   readonly family: FamilyService;
@@ -28,10 +30,11 @@ export class App {
   readonly policy: PolicyService;
   readonly approvals: ApprovalService;
 
-  private constructor(repo: Repository, notifier: Notifier, cfg: AppConfig,
+  private constructor(repo: Repository, notifier: Notifier, hub: EventHub, cfg: AppConfig,
                       signingPublicKeyB64: string, signingPrivateKeyB64: string) {
     this.repo = repo;
     this.notifier = notifier;
+    this.hub = hub;
     this.authSecret = cfg.authSecret;
     this.signingPublicKeyB64 = signingPublicKeyB64;
     this.family = new FamilyService(repo);
@@ -44,13 +47,15 @@ export class App {
     repo?: Repository; notifier?: Notifier; config: AppConfig;
   }): Promise<App> {
     const repo = opts.repo ?? new MemoryStore();
-    const notifier = opts.notifier ?? new ConsoleNotifier();
+    const hub = new EventHub();
+    // Wrap the base notifier so device nudges wake long-poll waiters on the hub.
+    const notifier = new HubNotifier(opts.notifier ?? new ConsoleNotifier(), hub);
     let pub = opts.config.signingPublicKeyB64;
     let priv = opts.config.signingPrivateKeyB64;
     if (!pub || !priv) {
       const kp = await generateSigningKeyPair();
       pub = kp.publicKeyB64; priv = kp.privateKeyB64;
     }
-    return new App(repo, notifier, opts.config, pub, priv);
+    return new App(repo, notifier, hub, opts.config, pub, priv);
   }
 }
