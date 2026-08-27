@@ -1,0 +1,20 @@
+{
+  "name": "@contentfilter/backend",
+  "version": "0.0.0-alpha",
+  "description": "Cloud backend: family model, policy engine, temporary approvals, access requests, signed policy sync",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "node --watch dist/index.js",
+    "test": "npm run build && node --test dist/**/*.test.js"
+  },
+  "dependencies": {
+    "@contentfilter/shared": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0"
+  }
+}

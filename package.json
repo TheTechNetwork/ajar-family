@@ -1,0 +1,17 @@
+{
+  "name": "contentfilter",
+  "private": true,
+  "version": "0.0.0-alpha",
+  "description": "Cross-platform parental URL filtering platform (monorepo)",
+  "workspaces": [
+    "shared",
+    "backend"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace shared && npm run build --workspace backend",
+    "test": "npm run test --workspace shared && npm run test --workspace backend"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,52 @@
+name: Deploy backend (Cloudflare Workers)
+
+# Deploys the backend Worker on pushes to main and on version tags.
+# Requires repo secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID.
+# Worker runtime secrets (AUTH_SECRET, SIGNING_PUBLIC_KEY_B64,
+# SIGNING_PRIVATE_KEY_B64) are set once with `wrangler secret put` — see
+# docs/DEPLOYMENT.md. This job is skipped automatically if the Cloudflare
+# secrets are not configured, so it never blocks a fork or an unconfigured repo.
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Check Cloudflare credentials
+        id: creds
+        run: |
+          if [ -n "${{ secrets.CLOUDFLARE_API_TOKEN }}" ] && [ -n "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
+            echo "have_creds=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_creds=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Cloudflare secrets not set — skipping deploy."
+          fi
+
+      - name: Deploy to Cloudflare Workers
+        if: steps.creds.outputs.have_creds == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: backend
+          command: deploy

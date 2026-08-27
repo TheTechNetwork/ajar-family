@@ -15,7 +15,7 @@
  * every platform adapter must reproduce.
  */
 
-import { normalizeYouTube, youTubePolicyKey } from "../youtube/youtube-normalize";
+import { normalizeYouTube, youTubePolicyKey } from "../youtube/youtube-normalize.js";
 
 // ---------------------------------------------------------------------------
 // Targets, actions, scopes

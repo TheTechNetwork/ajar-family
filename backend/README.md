@@ -1,43 +1,63 @@
-# backend — cloud API (Phase 1 placeholder)
+# backend — cloud API (Phase 1, alpha)
 
-Not implemented yet. Phase 0 defines the contract; this directory is scaffolded
-so Phase 1 drops in without restructuring. See `docs/ARCHITECTURE.md §7–§8`.
+TypeScript backend implementing the platform-agnostic core: family model, roles,
+enrollment, policy engine, temporary approvals, access requests, approval
+decisions, push abstraction, and **signed, versioned policy sync**. Reuses the
+`@contentfilter/shared` policy model + YouTube canonicalization as the source of
+truth. See `docs/ARCHITECTURE.md §7–§8`.
 
-## Planned stack
+> **Alpha status:** runs on an **in-memory store** (zero external services) and is
+> fully tested. The durable path is a Postgres or Cloudflare D1 `Repository`
+> implementation behind the same interface (`src/store/repository.ts`) — a
+> follow-up, not required to run the alpha. No secrets or browsing history are
+> stored by default.
 
-- **TypeScript** (Node), **PostgreSQL**, **REST** for CRUD + **WebSocket/SSE** for
-  immediate policy-change push. **Redis** only where a concrete need appears
-  (rate-limit buckets, WS fan-out). Containerized; **Docker Compose** for local
-  dev. Vendor-neutral (AWS/GCP/Azure/Fly/Cloudflare); the Apple **PIR/OHTTP**
-  service (for the `NEURLFilter` blocklist layer) is a separate, optional
-  component with Apple-specific hosting requirements — see
-  `docs/APPLE_URL_FILTER_POC.md` and `apple/poc-urlfilter/pir-server/`.
+## Run locally
 
-## Planned modules (Phase 1)
+```sh
+npm ci                 # from the repo root (workspaces)
+npm run build          # builds shared → backend to dist/
+npm run start --workspace @contentfilter/backend   # or: cd backend && npm start
+# → contentfilter backend (alpha) listening on :8787
+curl localhost:8787/v1/health
+```
 
-- **auth** — Sign in with Apple / passkeys / email; parent MFA; short-lived
-  access tokens + refresh rotation; per-device keypair at enrollment.
-- **family** — `Family`, `FamilyMembership` (roles `OWNER | PARENT | LIMITED_GUARDIAN`),
-  `Child`, `Device`. Own family graph (no Apple Family Sharing roster API exists).
-- **policy** — `Policy`, `PolicyRule`, `TemporaryRule`, `DevicePolicyVersion`;
-  targets/actions/scopes and the evaluation order from
-  `shared/policy/policy-model.ts` (the reference evaluator is the semantics the
-  server and every device adapter must match).
-- **requests** — `AccessRequest`, `ApprovalDecision` (server-authoritative,
-  records the deciding parent); scope defaults to the narrowest useful permission.
-- **sync** — versioned incremental ("changed since vN") + full fallback; issues
-  **Ed25519-signed** `DevicePolicySnapshot`s; approval → immediate push.
-- **notifications** — APNs abstraction (`NotificationEndpoint`); actionable
-  approve/deny notifications.
-- **audit** — `AuditEvent` for every decision.
+## Test
 
-## Data model
+```sh
+npm test               # shared + backend (node:test); backend covers the MVP flow
+```
 
-See `docs/ARCHITECTURE.md §7`. The shared types in `shared/` are the source of
-truth for policy shapes; the DB schema mirrors them.
+The backend test (`src/domain/flow.test.ts`) proves the MVP at the service layer:
+a parent approves ONE canonical YouTube video for 30 minutes → it plays → every
+other video stays blocked → it auto-expires, with the device-side decision
+computed by the **shared** `evaluate()` so backend and device agree, and the
+snapshot Ed25519-verified.
 
-## Enrollment
+## Shape
 
-Short-lived, single-use enrollment token (QR or 6-digit code) binds a device to a
-family + child; the device then generates a persistent keypair. No reusable
-family secret on devices.
+```
+src/
+  domain/      model.ts · services.ts (family/enrollment/policy/approvals) · signing.ts (WebCrypto Ed25519)
+  store/       repository.ts (interface) · memory.ts (in-memory impl)
+  auth/        tokens.ts (WebCrypto HMAC bearer tokens — skeleton)
+  push/        notifier.ts (APNs/WebSocket abstraction; in-memory + console impls)
+  http/        router.ts (transport-agnostic) · api.ts (routes) · node-server.ts (node:http adapter)
+  app.ts       assembles repo + notifier + services
+  index.ts     Node entrypoint          worker.ts  Cloudflare Workers fetch entrypoint
+```
+
+The HTTP layer is **transport-agnostic**: the same router runs under `node:http`
+(local/any Node host) and the Cloudflare Workers fetch handler (`src/worker.ts`).
+Signing and tokens use **WebCrypto**, which both runtimes support. Deploy: see
+`docs/DEPLOYMENT.md`.
+
+## API (v1, bearer auth)
+
+- `POST /v1/auth/register` · `POST /v1/auth/login` → `{ userId, token }`
+- `POST /v1/families` · `GET /v1/families/:id` · `POST /v1/families/:id/parents` · `POST|GET /v1/families/:id/children`
+- `PUT /v1/families/:id/children/:childId/defaults` · `POST|GET|DELETE /v1/families/:id/rules[/:ruleId]`
+- `POST /v1/families/:id/enroll` → `{ code }`; `POST /v1/enroll/redeem` (device) → `{ device, deviceToken, signingPublicKeyB64 }`
+- `POST /v1/requests` (device) · `GET /v1/families/:id/requests` · `POST /v1/families/:id/requests/:reqId/decide`
+- `GET /v1/devices/:deviceId/policy[?since=N]` (device) → signed snapshot / `{ upToDate: true }`
+- `GET /v1/signing-key` → `{ publicKeyB64 }` (devices verify snapshots) · `GET /v1/health`

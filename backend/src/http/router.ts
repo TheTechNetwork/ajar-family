@@ -1,0 +1,81 @@
+/**
+ * Tiny transport-agnostic router. Adapters (node:http, Workers fetch) convert
+ * their native request into `HttpRequest` and render `HttpResponse` back.
+ */
+export interface HttpRequest {
+  method: string;
+  path: string;
+  query: URLSearchParams;
+  headers: Record<string, string>;
+  json<T = unknown>(): Promise<T>;
+  params: Record<string, string>;
+}
+
+export interface HttpResponse {
+  status: number;
+  body: unknown;
+}
+
+export type Handler = (req: HttpRequest) => Promise<HttpResponse>;
+
+interface Route { method: string; parts: string[]; handler: Handler }
+
+export const ok = (body: unknown, status = 200): HttpResponse => ({ status, body });
+export const err = (status: number, message: string, code?: string): HttpResponse =>
+  ({ status, body: { error: message, code } });
+
+export class Router {
+  private routes: Route[] = [];
+
+  add(method: string, path: string, handler: Handler): this {
+    this.routes.push({ method: method.toUpperCase(), parts: split(path), handler });
+    return this;
+  }
+  get(p: string, h: Handler) { return this.add("GET", p, h); }
+  post(p: string, h: Handler) { return this.add("POST", p, h); }
+  del(p: string, h: Handler) { return this.add("DELETE", p, h); }
+
+  async handle(req: HttpRequest): Promise<HttpResponse> {
+    const reqParts = split(req.path);
+    for (const r of this.routes) {
+      if (r.method !== req.method.toUpperCase()) continue;
+      const params = match(r.parts, reqParts);
+      if (!params) continue;
+      req.params = params;
+      try {
+        return await r.handler(req);
+      } catch (e) {
+        const anyE = e as { code?: string; message?: string };
+        const status = codeToStatus(anyE.code);
+        return err(status, anyE.message ?? "error", anyE.code);
+      }
+    }
+    return err(404, "not found", "NOT_FOUND");
+  }
+}
+
+function split(path: string): string[] {
+  return path.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+}
+
+function match(routeParts: string[], reqParts: string[]): Record<string, string> | null {
+  if (routeParts.length !== reqParts.length) return null;
+  const params: Record<string, string> = {};
+  for (let i = 0; i < routeParts.length; i++) {
+    const rp = routeParts[i]!, qp = reqParts[i]!;
+    if (rp.startsWith(":")) params[rp.slice(1)] = decodeURIComponent(qp);
+    else if (rp !== qp) return null;
+  }
+  return params;
+}
+
+function codeToStatus(code?: string): number {
+  switch (code) {
+    case "FORBIDDEN": return 403;
+    case "NOT_FOUND": return 404;
+    case "CONFLICT": return 409;
+    case "GONE": return 410;
+    case "UNAUTHORIZED": return 401;
+    default: return 400;
+  }
+}

@@ -1,0 +1,25 @@
+# Cloudflare Workers deploy config for the backend.
+# Deploy: from backend/, `npm run build` then `wrangler deploy`.
+# Secrets (never in git): set with `wrangler secret put <NAME>`:
+#   AUTH_SECRET, SIGNING_PUBLIC_KEY_B64, SIGNING_PRIVATE_KEY_B64
+# See docs/DEPLOYMENT.md for generating the Ed25519 keypair and CI wiring.
+name = "contentfilter-backend"
+main = "dist/worker.js"
+compatibility_date = "2026-08-01"
+
+# The Worker uses node:crypto (randomUUID) and Buffer via the Node compat layer.
+# Ed25519 signing uses WebCrypto, which Workers supports natively.
+compatibility_flags = ["nodejs_compat"]
+
+# ---------------------------------------------------------------------------
+# PERSISTENCE (follow-up, not in the alpha): the in-memory store is per-isolate
+# and NOT durable on Workers. Bind D1 (SQLite) here and add a D1-backed
+# Repository implementation behind the same interface. See docs/DEPLOYMENT.md.
+# ---------------------------------------------------------------------------
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "contentfilter"
+# database_id = "<created via: wrangler d1 create contentfilter>"
+
+[observability]
+enabled = true
