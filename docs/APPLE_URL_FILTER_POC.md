@@ -181,7 +181,68 @@ shipping build does. Then kill connectivity to the PIR server and, with
 `shouldFailClosed = true`, confirm a **Bloom-hit cache-miss denies** (fail-closed);
 with it false, confirm it allows (fail-open).
 
-## Observed Results (fill on hardware)
+## Build status (verified 2026-08-27)
+
+| Item | Result |
+|---|---|
+| `xcodegen generate` → `URLFilterPoC.xcodeproj` | OK (XcodeGen 2.46.0) |
+| App + control-provider extension, `-destination generic/platform=iOS` | **BUILD SUCCEEDED**, arm64, 0 warnings |
+| Extension `EXAppExtensionAttributes.EXExtensionPointIdentifier` | `com.apple.networkextension.url-filter-control` |
+| Extension embedded at | `URLFilterPoC.app/Extensions/…appex` (ExtensionKit, not `PlugIns/`) |
+| `bloom.bin` + `bloom.meta.json` bundled into the extension | OK |
+| `build_bloom.py --selftest` | **PASS** (FNV-1a, MurmurHash3 x86_32, Bloom round-trip) |
+| `build_bloom.py` on the PoC blocklist | OK — tag `aa84441b…6cf2`, bitCount 15, hashCount 10, murmurSeed 2538058380 |
+| SDK API corrections needed | 4 — see ADR-013 |
+| Code-signed / installed / launched on a device | **NO — blocked, see ADR-012** |
+
+Reproduce:
+
+```sh
+cd apple/poc-urlfilter
+python3 tools/build-bloom/build_bloom.py Resources/blocklist.txt --out-dir Resources/out
+xcodegen generate
+xcodebuild -project URLFilterPoC.xcodeproj -scheme URLFilterPoC \
+  -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO clean build
+```
+
+## What the SDK already answers (no device needed)
+
+**D3 / §13 item 9 — the iOS-27 key shape is now known.** All URL-parsing control
+is `@available(iOS 27.0, macOS 27.0, *)`:
+
+| API | iOS 26 | iOS 27 |
+|---|---|---|
+| `shouldFailClosed`, `prefilterFetchInterval` | yes | yes |
+| `ParsingConfiguration` / `urlParsingConfiguration` | **absent** | yes |
+| `setURLParsingRegularExpression(_:)` | **absent** | yes |
+| `reportEndpoint` / `reportInterval` / `reportFormat` | **absent** | yes |
+
+So on **iOS 26 the dataset-key shape cannot be influenced at all** — the fixed
+derivation with hierarchy enumeration is what produces the "one sub-URL takes out
+the whole domain" behaviour. On **iOS 27**,
+`QueryOptions(excluded: false, parameters: ["v"])` keys on the video id and
+`DomainOptions(enumerateHierarchy: false)` / `PathOptions(enumerateHierarchy: false)`
+stop the escalation, making `youtube.com/watch?v=<id>` expressible.
+
+This makes `NEURLFilter` **precise** on iOS 27 — but precision was never the
+blocker. There is still no allow verdict and no default-deny, so it still cannot
+express "deny YouTube except this video" on either version. **ADR-002 stands**;
+what changes is that the "specific bad videos" use is practical on iOS 27 and not
+on iOS 26. See ADR-013.
+
+**A concrete canonicalization bug, found statically.** `build_bloom.py` emits PIR
+keywords keeping the `www.` prefix (`www.youtube.com/watch?v=…`), but
+`DomainOptions.stripWWW` defaults to **`true`**, so the device would look up
+`youtube.com/watch?v=…` and the Bloom hit would never land on a matching PIR row.
+Left unchanged pending device observation of the iOS 26 form — this is the
+concrete shape of "Key unresolved" item 6.
+
+**D5 is NOT answered by the SDK.** There is nothing about supervision anywhere in
+the NetworkExtension URL-filter API, and no ManagedSettings key locks a filter
+toggle. Both halves of D5 — the supervision contradiction and whether `.child`
+locks the toggle — remain open and are answerable only on hardware.
+
+## Observed Results (NOT YET RUN — requires hardware, see ADR-012)
 
 | Test | Expected | Observed | Pass/Fail | Notes |
 |---|---|---|---|---|
@@ -189,8 +250,8 @@ with it false, confirm it allows (fail-open).
 | D1 `verdict(for:)` on BLOCKED_URL | `.deny` | | | |
 | D2 ALLOWED_URL loads (absence) | Loads | | | |
 | D2 `verdict(for:)` on ALLOWED_URL | `.allow`/`.unknown` | | | which? |
-| D3 iOS 26 block with extra params | (likely miss) | | | whole-query unit |
-| D3 iOS 27 `QueryOptions(["v"])` key shape | Matches `v=`-only | | | **record exact key** |
+| D3 iOS 26 block with extra params | (likely miss) | | | no parsing control exists on iOS 26 (ADR-013) |
+| D3 iOS 27 `QueryOptions(["v"])` key shape | Matches `v=`-only | | | **record exact key**; API confirmed iOS-27-only (ADR-013) |
 | D4.1 Bloom-only propagation | ≥ 2700 s | | | ___ s |
 | D4.2 PIR reset propagation | seconds–minutes | | | ___ s |
 | D5 enable on UNSUPERVISED device | ? | | | **key unknown** |
@@ -204,17 +265,26 @@ with it false, confirm it allows (fail-open).
 
 ## Key unresolved
 
-1. **Does FamilyControls `.child` lock the URL-filter Settings toggle?** For PoC A
-   the `.child` posture blocks app-deletion and iCloud sign-out; it is unknown
-   whether it also prevents a child from disabling the *URL filter* in Settings.
-   If it does not, the blocklist is trivially removable and only useful layered
-   under the PoC A content filter. (D5.)
-2. **Supervision requirement — the sources contradict.** TN3134 / WWDC25 session
-   234 imply a URL-filter provider is enableable without supervision (no
-   supervision restriction listed), but the **Apple Platform Deployment** "Filter
-   content" guide frames URL filtering under supervised/managed contexts. This
-   must be resolved on hardware (D5): if supervision is required, `NEURLFilter` is
-   **not** a consumer-unsupervised mechanism and drops to MDM-only scope.
+1. **Does FamilyControls `.child` lock the URL-filter Settings toggle?** STILL
+   OPEN — and now known to be unanswerable from the SDK: there is no
+   ManagedSettings key that locks a content-filter or URL-filter toggle, and
+   nothing in the NEURLFilter API references it. Note also that PoC A's
+   assumption that `.child` blocks app-deletion and iCloud sign-out should not be
+   assumed either — those are separately assertable via
+   `ApplicationSettings.denyAppRemoval` and `AccountSettings.lockAccounts`
+   (ADR-014). If the toggle is not lockable, the blocklist is trivially removable
+   and only useful layered under the PoC A content filter. (D5.)
+2. **Supervision requirement — the sources contradict. NOT RESOLVED.** TN3134 /
+   WWDC25 session 234 imply a URL-filter provider is enableable without
+   supervision, but the **Apple Platform Deployment** "Filter content" guide
+   frames URL filtering under supervised/managed contexts. Searching the Xcode 27
+   SDK does **not** break the tie: the NetworkExtension framework mentions
+   supervision only in `NEAppPushManager.h` (unrelated), and the URL-filter API
+   exposes no supervision-related surface. The entitlement is plain
+   `url-filter-provider` with no supervision qualifier. This is a
+   runtime/provisioning question and must be resolved on hardware (D5): if
+   supervision is required, `NEURLFilter` is **not** a consumer-unsupervised
+   mechanism and drops to MDM-only scope.
    - TN3134: <https://developer.apple.com/documentation/technotes/tn3134-network-extension-provider-deployment>
    - Deployment guide: <https://support.apple.com/guide/deployment/filter-content-dep1129ff8d2/web>
 3. **Chromium/Firefox participation via `NEURLFilter.verdict(for:)`.** Non-WebKit
@@ -233,8 +303,11 @@ with it false, confirm it allows (fail-open).
 6. **Exact URL canonicalization / sub-URL enumeration.** The device expands each
    request into ~48 sub-URL keys; the Bloom builder and PIR dataset must emit keys
    in the identical canonical form or a Bloom hit never lands on a matching PIR
-   row. `build_bloom.py` implements a conservative scheme-stripped + Punycoded
-   form and flags this as open; reconcile against observed device keys (D3/D6).
+   row. **One concrete mismatch is already identified statically:**
+   `build_bloom.py` keeps the `www.` prefix while `DomainOptions.stripWWW`
+   defaults to `true` (ADR-013) — so at minimum the builder needs a `www.`-strip
+   to agree with the iOS 27 default. The iOS 26 fixed form is still unobservable.
+   Reconcile against observed device keys (D3/D6) before changing the builder.
 
 ## Success criterion
 

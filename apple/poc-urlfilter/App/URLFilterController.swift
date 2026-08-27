@@ -9,8 +9,9 @@ import NetworkExtension
 /// NEURLFilter is BLOCKLIST-ONLY and is NOT the per-video-approval engine
 /// (that is PoC A). See docs/APPLE_URL_FILTER_POC.md and ARCHITECTURE.md §3.1.
 ///
-/// This environment (Linux, no Xcode/Apple SDK, no iOS 26 device) cannot compile
-/// or run this. Open in Xcode 26; run on iOS/iPadOS 26 hardware.
+/// Verified to COMPILE against the Xcode 27 iPhoneOS SDK (deployment target
+/// iOS 26.0). Running it still needs iOS/iPadOS 26 hardware. SDK corrections
+/// applied vs. the original scaffold are recorded in ADR-013.
 @MainActor
 final class URLFilterController: ObservableObject {
 
@@ -49,7 +50,8 @@ final class URLFilterController: ObservableObject {
 
             // Point the manager at our PIR stack and the bundled control provider
             // that supplies the Bloom prefilter.
-            mgr.setConfiguration(
+            // SDK: setConfiguration(...) is `throws` (ADR-013).
+            try mgr.setConfiguration(
                 pirServerURL: pirServerURL,
                 pirPrivacyPassIssuerURL: pirPrivacyPassIssuerURL,
                 pirAuthenticationToken: pirAuthenticationToken,
@@ -61,11 +63,42 @@ final class URLFilterController: ObservableObject {
             // false (fail-open). (ARCHITECTURE.md §3.1, DECISIONS ADR-002.)
             mgr.shouldFailClosed = true
 
-            // Bloom prefilter refresh cadence. Default 86400s; floor 2700s (45min).
-            // There is NO push/force-reload for the prefilter — this is the ≥45min
-            // propagation floor the PoC measures. // TODO(verify on device): exact
-            // property name/behavior of prefilterFetchInterval.
+            // Bloom prefilter refresh cadence. There is NO push/force-reload for
+            // the prefilter — this is the ≥45min propagation floor the PoC
+            // measures. The property name is confirmed present in the SDK
+            // (`var prefilterFetchInterval: TimeInterval`); the DEFAULT and the
+            // enforced FLOOR are still unverified — measure on device.
             mgr.prefilterFetchInterval = 2700
+
+            // How the system reduces an observed URL to the dataset key it looks
+            // up. This is the ARCHITECTURE.md §13 item-9 unknown, and the SDK
+            // answers it — but only on iOS 27 (ADR-013).
+            //
+            // On **iOS 26 there is NO parsing control at all**: `ParsingConfiguration`,
+            // `urlParsingConfiguration` and `setURLParsingRegularExpression` are all
+            // marked `@available(iOS 27.0, macOS 27.0, *)`. So on iOS 26 the dataset
+            // key shape is fixed by the system, with hierarchy enumeration on — which
+            // is exactly the "blocking a sub-URL takes out the whole domain" behaviour
+            // ADR-002 describes.
+            //
+            // On iOS 27 query parameters CAN be included by name and hierarchy
+            // enumeration CAN be switched off, so a key of the form
+            // `youtube.com/watch?v=<id>` becomes expressible and blocking one video
+            // need not enumerate up to the whole domain.
+            //
+            // Either way this does NOT give NEURLFilter an allow verdict or a
+            // default-deny, so it still cannot express "deny all of YouTube except
+            // this one video" — ADR-002 stands, and PoC A remains the engine.
+            if #available(iOS 27.0, macOS 27.0, *) {
+                mgr.urlParsingConfiguration = NEURLFilterManager.ParsingConfiguration(
+                    excludeScheme: true,
+                    domain: .init(stripWWW: true, enumerateHierarchy: false),
+                    path: .init(enumerateHierarchy: false),
+                    query: .init(excluded: false, parameters: ["v"]),
+                    excludeFragment: true,
+                    caseSensitive: false
+                )
+            }
 
             mgr.isEnabled = true
             try await mgr.saveToPreferences()
@@ -126,10 +159,24 @@ final class URLFilterController: ObservableObject {
     /// Drop the cached PIR verdicts so the next Bloom-hit re-queries the server.
     /// This is the FASTER-than-Bloom path (the app must run to call it; there is
     /// no server→device trigger). Pairs with refreshPIRParameters().
-    func resetPIRCache() {
-        NEURLFilterManager.shared.resetPIRCache()
-        // refreshPIRParameters() re-fetches PIR crypto params after a server-side
-        // database/param change.
-        NEURLFilterManager.shared.refreshPIRParameters()
+    ///
+    /// SDK: both are `async throws`, not synchronous (ADR-013).
+    func resetPIRCache() async {
+        do {
+            try await NEURLFilterManager.shared.resetPIRCache()
+            // Re-fetch PIR crypto params after a server-side database/param change.
+            try await NEURLFilterManager.shared.refreshPIRParameters()
+        } catch {
+            lastError = "PIR reset failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Report the manager's own lifecycle status (`.stopped/.starting/.running/…`)
+    /// and the last disconnect error — both are `async` getters in the SDK.
+    func refreshDetailedStatus() async {
+        let mgr = NEURLFilterManager.shared
+        let st = await mgr.status
+        let err = await mgr.lastDisconnectError
+        statusText = "\(st)" + (err.map { " (last error: \($0))" } ?? "")
     }
 }

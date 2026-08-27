@@ -166,3 +166,90 @@ nobody measured.
 **To close:** a Mac with USB access to an iOS 26 device, an Apple Developer team
 with the Family Controls entitlement, and a child Apple ID in a Family Sharing
 group. Then run A1–A6 verbatim and update ADR-001 and ARCHITECTURE.md §13.
+
+### ADR-013 — iOS 26/27 SDK corrections to the PoC D scaffold, and the `NEURLFilter` API as it actually ships
+**Status:** Accepted (compiler-verified against the Xcode 27.0 iPhoneOS SDK)
+**Context:** The PoC D scaffold was written from WWDC/doc research. Compiling it
+for the first time showed the shipped API differs in shape, and — more
+importantly — that the capability split between iOS 26 and iOS 27 is load-bearing
+for ADR-002.
+
+**Where the API actually lives.** `NEURLFilter` is only *partly* Objective-C. The
+header `NEURLFilter.h` declares nothing but the verdict enum and
+`+verdictForURL:completionHandler:`. `NEURLFilterManager`,
+`NEURLFilterControlProvider` and `NEURLFilterPrefilter` are **Swift-native** and
+declared only in `NetworkExtension.swiftinterface`. Read that file, not the
+headers, when checking this API.
+
+**Corrections applied:**
+1. `NEURLFilterControlProvider` is a **protocol refining ExtensionFoundation's
+   `AppExtension`**, not a class to subclass. The provider is a `@main` struct
+   conforming to it, with `init()`; `configuration` comes from the protocol's
+   default implementation. It is an **ExtensionKit** extension — it lands in
+   `MyApp.app/Extensions/`, not `PlugIns/`, which is consistent with the
+   `EXExtensionPointIdentifier` key the scaffold already specified.
+2. `NEURLFilterPrefilter.init(data:…)` takes an
+   `NEURLFilterPrefilter.PrefilterData` enum — `.smallFilter(Data)` or
+   `.temporaryFilepath(URL)` — **not** raw `Data`. The `.temporaryFilepath` case
+   is the intended path for a blocklist too large to hold in memory.
+3. `NEURLFilterManager.setConfiguration(pirServerURL:pirPrivacyPassIssuerURL:pirAuthenticationToken:controlProviderBundleIdentifier:)`
+   **throws**.
+4. `resetPIRCache()` and `refreshPIRParameters()` are **`async throws`**, not
+   synchronous. `status` and `lastDisconnectError` are `async` getters.
+5. `shouldFailClosed` and `prefilterFetchInterval` exist as assumed (iOS 26).
+
+**The iOS 26 / iOS 27 split — this is the important part.** Every URL-parsing
+control is gated `@available(iOS 27.0, macOS 27.0, *)`:
+`ParsingConfiguration`, `urlParsingConfiguration`, `urlParsingRegularExpression`,
+`setURLParsingRegularExpression` (also `reportEndpoint`/`reportInterval`/`reportFormat`).
+
+- **On iOS 26 there is no way to influence the dataset-key shape at all.** The
+  system's key derivation is fixed, with hierarchy enumeration on. That *is* the
+  "blocking a sub-URL takes out the whole domain" behaviour ADR-002 describes.
+- **On iOS 27** the shape is controllable and the §13 item-9 unknown is answered
+  at the API level:
+  `ParsingConfiguration.QueryOptions(excluded:parameters:)` can include named
+  query parameters (so `parameters: ["v"]` keys on the YouTube video id), and
+  `DomainOptions(excluded:stripWWW:levels:enumerateHierarchy:)` /
+  `PathOptions(excluded:segments:enumerateHierarchy:)` can turn hierarchy
+  enumeration **off**. So a key of the form `youtube.com/watch?v=<id>` is
+  expressible and blocking one video need not escalate to the whole domain.
+
+**Consequence for ADR-002: it stands, refined.** iOS 27 makes `NEURLFilter`
+*precise*, but precision was never the blocker — `NEURLFilter` still has **no
+allow verdict and no default-deny**, so it cannot express "deny all of YouTube
+except this one video" on either OS version. It remains the supplementary
+blocklist; PoC A remains the per-video engine. What changes is that on iOS 27 the
+blocklist can name individual videos without collateral damage to the domain,
+which makes the "specific bad videos" use in ADR-002 actually practical — on iOS
+26 it is not.
+
+**Also found:** `build_bloom.py` emits PIR keywords that keep the `www.` prefix
+(`www.youtube.com/watch?v=…`), but `DomainOptions.stripWWW` defaults to **true**,
+so on iOS 27 the device would look up `youtube.com/watch?v=…`. A Bloom hit would
+then never land on a matching PIR row. Not changed yet because the iOS 26
+behaviour is unobservable from the SDK — flagged as the concrete form of "Key
+unresolved" item 6 and must be reconciled against observed device keys (D3/D6).
+
+### ADR-014 — Tamper resistance should be enforced through ManagedSettings, not assumed from `.child`
+**Status:** Proposed (API confirmed present; behaviour unverified on hardware)
+**Context:** PoC A test A6 and ADR-009 currently *hope* that the `.child` posture
+blocks app deletion, iCloud sign-out, and clock tampering. Reviewing the
+ManagedSettings API in the Xcode 27 SDK shows these are not things to hope for —
+they are settings the product can assert explicitly once it holds FamilyControls
+authorization:
+- `ApplicationSettings.denyAppRemoval` — blocks deleting the app.
+- `ApplicationSettings.denyAppInstallation` — blocks installing a bypass app.
+- `AccountSettings.lockAccounts` — blocks signing out of iCloud.
+- `DateAndTimeSettings.requireAutomaticDateAndTime` — forces automatic date/time,
+  which directly hardens the ADR-009 clock-rollback concern instead of merely
+  detecting it. This is the strongest available answer to A5's "change the clock
+  to extend a grant" test.
+**Decision (proposed):** the product asserts these through a `ManagedSettingsStore`
+rather than relying on defaults, and A6 tests both postures — `.child` alone, and
+`.child` + explicit ManagedSettings — so we learn which protections are inherent
+and which we must assert.
+**Not solved by this:** there is **no** ManagedSettings key that locks the
+content-filter or URL-filter toggle in Settings. That question is still open and
+still cannot be answered from the SDK — only on hardware (A6 / D5).
+

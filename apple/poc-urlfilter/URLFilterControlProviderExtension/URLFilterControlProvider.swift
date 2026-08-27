@@ -1,3 +1,4 @@
+import ExtensionFoundation
 import NetworkExtension
 import os.log
 
@@ -6,19 +7,27 @@ import os.log
 /// system consults BEFORE any network — built offline by
 /// `tools/build-bloom/build_bloom.py` and bundled into this extension.
 ///
-/// This is an APP EXTENSION on both iOS and macOS (never a system extension).
-/// Info.plist must set:
+/// This is an **ExtensionKit app extension** on both iOS and macOS (never a
+/// system extension). Info.plist sets:
 ///     EXExtensionPointIdentifier = com.apple.networkextension.url-filter-control
 /// Entitlement `com.apple.developer.networking.networkextension` value:
 ///     url-filter-provider
+///
+/// SDK REALITY (verified against the Xcode 27 iPhoneOS SDK — see ADR-013):
+/// `NEURLFilterControlProvider` is a **protocol refining ExtensionFoundation's
+/// `AppExtension`**, not a class to subclass. So this is a `@main` struct that
+/// conforms; `configuration` comes from the protocol's default implementation.
 ///
 /// NEURLFilter is BLOCKLIST-ONLY. The prefilter answers "might this URL be in the
 /// blocklist?"; a Bloom hit triggers a PIR lookup against the vendor server. There
 /// is no author-able allow verdict, no exceptions, one dataset per app. Allowed
 /// URLs are allowed by ABSENCE from the set (ARCHITECTURE.md §3.1, ADR-002).
-final class URLFilterControlProvider: NEURLFilterControlProvider {
+@main
+struct URLFilterControlProvider: NEURLFilterControlProvider {
 
-    private let log = Logger(subsystem: "com.example.URLFilterPoC", category: "url-filter-control")
+    private static let log = Logger(subsystem: "com.example.URLFilterPoC", category: "url-filter-control")
+
+    init() {}
 
     /// The system asks for the current prefilter, passing the tag of whatever it
     /// already holds. Return `nil` to indicate "unchanged"; otherwise return a
@@ -27,28 +36,31 @@ final class URLFilterControlProvider: NEURLFilterControlProvider {
     /// the ≥45-min propagation floor the PoC measures.
     func fetchPrefilter(existingPrefilterTag: String?) async throws -> NEURLFilterPrefilter? {
         guard let meta = Self.loadMeta() else {
-            log.error("bloom.meta.json missing from extension bundle")
+            Self.log.error("bloom.meta.json missing from extension bundle")
             return nil
         }
 
         // No change since the system's current copy → tell it so (nil = unchanged).
         if let existing = existingPrefilterTag, existing == meta.tag {
-            log.info("prefilter unchanged (tag \(meta.tag, privacy: .public))")
+            Self.log.info("prefilter unchanged (tag \(meta.tag, privacy: .public))")
             return nil
         }
 
         guard let data = Self.loadBloomBlob() else {
-            log.error("bloom.bin missing from extension bundle")
+            Self.log.error("bloom.bin missing from extension bundle")
             return nil
         }
 
-        log.info("returning prefilter tag=\(meta.tag, privacy: .public) bits=\(meta.bitCount) hashes=\(meta.hashCount)")
+        Self.log.info("prefilter tag=\(meta.tag, privacy: .public) bits=\(meta.bitCount) hashes=\(meta.hashCount)")
 
-        // Construct the prefilter from the offline-built blob and its parameters.
         // The bitCount/hashCount/murmurSeed MUST match build_bloom.py exactly, or
         // the on-device matcher will index different bits than the builder set.
+        //
+        // SDK REALITY: `data:` is an `NEURLFilterPrefilter.PrefilterData` enum,
+        // not raw `Data` — `.smallFilter(Data)` for an in-memory blob or
+        // `.temporaryFilepath(URL)` for a large one spilled to disk (ADR-013).
         return NEURLFilterPrefilter(
-            data: data,
+            data: .smallFilter(data),
             tag: meta.tag,
             bitCount: meta.bitCount,
             hashCount: meta.hashCount,
@@ -56,14 +68,12 @@ final class URLFilterControlProvider: NEURLFilterControlProvider {
         )
     }
 
-    /// Start participating. // TODO(verify on device): whether any prefilter
-    /// priming is expected here vs. purely in fetchPrefilter().
     func start() async throws {
-        log.info("URLFilterControlProvider start")
+        Self.log.info("URLFilterControlProvider start")
     }
 
     func stop(reason: NEProviderStopReason) async throws {
-        log.info("URLFilterControlProvider stop reason=\(reason.rawValue)")
+        Self.log.info("URLFilterControlProvider stop reason=\(reason.rawValue)")
     }
 
     // MARK: - Bundled Bloom artifacts

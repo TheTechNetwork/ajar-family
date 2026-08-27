@@ -465,7 +465,23 @@ evidence of behaviour._
 8. `ExtensionInstallForcelist` + MV3 `webRequestBlocking` on clean, non-domain-joined Windows 11 Home; full-URL enforcement; service anti-tamper; block unsupported browsers; whether any concrete case forces the MITM fallback.
 
 **PoC D — `NEURLFilter` Bloom/PIR (SUPPLEMENTARY):**
-9. `.child` lock on the URL-filter Settings toggle; supervision requirement (WWDC/TN3134 vs. Deployment-guide contradiction); iOS-27 `ParsingConfiguration` exact dataset-key shape for `v=` matching; realistic propagation; PIR operational cost.
+_Status 2026-08-27: scaffold **builds clean for arm64 device** (app + ExtensionKit
+control-provider extension, Bloom blob bundled); `build_bloom.py --selftest`
+passes. Four SDK corrections applied — see ADR-013. No test executed (ADR-012)._
+9. Split into what the SDK settled and what it did not:
+   - **`ParsingConfiguration` dataset-key shape — ANSWERED at the API level (ADR-013).** All URL-parsing control (`ParsingConfiguration`, `urlParsingConfiguration`, `setURLParsingRegularExpression`) is `@available(iOS 27.0, *)`. **On iOS 26 the key shape cannot be influenced at all**, which is precisely the "one sub-URL blocks the whole domain" behaviour. On iOS 27, `QueryOptions(parameters: ["v"])` plus `DomainOptions/PathOptions(enumerateHierarchy: false)` make `youtube.com/watch?v=<id>` expressible. This makes the blocklist *precise* on iOS 27 but does **not** give it an allow verdict or a default-deny — **ADR-002 stands**, and the "specific bad videos" use is practical on iOS 27 only.
+   - **Supervision requirement — STILL UNRESOLVED.** The SDK does not break the TN3134-vs-Deployment-guide tie: NetworkExtension mentions supervision only in `NEAppPushManager.h` (unrelated), and the entitlement is plain `url-filter-provider` with no supervision qualifier. Hardware-only (D5). If supervision *is* required, `NEURLFilter` drops to MDM-only scope.
+   - **`.child` lock on the URL-filter Settings toggle — STILL UNRESOLVED**, and now known to be unanswerable from the SDK: no ManagedSettings key locks a filter toggle (see ADR-014 for what *is* assertable).
+   - **Realistic propagation and PIR operational cost — NOT MEASURED.**
+   - **New, found statically:** `build_bloom.py` emits keywords keeping `www.`, but `DomainOptions.stripWWW` defaults to `true` — a canonicalization mismatch that would make Bloom hits miss their PIR row on iOS 27 (ADR-013).
+
+**Cross-cutting, found while building (ADR-014):** app-deletion, iCloud sign-out
+and clock tampering should not be *assumed* from the `.child` posture — they are
+directly assertable via `ApplicationSettings.denyAppRemoval`,
+`ApplicationSettings.denyAppInstallation`, `AccountSettings.lockAccounts`, and
+`DateAndTimeSettings.requireAutomaticDateAndTime`. The last one hardens ADR-009's
+clock-rollback concern rather than merely detecting it. A6 should test both
+postures (`.child` alone vs. `.child` + asserted settings).
 
 See `docs/APPLE_CONTENT_FILTER_POC.md` (A), `docs/MACOS_SAFARI_POC.md` (B),
 `docs/WINDOWS_FILTER_POC.md` (C), `docs/APPLE_URL_FILTER_POC.md` (D), and

@@ -27,6 +27,7 @@ struct ContentView: View {
                         Task { await controller.configureAndEnable() }
                     }
                     Button("Refresh status") { Task { await controller.refreshStatus() } }
+                    Button("Detailed status (async)") { Task { await controller.refreshDetailedStatus() } }
                     Button("Disable") { Task { await controller.disableFilter() } }
                 }
 
@@ -45,7 +46,7 @@ struct ContentView: View {
 
                 Section("3 · PIR fast path") {
                     Button("resetPIRCache() + refreshPIRParameters()") {
-                        controller.resetPIRCache()
+                        Task { await controller.resetPIRCache() }
                     }
                     Text("The Bloom prefilter cannot update faster than ~45 min; PIR verdicts refresh faster, but only when THIS app runs to reset the cache. No server→device trigger.")
                         .font(.footnote).foregroundStyle(.secondary)
