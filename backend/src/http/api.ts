@@ -44,6 +44,16 @@ export function buildRouter(app: App): Router {
     return ok({ userId: user.id, token: await issueToken(app.authSecret, { kind: "user", userId: user.id }) });
   });
 
+  r.get("/v1/me", async (req) => {
+    const userId = await requireUser(app, req);
+    const user = await app.repo.getUser(userId);
+    const memberships = await app.repo.listMembershipsForUser(userId);
+    const families = await Promise.all(memberships.map(async (m) => ({
+      familyId: m.familyId, role: m.role, family: await app.repo.getFamily(m.familyId),
+    })));
+    return ok({ userId, email: user?.email, displayName: user?.displayName, families });
+  });
+
   // --- families ---
   r.post("/v1/families", async (req) => {
     const userId = await requireUser(app, req);

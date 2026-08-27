@@ -35,7 +35,9 @@ interception on Apple platforms and without enterprise MDM**.
 | `docs/DEPLOYMENT.md` | Backend → Cloudflare Workers via GitHub Actions; secrets + signing-key generation. |
 | `docs/APPLE_ACCOUNT_SETUP.md` | Apple Developer account prep runbook (enrollment, App IDs, entitlements, Family Controls request, APNs). |
 | `docs/RELEASE_CHECKLIST.md` | The gate for merging PR #1 — "alpha ready → merge." |
-| `backend/` | **Cloud backend (implemented, tested)** — TypeScript, in-memory store (alpha), node:http + Workers adapters. |
+| `backend/` | **Cloud backend (implemented, tested)** — TypeScript, in-memory + durable SQLite/D1 store, node:http + Workers adapters. |
+| `web/parent/` | **Parent Console** — static web UI to demo the approval loop in a browser (production parent UX is the iOS app). |
+| `windows/extension/` | **Windows MV3 extension** — enforcing client; browser-testable against the live backend (enroll → long-poll → block → request → approve). |
 | `shared/policy/policy-model.ts` | Platform-agnostic policy model + evaluation order + reference evaluator (**the source of truth**). |
 | `shared/youtube/youtube-normalize.ts` | Canonical YouTube object normalization (**the source of truth**). |
 | `apple/poc-contentfilter/` | PoC A scaffold (Xcode 26 / iOS 26, on-device). |

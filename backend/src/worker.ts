@@ -11,7 +11,7 @@
  */
 import { App } from "./app.js";
 import { buildRouter } from "./http/api.js";
-import type { HttpRequest, Router } from "./http/router.js";
+import { CORS_HEADERS, type HttpRequest, type Router } from "./http/router.js";
 import { createD1, type D1Like } from "./store/sql/database.js";
 import { SqlStore } from "./store/sql/sql-store.js";
 
@@ -47,6 +47,9 @@ async function getRouter(env: Env): Promise<Router> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    // CORS preflight.
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
+
     const url = new URL(request.url);
     const headers: Record<string, string> = {};
     request.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
@@ -64,7 +67,7 @@ export default {
     const r = await (await getRouter(env)).handle(req);
     return new Response(JSON.stringify(r.body), {
       status: r.status,
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...CORS_HEADERS },
     });
   },
 };

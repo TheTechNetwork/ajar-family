@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Family Filter — Parent Console</title>
+  <style>
+    :root { --bg:#f7f7f8; --card:#fff; --line:#e4e4e7; --ink:#18181b; --muted:#71717a; --accent:#2563eb; --danger:#dc2626; --ok:#16a34a; }
+    * { box-sizing: border-box; }
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--ink); }
+    header { background: var(--card); border-bottom: 1px solid var(--line); padding: 0.75rem 1rem; display: flex; gap: 1rem; align-items: center; }
+    header h1 { font-size: 1.05rem; margin: 0; }
+    header .who { margin-left: auto; color: var(--muted); font-size: 0.9rem; }
+    main { max-width: 52rem; margin: 1.25rem auto; padding: 0 1rem; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+    .card h2 { font-size: 1rem; margin: 0 0 0.75rem; }
+    label { display:block; font-weight:600; margin: 0.5rem 0 0.2rem; font-size: 0.85rem; }
+    input, select { width: 100%; padding: 0.45rem; font-size: 0.95rem; border:1px solid var(--line); border-radius: 6px; }
+    .row { display:flex; gap: 0.5rem; flex-wrap: wrap; align-items: flex-end; }
+    .row > * { flex: 1; min-width: 8rem; }
+    button { padding: 0.45rem 0.8rem; font-size: 0.9rem; border:0; border-radius: 6px; background: var(--accent); color:#fff; cursor:pointer; }
+    button.secondary { background:#e4e4e7; color: var(--ink); }
+    button.danger { background: var(--danger); }
+    button.ok { background: var(--ok); }
+    .muted { color: var(--muted); font-size: 0.85rem; }
+    .code { font: 700 1.6rem/1 ui-monospace, monospace; letter-spacing: 0.2rem; background:#eef2ff; color: var(--accent); padding: 0.5rem 0.75rem; border-radius: 8px; display:inline-block; }
+    .req { border:1px solid var(--line); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.75rem; }
+    .req .t { font-weight: 600; }
+    .req .meta { color: var(--muted); font-size: 0.85rem; word-break: break-all; }
+    .actions { display:flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    .actions button { font-size: 0.82rem; padding: 0.35rem 0.6rem; }
+    .pill { display:inline-block; font-size:0.72rem; background:#eef2ff; color:var(--accent); padding:0.1rem 0.45rem; border-radius:999px; }
+    .empty { color: var(--muted); text-align:center; padding: 1.5rem; }
+    .hide { display:none; }
+    .err { color: var(--danger); font-size: 0.85rem; }
+    .flash { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background:#111; color:#fff; padding:0.5rem 1rem; border-radius: 8px; opacity:0; transition: opacity .2s; }
+    .flash.show { opacity: 0.95; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>👨‍👩‍👧 Family Filter — Parent Console</h1>
+    <span class="who" id="who"></span>
+  </header>
+  <main>
+    <!-- Auth -->
+    <section class="card" id="authCard">
+      <h2>Sign in</h2>
+      <label for="backendUrl">Backend URL</label>
+      <input id="backendUrl" type="url" value="http://localhost:8787" />
+      <div class="row">
+        <div><label for="email">Email</label><input id="email" type="email" placeholder="parent@example.com" /></div>
+        <div><label for="name">Name (for register)</label><input id="name" type="text" placeholder="Alex Parent" /></div>
+      </div>
+      <div class="actions">
+        <button id="btnRegister">Register</button>
+        <button id="btnLogin" class="secondary">Log in</button>
+      </div>
+      <div class="err" id="authErr"></div>
+    </section>
+
+    <!-- Family / children / enrollment -->
+    <section class="card hide" id="familyCard">
+      <h2>Family</h2>
+      <div id="familyPick"></div>
+      <div class="row">
+        <div><label for="familyName">New family name</label><input id="familyName" placeholder="The Parkers" /></div>
+        <div style="flex:0"><button id="btnCreateFamily">Create</button></div>
+      </div>
+      <div id="childrenBox" class="hide">
+        <label>Children</label>
+        <div id="children"></div>
+        <div class="row">
+          <div><input id="childName" placeholder="New child name (e.g. Jane)" /></div>
+          <div style="flex:0"><button id="btnAddChild" class="secondary">Add child</button></div>
+        </div>
+        <div id="enrollBox" class="hide" style="margin-top:0.75rem">
+          <label>Enrollment code (enter in the child's browser extension → Options)</label>
+          <div><span class="code" id="enrollCode">------</span> <span class="muted" id="enrollMeta"></span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Requests -->
+    <section class="card hide" id="requestsCard">
+      <h2>Pending requests <span class="pill" id="reqCount">0</span></h2>
+      <div id="requests"><div class="empty">No pending requests. Approvals appear here in real time.</div></div>
+    </section>
+  </main>
+  <div class="flash" id="flash"></div>
+  <script src="app.js"></script>
+</body>
+</html>

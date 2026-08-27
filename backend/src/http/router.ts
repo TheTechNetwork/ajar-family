@@ -24,6 +24,20 @@ export const ok = (body: unknown, status = 200): HttpResponse => ({ status, body
 export const err = (status: number, message: string, code?: string): HttpResponse =>
   ({ status, body: { error: message, code } });
 
+/**
+ * Permissive CORS for the alpha so a web parent UI on another origin can call the
+ * API (the browser extension bypasses CORS via host permissions and doesn't need
+ * this). Bearer-token auth, no cookies, so `*` is safe. Production should restrict
+ * the origin. Applied by both transport adapters; OPTIONS preflight is answered
+ * transport-side with 204.
+ */
+export const CORS_HEADERS: Record<string, string> = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+  "access-control-allow-headers": "authorization,content-type",
+  "access-control-max-age": "86400",
+};
+
 export class Router {
   private routes: Route[] = [];
 
