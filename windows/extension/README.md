@@ -11,6 +11,39 @@ This is the primary Windows mechanism under **ADR-005** (Windows starts without
 TLS interception). See `docs/WINDOWS_FILTER_POC.md` for the experiment protocol and
 the load-bearing empirical question this extension exists to answer.
 
+## Two policy sources: native host (production) and backend HTTP (dev)
+
+The blocking listener only ever reads an in-memory **signed** policy snapshot; two
+sources can populate it, selected automatically at startup:
+
+- **Native-host mode (production Windows):** the LocalSystem service (`windows/agent/`)
+  pushes signed snapshots over native messaging and forwards access requests.
+- **Backend HTTP mode (browser-testable, no service required):** enroll the browser
+  from the **options page** and the extension talks directly to the backend —
+  `backend-client.js` long-polls `GET /v1/devices/:id/policy/wait` for signed
+  snapshots and posts access requests to `POST /v1/requests`. Every snapshot is
+  **Ed25519-verified** in the extension (`policy-verify.js`) against the backend's
+  `/v1/signing-key` before it is trusted (fail closed).
+
+### Try the full loop in Chrome/Edge (no Apple hardware, no Windows service)
+
+1. Run the backend: `npm ci && npm run build && (cd backend && AUTH_SECRET=dev PORT=8787 node dist/index.js)`.
+2. Create a family/child and an enrollment code via the API (see `backend/README.md`):
+   register → `POST /v1/families` → `POST /v1/families/:id/children` →
+   `POST /v1/families/:id/enroll` returns a six-digit `code`.
+3. `chrome://extensions` → **Developer mode** → **Load unpacked** → select
+   `windows/extension/`. (Loading unpacked grants blocking `webRequest` for dev, the
+   same capability force-install grants in production.)
+4. Open the extension **Options**, enter the backend URL + the six-digit code → enroll.
+5. Browse to a YouTube video → it's blocked (default-deny) → **Request Access** →
+   approve it from the parent side (`POST /v1/families/:id/requests/:reqId/decide`
+   with `scope:"THIS_VIDEO"`, `duration:{kind:"MINUTES",minutes:30}`) → the extension's
+   long-poll picks up the signed snapshot within seconds and the exact video plays,
+   while every other video stays blocked and the grant auto-expires.
+
+This is the MVP success flow, verified end-to-end at the HTTP layer (an approval is
+delivered to a parked long-poll in single-digit milliseconds locally).
+
 ## Why a policy-installed extension can do what a store one can't
 
 MV3 removed the blocking form of `webRequest` for ordinary extensions and pushed

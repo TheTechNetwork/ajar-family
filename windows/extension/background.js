@@ -20,6 +20,7 @@
  */
 
 import { normalizeYouTube, youTubePolicyKey, isPlaybackSupportHost } from "./youtube-normalize.js";
+import { getConfig, startPolicySync, postAccessRequest } from "./backend-client.js";
 
 // ---------------------------------------------------------------------------
 // Policy snapshot cache (held in memory for the synchronous blocking listener)
@@ -76,12 +77,36 @@ function connectNativeHost() {
   }
 }
 
+/** Apply a verified snapshot from either policy source (native host or backend). */
+function applySnapshot(snapshot, serverNowMs) {
+  SNAPSHOT = snapshot;
+  if (typeof serverNowMs === "number") {
+    CLOCK_ANCHOR = { serverNowMs, perfNowAtAnchor: performance.now() };
+  }
+  chrome.storage.local.set({ snapshot: SNAPSHOT, clockAnchor: CLOCK_ANCHOR });
+}
+
 // Restore the last cached snapshot on worker restart so enforcement is immediate.
 chrome.storage.local.get(["snapshot", "clockAnchor"], (v) => {
   if (v && v.snapshot) SNAPSHOT = v.snapshot;
   if (v && v.clockAnchor) CLOCK_ANCHOR = v.clockAnchor;
 });
-connectNativeHost();
+
+// Policy source selection:
+//  - Backend HTTP mode (dev / browser-testable): if enrolled via the options page,
+//    long-poll the backend directly for signed snapshots.
+//  - Native-host mode (production Windows): the LocalSystem service pushes signed
+//    snapshots over native messaging.
+// Both call applySnapshot(); the blocking listener only ever reads the cache.
+let BACKEND_MODE = false;
+getConfig().then((cfg) => {
+  if (cfg.backendUrl && cfg.deviceToken) {
+    BACKEND_MODE = true;
+    startPolicySync((snapshot, serverNowMs) => applySnapshot(snapshot, serverNowMs));
+  } else {
+    connectNativeHost();
+  }
+});
 
 /** Monotonic "now" in UTC ms (EvalContext.nowMs). Uses the server-anchored time
  *  plus a monotonic delta; falls back to Date.now() only if never anchored. */
@@ -346,17 +371,28 @@ chrome.webNavigation.onHistoryStateUpdated.addListener(
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg && msg.type === "requestAccess") {
-    const payload = {
-      type: "accessRequest",
-      url: msg.url,
-      canonicalKey: msg.key || null,
-      reason: msg.userReason || null,
-      childId: SNAPSHOT?.childId,
-      deviceId: SNAPSHOT?.deviceId,
-      atMs: nowMs(),
-    };
+    // Derive the canonical target from the blocked URL so the parent approves the
+    // right object (e.g. YOUTUBE_VIDEO:<id>), never the raw URL string.
+    const yt = normalizeYouTube(msg.url);
+    const key = yt.isYouTube ? youTubePolicyKey(yt) : null;
+    const [targetType, targetValue] = key ? key.split(/:(.+)/) : ["URL", msg.url];
+
+    if (BACKEND_MODE) {
+      postAccessRequest({
+        targetType, targetValue,
+        title: msg.title || undefined, url: msg.url, reason: msg.userReason || undefined,
+      })
+        .then(() => sendResponse({ ok: true }))
+        .catch((e) => sendResponse({ ok: false, error: String(e) }));
+      return true; // async response
+    }
+
+    // Native-host mode: forward to the LocalSystem service, which signs + forwards.
     try {
-      if (port) port.postMessage(payload);
+      if (port) port.postMessage({
+        type: "accessRequest", url: msg.url, canonicalKey: key,
+        reason: msg.userReason || null, childId: SNAPSHOT?.childId, deviceId: SNAPSHOT?.deviceId, atMs: nowMs(),
+      });
       sendResponse({ ok: true });
     } catch (e) {
       sendResponse({ ok: false, error: String(e) });

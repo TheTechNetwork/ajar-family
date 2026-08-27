@@ -11,6 +11,13 @@
     "type": "module"
   },
 
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+
+  "//options_note": "Dev/browser-testable enrollment: point the extension at the backend and redeem a six-digit code. In production on Windows the LocalSystem service is the policy source and this page is unnecessary.",
+
   "permissions": [
     "webRequest",
     "webRequestBlocking",

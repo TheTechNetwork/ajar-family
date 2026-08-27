@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Family Filter — Setup</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; max-width: 34rem; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1 { font-size: 1.3rem; }
+    label { display: block; margin: 0.75rem 0 0.25rem; font-weight: 600; }
+    input { width: 100%; padding: 0.5rem; font-size: 1rem; box-sizing: border-box; }
+    button { margin-top: 1rem; padding: 0.6rem 1.2rem; font-size: 1rem; cursor: pointer; }
+    .status { margin-top: 1rem; padding: 0.75rem; border-radius: 6px; }
+    .ok { background: #e6f4ea; } .err { background: #fce8e6; } .muted { color: #666; }
+    code { background: #f1f1f1; padding: 0.1rem 0.3rem; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h1>Family Filter — device setup</h1>
+  <p class="muted">Enrolls this browser against the backend for development/testing. In production the Windows service is the policy source.</p>
+
+  <div id="enrolled" hidden>
+    <div class="status ok">
+      Enrolled. Device <code id="deviceId"></code> for child <code id="childId"></code>.
+      Backend <code id="curUrl"></code>.
+    </div>
+    <button id="unenroll">Unenroll</button>
+  </div>
+
+  <form id="form">
+    <label for="backendUrl">Backend URL</label>
+    <input id="backendUrl" type="url" placeholder="http://localhost:8787" value="http://localhost:8787" required />
+    <label for="code">Enrollment code (6 digits from the parent app)</label>
+    <input id="code" inputmode="numeric" pattern="[0-9]{6}" placeholder="123456" required />
+    <label for="name">Device name</label>
+    <input id="name" type="text" placeholder="Windows PC (Chrome)" value="Windows PC (Chrome)" required />
+    <button type="submit">Enroll this browser</button>
+  </form>
+
+  <div id="status" class="status" hidden></div>
+  <script type="module" src="options.js"></script>
+</body>
+</html>
