@@ -27,21 +27,26 @@ final class FilterDataProvider: NEFilterDataProvider {
     }
 
     override func handleNewFlow(_ flow: NEFilterFlow) -> NEFilterNewFlowVerdict {
-        // WebKit browser flow → full URL available.
+        // WebKit browser flow → full URL available. Fold the URL host's CNAME chain.
         if let browser = flow as? NEFilterBrowserFlow, let url = browser.url {
-            return verdict(forURL: url.absoluteString, isWebKit: true)
+            let host = url.host ?? ""
+            if !host.isEmpty { CnameResolver.shared.prime(host) }
+            return verdict(forURL: url.absoluteString, resolvedHosts: CnameResolver.shared.chain(for: host))
         }
-        // Socket flow → hostname only. Allow by default in the PoC (host-level
-        // enforcement is a later concern); log for A2 comparison.
-        if let socket = flow as? NEFilterSocketFlow {
-            log.debug("socket flow host=\(socket.remoteHostname ?? "nil", privacy: .public)")
-            return .allow()
+        // Socket flow → hostname only. Enforce host-level DOMAIN/CATEGORY rules,
+        // resolving the CNAME chain so a cloaked alias can't bypass a domain block.
+        if let socket = flow as? NEFilterSocketFlow, let host = socket.remoteHostname, !host.isEmpty {
+            CnameResolver.shared.prime(host)
+            let resolved = CnameResolver.shared.chain(for: host)
+            let decision = store.evaluate("https://\(host)/", resolvedHosts: resolved)
+            log.debug("socket flow host=\(host, privacy: .public) action=\(decision.action.rawValue, privacy: .public)")
+            return decision.action == .block ? .drop() : .allow()
         }
         return .allow()
     }
 
-    private func verdict(forURL urlString: String, isWebKit: Bool) -> NEFilterNewFlowVerdict {
-        let decision = store.evaluate(urlString)
+    private func verdict(forURL urlString: String, resolvedHosts: [String]) -> NEFilterNewFlowVerdict {
+        let decision = store.evaluate(urlString, resolvedHosts: resolvedHosts)
         log.info("url=\(urlString, privacy: .public) action=\(decision.action.rawValue, privacy: .public) reason=\(decision.reason, privacy: .public)")
 
         switch decision.action {

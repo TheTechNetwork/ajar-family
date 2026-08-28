@@ -21,6 +21,11 @@
 
 import { normalizeYouTube, youTubePolicyKey, isPlaybackSupportHost } from "./youtube-normalize.js";
 import { getConfig, startPolicySync, startCategoryFilterSync, postAccessRequest } from "./backend-client.js";
+import { makeResolver } from "./cname-resolve.js";
+
+// On-device CNAME resolver (anti-cloaking). Resolves asynchronously + caches;
+// the synchronous block listener reads the cached chain. See cname-resolve.js.
+const CNAME = makeResolver();
 
 // ---------------------------------------------------------------------------
 // Policy snapshot cache (held in memory for the synchronous blocking listener)
@@ -406,11 +411,16 @@ function decide(url, type) {
     return { action: "ALLOW", reason: "playback-support-host" };
   }
 
+  // Kick off async CNAME resolution for this host (cached for next time) and
+  // read whatever chain is already cached for THIS decision. The sync listener
+  // can't await, so the first hit to a new host uses [] and later hits are covered.
+  if (host) CNAME.prime(host);
   const ctx = {
     url,
     childId: SNAPSHOT.childId,
     deviceId: SNAPSHOT.deviceId,
     nowMs: nowMs(),
+    resolvedHosts: host ? CNAME.chainFor(host) : [],
   };
   return evaluate(SNAPSHOT, ctx);
 }
@@ -442,6 +452,16 @@ chrome.webRequest.onBeforeRequest.addListener(
   },
   ["blocking"],
 );
+
+// Warm the CNAME cache before the request is decided: onBeforeNavigate fires
+// ahead of the main_frame request, so by the time onBeforeRequest runs the
+// chain is usually already cached and folded into the decision.
+if (chrome.webNavigation?.onBeforeNavigate) {
+  chrome.webNavigation.onBeforeNavigate.addListener((d) => {
+    if (d.frameId !== 0) return;
+    try { CNAME.prime(new URL(d.url).hostname); } catch { /* ignore */ }
+  });
+}
 
 // ---------------------------------------------------------------------------
 // SPA route interception (YouTube changes the video via history.pushState with

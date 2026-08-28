@@ -42,7 +42,11 @@ public final class PolicyStore {
 
     // MARK: evaluation (mirror of shared/policy evaluate())
 
-    public func evaluate(_ urlString: String, appId: String? = nil) -> EvalResult {
+    /// `resolvedHosts` are the canonical names the request host CNAMEs to,
+    /// supplied by the network layer (FilterDataProvider resolves them). DOMAIN
+    /// rules match the request host OR any resolved name, so CNAME cloaking
+    /// (a first-party alias onto a blocked target) can't bypass a block.
+    public func evaluate(_ urlString: String, appId: String? = nil, resolvedHosts: [String] = []) -> EvalResult {
         guard let snap = current() else {
             // No policy yet: fail OPEN for ordinary web (usable device), but the
             // product default for a provisioned device is the snapshot's defaults.
@@ -51,6 +55,9 @@ public final class PolicyStore {
 
         let yt = YouTube.normalize(urlString)
         let host = URLComponents(string: urlString)?.host.map(YouTube.stripWww)
+        // Request host + its CNAME chain, normalized + deduped.
+        let hosts = Array(Set(([host].compactMap { $0 } + resolvedHosts.map(YouTube.stripWww))
+            .map { $0.lowercased() }.filter { !$0.isEmpty }))
         let now = nowUTC()
 
         func matches(target: PolicyTargetType, value: String) -> String? {
@@ -63,7 +70,7 @@ public final class PolicyStore {
             case .ytVideo:   return (yt.videoId == value) ? "YOUTUBE_VIDEO:\(value)" : nil
             case .ytPlaylist:return (yt.playlistId == value && yt.kind == .playlist) ? "YOUTUBE_PLAYLIST:\(value)" : nil
             case .ytChannel: return (yt.channelId == value || yt.channelHandle == value) ? "YOUTUBE_CHANNEL:\(value)" : nil
-            case .domain:    return (host == value || (host?.hasSuffix(".\(value)") ?? false)) ? "DOMAIN:\(value)" : nil
+            case .domain:    return hosts.contains(where: { $0 == value || $0.hasSuffix(".\(value)") }) ? "DOMAIN:\(value)" : nil
             case .application: return (appId == value) ? "APPLICATION:\(value)" : nil
             case .category:  return nil   // injected out-of-band by the category service
             }

@@ -160,19 +160,29 @@ is resolved depends on the enforcement point:**
   chain server-side (node:dns on a Node host, DNS-over-HTTPS on Workers;
   best-effort, time-bounded, `resolve=0` opts out) and returns `resolvedHosts`,
   so the console shows a site's *real* classification.
-- **iOS / macOS** — the network extension / an `NEDNSProxyProvider` observes the
-  resolved chain on the DNS/socket path and passes it into evaluation. This is
-  the right layer: it sees what the OS actually resolved.
-- **Windows** — the Go service (network layer: local proxy / WFP) resolves and
-  enforces CNAME-cloaked destinations for socket flows; it feeds `resolvedHosts`
-  to the extension for URL-level decisions.
-- **Chrome extension caveat (honest limit).** A Chrome MV3 `webRequest` hook is
-  synchronous and Chrome exposes **no DNS API**, so the extension itself cannot
-  resolve CNAMEs on-path. Coverage there comes from the **companion network-layer
-  enforcer** (the Windows service; on Firefox, `browser.dns.resolve` is available
-  and can populate `resolvedHosts` directly). The engine and both extension
-  mirrors already accept and fold `resolvedHosts`; wiring each platform's
-  resolver into it is the remaining per-platform integration.
+- **iOS / macOS (network layer)** — the `NEFilterDataProvider` resolves the
+  canonical name for each flow (`CnameResolver`, `getaddrinfo(AI_CANONNAME)`,
+  cached + async-filled) and passes it into `PolicyStore.evaluate(resolvedHosts:)`
+  — implemented for both WebKit URL flows and **socket flows** (which now enforce
+  host-level DOMAIN/CATEGORY with anti-cloaking instead of allow-all). This is the
+  right layer: it sees what the OS actually resolved. The macOS Safari *web*
+  extension stays YouTube-only (never blocks Safari), so CNAME enforcement lives
+  in the system-extension path, not the web extension.
+- **Windows / Chromium extension** — a Chrome MV3 `webRequest` hook is synchronous
+  and Chrome has no DNS API, so the extension resolves **asynchronously and caches**
+  (`cname-resolve.js`): it primes on `webNavigation.onBeforeNavigate` (ahead of the
+  request) and on first sighting, and the sync block listener reads the cached
+  chain. Resolution uses a browser DNS API when present (Firefox `browser.dns`,
+  system resolver, no third party) and otherwise **DNS-over-HTTPS** (Chrome/Edge).
+  Residual: the very first hit to a brand-new host resolves after the fact and is
+  covered from the next hit; the companion network-layer enforcer closes that
+  window. DoH exposes the hostname to the DoH provider (the browser is about to
+  resolve it anyway) — the endpoint is configurable and can be disabled.
+
+All of the above is wired: the shared engine, both extension mirrors, and the
+Swift evaluator fold `resolvedHosts`, and the backend/console, the Apple network
+filter, and the Chromium extension each resolve the chain with the facility their
+platform provides.
 
 ---
 

@@ -15,6 +15,10 @@
     "./categories": {
       "types": "./dist/categories/index.d.ts",
       "default": "./dist/categories/index.js"
+    },
+    "./net": {
+      "types": "./dist/net/cname.d.ts",
+      "default": "./dist/net/cname.js"
     }
   },
   "scripts": {
