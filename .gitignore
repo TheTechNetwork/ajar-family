@@ -25,3 +25,7 @@ apple/poc-urlfilter/Resources/out/
 
 DerivedData/
 xcuserdata/
+
+# Go build artifacts
+*.exe
+windows/agent/familyfilter.exe
