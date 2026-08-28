@@ -23,6 +23,21 @@ npm run start --workspace @ajar/backend   # or: cd backend && npm start
 curl localhost:8787/v1/health
 ```
 
+## API contract (OpenAPI)
+
+The full REST surface is described by an **OpenAPI 3.1** document — the source of
+truth the iOS / macOS / Windows clients integrate against.
+
+- **Live:** `GET /openapi.json` (served by the running backend).
+- **File:** [`openapi.json`](openapi.json) — import into Swagger UI, Postman,
+  Insomnia, or a codegen. Regenerate with `npm run openapi --workspace @ajar/backend`.
+- **Authored in** `src/http/openapi.ts`. A **contract test** (`src/http/openapi.test.ts`)
+  fails if the document and the router drift, so every route stays documented.
+
+Two bearer identities: **user tokens** (from `/v1/auth/*`) and **device tokens**
+(from `/v1/enroll/redeem`). Long-poll endpoints (`/policy/wait`, `/requests/wait`)
+deliver changes in seconds without streaming.
+
 ## Test
 
 ```sh

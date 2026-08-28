@@ -49,6 +49,12 @@ export class Router {
   post(p: string, h: Handler) { return this.add("POST", p, h); }
   del(p: string, h: Handler) { return this.add("DELETE", p, h); }
 
+  /** Registered routes as `{ method, path }` (path with `:param` segments).
+   *  Used by the OpenAPI contract test to detect spec/route drift. */
+  list(): Array<{ method: string; path: string }> {
+    return this.routes.map((r) => ({ method: r.method, path: "/" + r.parts.join("/") }));
+  }
+
   async handle(req: HttpRequest): Promise<HttpResponse> {
     const reqParts = split(req.path);
     for (const r of this.routes) {

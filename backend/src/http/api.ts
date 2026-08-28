@@ -6,6 +6,7 @@
 import type { App } from "../app.js";
 import { Router, ok, err, type HttpRequest, type HttpResponse } from "./router.js";
 import { issueToken, verifyToken, type Principal } from "../auth/tokens.js";
+import { openapiDocument } from "./openapi.js";
 import type { ApprovalDuration, ApprovalScope, Platform, RuleAction, PolicyTargetType, Role } from "../domain/model.js";
 
 async function principal(app: App, req: HttpRequest): Promise<Principal | null> {
@@ -29,6 +30,8 @@ export function buildRouter(app: App): Router {
 
   r.get("/v1/health", async () => ok({ status: "ok", version: "0.0.0-alpha" }));
   r.get("/v1/signing-key", async () => ok({ publicKeyB64: app.signingPublicKeyB64, alg: "Ed25519" }));
+  // Machine-readable API contract (the source of truth clients integrate against).
+  r.get("/openapi.json", async () => ok(openapiDocument));
 
   // --- auth (skeleton) ---
   r.post("/v1/auth/register", async (req) => {
