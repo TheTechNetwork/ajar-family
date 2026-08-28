@@ -14,7 +14,7 @@ import type {
   PolicyRule, TemporaryRule, DefaultPolicy, PolicyTargetType, RuleScope,
 } from "./model.js";
 import type { DevicePolicySnapshot } from "@ajar/shared/policy";
-import { DEFAULT_CATEGORY_DOMAINS } from "@ajar/shared/categories";
+import type { CategoryProvider } from "../categories/provider.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 
 const now = () => new Date().toISOString();
@@ -253,7 +253,11 @@ export class EnrollmentService {
 // ---------------------------------------------------------------------------
 
 export class PolicyService {
-  constructor(private repo: Repository, private signingPrivateKeyB64: string) {}
+  constructor(
+    private repo: Repository,
+    private signingPrivateKeyB64: string,
+    private categories: CategoryProvider,
+  ) {}
 
   async setDefaults(familyId: string, actingUserId: string, childId: string, d: DefaultPolicy) {
     await this.requireManage(familyId, actingUserId);
@@ -287,9 +291,21 @@ export class PolicyService {
       .filter((t) => Date.parse(t.expiresAt) > nowMs); // drop already-expired
     const version = await this.repo.getPolicyVersion(familyId, childId);
 
+    // Inline ONLY the categories this policy actually enforces (referenced by a
+    // CATEGORY rule, standing or temporary), sourced from the datastore-backed
+    // provider — not a hardcoded map, and bounded to what this device needs.
+    const activeCategories = [...new Set(
+      [...rules, ...temporaryRules]
+        .filter((r) => r.target === "CATEGORY")
+        .map((r) => r.value),
+    )];
+    const categories = activeCategories.length > 0
+      ? await this.categories.categoryMap(activeCategories)
+      : undefined;
+
     const unsigned: DevicePolicySnapshot = {
       version, familyId, childId, deviceId, defaults, rules, temporaryRules,
-      categories: DEFAULT_CATEGORY_DOMAINS,
+      ...(categories ? { categories } : {}),
       issuedAt: now(), signature: "",
     };
     unsigned.signature = await signSnapshot(unsigned, this.signingPrivateKeyB64);

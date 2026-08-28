@@ -72,6 +72,33 @@ export function buildRouter(app: App): Router {
   // Machine-readable API contract (the source of truth clients integrate against).
   r.get("/openapi.json", async () => ok(openapiDocument));
 
+  // --- categorization dataset (lookup + feed import; NOT hardcoded) ---
+  // The domain→category classification lives in the datastore behind a provider.
+  // These let a parent/ops see how a site is classified and swap the whole
+  // dataset for a maintained feed without a code change or redeploy.
+  r.get("/v1/categories", async (req) => {
+    await requireUser(app, req);
+    return ok({ version: await app.categories.version(), categories: await app.categories.listCategories() });
+  });
+  r.get("/v1/categories/lookup", async (req) => {
+    await requireUser(app, req);
+    const host = (req.query.get("host") ?? "").trim();
+    if (!host) return err(400, "host query param required", "BAD_REQUEST");
+    return ok({ host, categories: await app.categories.lookup(host) });
+  });
+  // Replace the entire categorization dataset from a feed (ops/admin action —
+  // there is no admin role yet, so it requires an authenticated user; restrict
+  // this further before production, see docs/SECURITY.md).
+  r.put("/v1/categories/dataset", async (req) => {
+    await requireUser(app, req);
+    const b = await req.json<{ categories?: Record<string, string[]> }>();
+    if (!b?.categories || typeof b.categories !== "object" || Array.isArray(b.categories)) {
+      return err(400, "body must be { categories: { <slug>: string[] } }", "BAD_REQUEST");
+    }
+    const version = await app.categories.replace(b.categories);
+    return ok({ version, categories: await app.categories.listCategories() });
+  });
+
   // --- auth (self-contained passwords, no external IdP) ---
   r.post("/v1/auth/register", async (req) => {
     const capped = limited(authLimiter, req); if (capped) return capped;

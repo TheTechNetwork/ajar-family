@@ -18,6 +18,7 @@ import type {
   TemporaryRule,
   DefaultPolicy,
   Session,
+  CategoryDomain,
 } from "../domain/model.js";
 
 export interface Repository {
@@ -76,6 +77,15 @@ export interface Repository {
   updateAccessRequest(r: AccessRequest): Promise<AccessRequest>;
   listAccessRequests(familyId: string, status?: string): Promise<AccessRequest[]>;
   createApprovalDecision(d: ApprovalDecision): Promise<ApprovalDecision>;
+
+  // category dataset (domain→category classification; feed-importable, never
+  // hardcoded). `categoriesForHost` is the indexed lookup used on the hot path;
+  // `listCategoryDomains` compiles the map inlined into device snapshots.
+  categoriesForHost(host: string): Promise<string[]>;
+  listCategoryDomains(categories?: string[]): Promise<CategoryDomain[]>;
+  categoryStats(): Promise<{ category: string; domainCount: number }[]>;
+  replaceCategoryDomains(entries: CategoryDomain[]): Promise<number>; // → new dataset version
+  getCategoryDatasetVersion(): Promise<number>;
 
   // endpoints & audit
   addNotificationEndpoint(e: NotificationEndpoint): Promise<NotificationEndpoint>;

@@ -10,6 +10,7 @@ import { generateSigningKeyPair } from "./domain/signing.js";
 import {
   AuthService, FamilyService, EnrollmentService, PolicyService, ApprovalService,
 } from "./domain/services.js";
+import { RepositoryCategoryProvider, seedCategoriesIfEmpty, type CategoryProvider } from "./categories/provider.js";
 
 export interface AppConfig {
   /** HMAC secret for bearer tokens. */
@@ -30,6 +31,7 @@ export class App {
   readonly enrollment: EnrollmentService;
   readonly policy: PolicyService;
   readonly approvals: ApprovalService;
+  readonly categories: CategoryProvider;
 
   private constructor(repo: Repository, notifier: Notifier, hub: EventHub, cfg: AppConfig,
                       signingPublicKeyB64: string, signingPrivateKeyB64: string) {
@@ -38,10 +40,11 @@ export class App {
     this.hub = hub;
     this.authSecret = cfg.authSecret;
     this.signingPublicKeyB64 = signingPublicKeyB64;
+    this.categories = new RepositoryCategoryProvider(repo);
     this.auth = new AuthService(repo);
     this.family = new FamilyService(repo);
     this.enrollment = new EnrollmentService(repo);
-    this.policy = new PolicyService(repo, signingPrivateKeyB64);
+    this.policy = new PolicyService(repo, signingPrivateKeyB64, this.categories);
     this.approvals = new ApprovalService(repo, notifier, hub);
   }
 
@@ -58,6 +61,10 @@ export class App {
       const kp = await generateSigningKeyPair();
       pub = kp.publicKeyB64; priv = kp.privateKeyB64;
     }
-    return new App(repo, notifier, hub, opts.config, pub, priv);
+    const app = new App(repo, notifier, hub, opts.config, pub, priv);
+    // Seed the categorization dataset from the bundled starter list on first
+    // boot only (no-op once a feed has been imported). Data, not hardcoding.
+    await seedCategoriesIfEmpty(app.categories);
+    return app;
   }
 }

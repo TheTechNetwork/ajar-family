@@ -96,13 +96,25 @@ whose action applies to every domain in that category — the mechanism behind t
 product's "restrict 90% of the internet, approve exceptions" posture. Because
 `CATEGORY` sits below the URL / DOMAIN / YOUTUBE_* tiers, a parent can carve out
 a single site, page, or video _above_ a blanket category block, and a temporary
-approval overrides it for its window. The category → domain map travels **inside
-the signed `DevicePolicySnapshot`** (`snapshot.categories`), so every platform
-evaluator enforces it offline and adding a site is a data-only change — no code
-ships to any client. The bundled `DEFAULT_CATEGORY_DOMAINS`
-(`shared/categories/category-data.ts`) is a **starter seed**; a production
-deployment swaps in a maintained categorization feed (millions of domains — on
-Apple that is the NEURLFilter Bloom/PIR blocklist path, [§3](#3-apple-url-filtering--capabilities-and-hard-limits)).
+approval overrides it for its window.
+
+**Categorization is a lookup, not a hardcoded list.** The domain→category data
+lives in the datastore behind a **`CategoryProvider`** interface
+(`backend/src/categories/provider.ts`), so the *source* is swappable without
+touching the engine: the repository-backed provider is the default, and a hosted
+categorization feed/API can implement the same interface later. The store is
+**seeded** on first boot from the bundled `DEFAULT_CATEGORY_DOMAINS` starter list
+(`shared/categories/category-data.ts`) and **replaced from a maintained feed** via
+`PUT /v1/categories/dataset` — a data-only, no-redeploy change. Lookups are
+indexed (`GET /v1/categories/lookup?host=` resolves a host with a single
+`WHERE domain IN (host-candidates)` query, not a scan), which is what lets the
+dataset grow past a hand-kept list. When it builds a device's snapshot, the
+backend inlines **only the categories that policy actually enforces**
+(`snapshot.categories`), sourced from the provider — bounded to what the device
+needs, still signed, still enforced offline. Scaling a single large category to
+millions of domains is the delivery frontier: a separately-cached signed dataset
+or a compact per-category filter (on Apple, the NEURLFilter Bloom/PIR blocklist
+path, [§3](#3-apple-url-filtering--capabilities-and-hard-limits)).
 
 ---
 

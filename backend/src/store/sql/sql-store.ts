@@ -5,12 +5,14 @@
 import type { Repository } from "../repository.js";
 import type { SqlDatabase, SqlRow } from "./database.js";
 import { SCHEMA_SQL } from "./schema.js";
+import { hostCandidates, normalizeHost } from "../host-match.js";
 import type {
   Session,
   User, Family, FamilyMembership, Child, Device, EnrollmentToken,
   AccessRequest, ApprovalDecision, AuditEvent, NotificationEndpoint,
   PolicyRule, TemporaryRule, DefaultPolicy, RuleScope, Role, Platform,
   RuleAction, PolicyTargetType, ApprovalScope, ApprovalDuration,
+  CategoryDomain,
 } from "../../domain/model.js";
 
 const s = (v: unknown) => (v == null ? null : String(v));
@@ -260,6 +262,50 @@ export class SqlStore implements Repository {
   }
 
   // endpoints & audit
+  // category dataset (feed-importable classification; see host-match.ts)
+  async categoriesForHost(host: string) {
+    const cands = hostCandidates(host);
+    if (cands.length === 0) return [];
+    const placeholders = cands.map(() => "?").join(",");
+    const rows = await this.db.all<SqlRow>(
+      `SELECT DISTINCT category FROM category_domains WHERE domain IN (${placeholders})`, cands);
+    return rows.map((r) => r.category as string);
+  }
+  async listCategoryDomains(categories?: string[]) {
+    let rows: SqlRow[];
+    if (categories && categories.length > 0) {
+      const ph = categories.map(() => "?").join(",");
+      rows = await this.db.all<SqlRow>(`SELECT category, domain FROM category_domains WHERE category IN (${ph})`, categories);
+    } else {
+      rows = await this.db.all<SqlRow>("SELECT category, domain FROM category_domains");
+    }
+    return rows.map((r): CategoryDomain => ({ category: r.category as string, domain: r.domain as string }));
+  }
+  async categoryStats() {
+    const rows = await this.db.all<SqlRow>(
+      "SELECT category, COUNT(*) AS n FROM category_domains GROUP BY category ORDER BY category ASC");
+    return rows.map((r) => ({ category: r.category as string, domainCount: Number(r.n ?? 0) }));
+  }
+  async replaceCategoryDomains(entries: CategoryDomain[]) {
+    await this.db.run("DELETE FROM category_domains", []);
+    for (const { category, domain } of entries) {
+      const d = normalizeHost(domain);
+      if (!d || !category) continue;
+      await this.db.run("INSERT OR IGNORE INTO category_domains(category, domain) VALUES(?, ?)", [category, d]);
+    }
+    const cur = await this.getCategoryDatasetVersion();
+    const next = cur + 1;
+    await this.db.run(
+      "INSERT INTO category_meta(id, version, updated_at) VALUES(1, ?, ?) " +
+      "ON CONFLICT(id) DO UPDATE SET version=excluded.version, updated_at=excluded.updated_at",
+      [next, new Date().toISOString()]);
+    return next;
+  }
+  async getCategoryDatasetVersion() {
+    const r = await this.db.get<SqlRow>("SELECT version FROM category_meta WHERE id=1", []);
+    return r ? Number(r.version ?? 0) : 0;
+  }
+
   async addNotificationEndpoint(e: NotificationEndpoint) {
     await this.db.run("INSERT INTO notification_endpoints(id,user_id,kind,token,created_at) VALUES(?,?,?,?,?)",
       [e.id, e.userId, e.kind, e.token, e.createdAt]);

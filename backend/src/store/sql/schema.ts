@@ -79,6 +79,15 @@ CREATE TABLE IF NOT EXISTS approval_decisions (
   produced_rule_id TEXT
 );
 
+CREATE TABLE IF NOT EXISTS category_domains (
+  category TEXT NOT NULL, domain TEXT NOT NULL, PRIMARY KEY (domain, category)
+);
+CREATE INDEX IF NOT EXISTS idx_catdom_domain ON category_domains(domain);
+CREATE INDEX IF NOT EXISTS idx_catdom_category ON category_domains(category);
+CREATE TABLE IF NOT EXISTS category_meta (
+  id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL DEFAULT 0, updated_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS notification_endpoints (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, token TEXT NOT NULL, created_at TEXT NOT NULL
 );

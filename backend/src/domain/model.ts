@@ -164,6 +164,16 @@ export interface NotificationEndpoint {
   createdAt: string;
 }
 
+/**
+ * One (category, domain) classification in the categorization dataset. The
+ * dataset is DATA in the store — seeded from a bundled list, replaceable from a
+ * maintained feed via the import endpoint, never hardcoded into enforcement.
+ */
+export interface CategoryDomain {
+  category: string; // slug, e.g. "social", "adult"
+  domain: string;   // registrable root, lowercased (subdomains match by suffix)
+}
+
 /** A signed, versioned policy container per child+device (the sync unit). */
 export interface DevicePolicyVersion {
   familyId: string;

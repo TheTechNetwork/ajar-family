@@ -137,6 +137,19 @@ const schemas = {
     },
     required: ["version", "familyId", "childId", "deviceId", "defaults", "rules", "temporaryRules", "issuedAt", "signature"],
   },
+  CategoryStat: {
+    type: "object",
+    properties: { category: { type: "string" }, domainCount: { type: "integer" } },
+    required: ["category", "domainCount"],
+  },
+  CategoryDatasetImport: {
+    type: "object",
+    description: "Full replacement dataset: category slug → registrable domains.",
+    properties: {
+      categories: { type: "object", additionalProperties: { type: "array", items: { type: "string" } } },
+    },
+    required: ["categories"],
+  },
   AccessRequest: {
     type: "object",
     properties: {
@@ -223,6 +236,7 @@ export const openapiDocument = {
   tags: [
     { name: "system" }, { name: "auth" }, { name: "families" }, { name: "policy" },
     { name: "enrollment" }, { name: "requests" }, { name: "sync" }, { name: "notifications" },
+    { name: "categories" },
   ],
   components: {
     securitySchemes: {
@@ -245,6 +259,21 @@ export const openapiDocument = {
     "/openapi.json": {
       get: { tags: ["system"], summary: "This OpenAPI document", security: [],
         responses: { "200": { description: "OpenAPI 3.1 document", content: json({ type: "object", additionalProperties: true }) } } },
+    },
+    "/v1/categories": {
+      get: { tags: ["categories"], summary: "List categories with domain counts + dataset version", security: userAuth,
+        responses: { "200": { description: "Category stats", content: json({ type: "object", properties: { version: { type: "integer" }, categories: { type: "array", items: { $ref: "#/components/schemas/CategoryStat" } } } }) }, "401": errorResponses["401"] } },
+    },
+    "/v1/categories/lookup": {
+      get: { tags: ["categories"], summary: "Look up which categories a host belongs to", security: userAuth,
+        parameters: [{ name: "host", in: "query", required: true, schema: { type: "string" }, description: "Hostname to classify, e.g. m.tiktok.com" }],
+        responses: { "200": { description: "Categories for the host", content: json({ type: "object", properties: { host: { type: "string" }, categories: { type: "array", items: { type: "string" } } } }) }, "400": errorResponses["400"], "401": errorResponses["401"] } },
+    },
+    "/v1/categories/dataset": {
+      put: { tags: ["categories"], summary: "Replace the categorization dataset from a feed (ops)", security: userAuth,
+        description: "Replaces the entire domain→category dataset. The bundled list is only a seed; import a maintained feed here without a code change.",
+        requestBody: { required: true, content: json({ $ref: "#/components/schemas/CategoryDatasetImport" }) },
+        responses: { "200": { description: "New dataset version + stats", content: json({ type: "object", properties: { version: { type: "integer" }, categories: { type: "array", items: { $ref: "#/components/schemas/CategoryStat" } } } }) }, "400": errorResponses["400"], "401": errorResponses["401"] } },
     },
     "/v1/auth/register": {
       post: { tags: ["auth"], summary: "Register a parent with a password", security: [],

@@ -4,6 +4,7 @@
  * Cloudflare D1) replaces this behind the same interface.
  */
 import type { Repository } from "./repository.js";
+import { hostCandidates, normalizeHost } from "./host-match.js";
 import type {
   Session,
   User,
@@ -19,6 +20,7 @@ import type {
   PolicyRule,
   TemporaryRule,
   DefaultPolicy,
+  CategoryDomain,
 } from "../domain/model.js";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -40,6 +42,9 @@ export class MemoryStore implements Repository {
   private decisions = new Map<string, ApprovalDecision>();
   private endpoints = new Map<string, NotificationEndpoint>();
   private audit: AuditEvent[] = [];
+  // domain → set of categories, plus a monotonic dataset version.
+  private categoryDomains = new Map<string, Set<string>>();
+  private categoryVersion = 0;
 
   async createUser(u: User) { this.users.set(u.id, clone(u)); return clone(u); }
   async updateUser(u: User) { this.users.set(u.id, clone(u)); return clone(u); }
@@ -127,6 +132,39 @@ export class MemoryStore implements Repository {
       .map(clone);
   }
   async createApprovalDecision(d: ApprovalDecision) { this.decisions.set(d.id, clone(d)); return clone(d); }
+
+  // category dataset
+  async categoriesForHost(host: string) {
+    const cats = new Set<string>();
+    for (const cand of hostCandidates(host))
+      for (const c of this.categoryDomains.get(cand) ?? []) cats.add(c);
+    return [...cats];
+  }
+  async listCategoryDomains(categories?: string[]) {
+    const want = categories ? new Set(categories) : null;
+    const out: CategoryDomain[] = [];
+    for (const [domain, cats] of this.categoryDomains)
+      for (const category of cats)
+        if (!want || want.has(category)) out.push({ category, domain });
+    return out;
+  }
+  async categoryStats() {
+    const counts = new Map<string, number>();
+    for (const cats of this.categoryDomains.values())
+      for (const c of cats) counts.set(c, (counts.get(c) ?? 0) + 1);
+    return [...counts].map(([category, domainCount]) => ({ category, domainCount }))
+      .sort((a, b) => a.category.localeCompare(b.category));
+  }
+  async replaceCategoryDomains(entries: CategoryDomain[]) {
+    this.categoryDomains = new Map();
+    for (const { category, domain } of entries) {
+      const d = normalizeHost(domain);
+      if (!d || !category) continue;
+      (this.categoryDomains.get(d) ?? this.categoryDomains.set(d, new Set()).get(d)!).add(category);
+    }
+    return ++this.categoryVersion;
+  }
+  async getCategoryDatasetVersion() { return this.categoryVersion; }
 
   async addNotificationEndpoint(e: NotificationEndpoint) { this.endpoints.set(e.id, clone(e)); return clone(e); }
   async listNotificationEndpoints(userId: string) {

@@ -46,6 +46,11 @@ living document for an alpha, not a completed audit.
   needs an email-verification flow — deferred.
 - **Input validation.** Request bodies are typed but not schema-validated
   (no Zod-style guards yet); malformed input is not uniformly rejected.
+- **Category dataset import is not yet role-restricted.** `PUT /v1/categories/dataset`
+  (replace the whole categorization dataset from a feed) requires an authenticated
+  user but there is no admin role yet, so any signed-in parent can call it. It is
+  global reference data — gate it behind an admin/ops role (or move it out of the
+  parent API to an ops tool) before production.
 - **Rate limiter is per-instance.** Fine for a single node/isolate; needs a
   shared store to be effective across a fleet.
 - **Before public launch:** a formal third-party penetration test, secret

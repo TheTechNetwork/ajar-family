@@ -62,6 +62,7 @@ export class Router {
   }
   get(p: string, h: Handler) { return this.add("GET", p, h); }
   post(p: string, h: Handler) { return this.add("POST", p, h); }
+  put(p: string, h: Handler) { return this.add("PUT", p, h); }
   del(p: string, h: Handler) { return this.add("DELETE", p, h); }
 
   /** Registered routes as `{ method, path }` (path with `:param` segments).
