@@ -127,6 +127,14 @@ export interface EvalContext {
    *  from the snapshot (the scalable, millions-of-domains membership source).
    *  When present, its categories are merged with the snapshot's inline map. */
   categoryFilters?: CategoryFilters;
+  /** Canonical hostnames the request's host resolves to via its CNAME chain,
+   *  supplied by the platform's DNS/network layer. DOMAIN and CATEGORY rules are
+   *  evaluated against the request host AND every resolved name, so a first-party
+   *  subdomain CNAME-cloaked onto a blocked target ("cdn.site.com → fbcdn.net")
+   *  cannot bypass the block. Adapters that cannot resolve DNS (e.g. a Chrome
+   *  webRequest hook) leave this empty and rely on the companion network-layer
+   *  enforcer; see docs/ARCHITECTURE.md §CNAME. */
+  resolvedHosts?: string[];
 }
 
 export interface EvalResult {
@@ -192,11 +200,22 @@ export function evaluate(
   } catch {
     /* leave host empty */
   }
+  // The request host PLUS every canonical name it resolves to (CNAME chain), so
+  // DOMAIN/CATEGORY rules can't be dodged by CNAME cloaking. De-duped, normalized.
+  const hosts = [...new Set(
+    [host, ...(ctx.resolvedHosts ?? [])]
+      .map((h) => (h || "").replace(/^www\./i, "").toLowerCase())
+      .filter(Boolean),
+  )];
+
   // Host's categories: the snapshot's inline map (small deployments / the
   // categories this policy enforces) UNION the device's cached Bloom filters
-  // (the scalable path for large datasets). Either may be absent.
-  const hostCats = categoriesForHost(snapshot.categories, host);
-  if (ctx.categoryFilters) for (const c of ctx.categoryFilters.categoriesForHost(host)) hostCats.add(c);
+  // (the scalable path for large datasets), evaluated over the whole chain.
+  const hostCats = new Set<string>();
+  for (const h of hosts) {
+    for (const c of categoriesForHost(snapshot.categories, h)) hostCats.add(c);
+    if (ctx.categoryFilters) for (const c of ctx.categoryFilters.categoriesForHost(h)) hostCats.add(c);
+  }
 
   const applicable = snapshot.rules.filter((r) => ruleAppliesToScope(r, ctx));
 
@@ -211,7 +230,7 @@ export function evaluate(
         scopeSpecificity(b.scope) - scopeSpecificity(a.scope),
     );
   for (const t of temps) {
-    const hit = matchTarget(t, ctx, yt, ytKey, host, hostCats);
+    const hit = matchTarget(t, ctx, yt, ytKey, hosts, hostCats);
     if (hit) return { action: t.action, reason: `temporary:${t.grantKind}`, matchedRuleId: t.id, matchedKey: hit };
   }
 
@@ -236,7 +255,7 @@ export function evaluate(
           scopeSpecificity(b.scope) - scopeSpecificity(a.scope),
       );
     for (const r of inTier) {
-      const hit = matchTarget(r, ctx, yt, ytKey, host, hostCats);
+      const hit = matchTarget(r, ctx, yt, ytKey, hosts, hostCats);
       if (hit) return { action: r.action, reason: `rule:${tier}`, matchedRuleId: r.id, matchedKey: hit };
     }
   }
@@ -255,7 +274,7 @@ function matchTarget(
   ctx: EvalContext,
   yt: ReturnType<typeof normalizeYouTube>,
   ytKey: string | null,
-  host: string,
+  hosts: string[],
   hostCats: Set<string>,
 ): string | null {
   switch (r.target) {
@@ -270,12 +289,14 @@ function matchTarget(
     case "YOUTUBE_CHANNEL":
       return (yt.channelId === r.value || yt.channelHandle === r.value) ? `YOUTUBE_CHANNEL:${r.value}` : null;
     case "DOMAIN":
-      return host && (host === r.value || host.endsWith(`.${r.value}`)) ? `DOMAIN:${r.value}` : null;
+      // Match the request host OR any CNAME-resolved canonical name, so a
+      // cloaked first-party subdomain can't dodge a domain block.
+      return hosts.some((h) => h === r.value || h.endsWith(`.${r.value}`)) ? `DOMAIN:${r.value}` : null;
     case "APPLICATION":
       return ctx.appId && ctx.appId === r.value ? `APPLICATION:${r.value}` : null;
     case "CATEGORY":
-      // The request host's categories are precomputed from the snapshot's
-      // category→domain map; a CATEGORY rule matches when the host is in the set.
+      // Categories are precomputed over the host + its CNAME chain; a CATEGORY
+      // rule matches when any of those names is in the set.
       return hostCats.has(r.value) ? `CATEGORY:${r.value}` : null;
   }
 }

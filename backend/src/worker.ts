@@ -10,6 +10,7 @@
  * `wrangler secret put`.
  */
 import { App } from "./app.js";
+import { DohCnameResolver } from "./categories/resolver.js";
 import { buildRouter } from "./http/api.js";
 import { corsHeaders, type HttpRequest, type Router } from "./http/router.js";
 import { createD1, type D1Like } from "./store/sql/database.js";
@@ -40,6 +41,8 @@ async function getRouter(env: Env): Promise<Router> {
           signingPublicKeyB64: env.SIGNING_PUBLIC_KEY_B64,
           signingPrivateKeyB64: env.SIGNING_PRIVATE_KEY_B64,
         },
+        // Workers has no raw DNS — follow CNAME chains over DNS-over-HTTPS.
+        cnameResolver: new DohCnameResolver(),
       });
     })();
   }

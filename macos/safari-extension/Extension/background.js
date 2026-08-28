@@ -201,7 +201,7 @@ function categoriesFromFilters(host) {
 }
 
 /** Returns the matched policy key if `r` targets the request, else null. */
-function matchTarget(r, ctx, yt, host, hostCats) {
+function matchTarget(r, ctx, yt, hosts, hostCats) {
   switch (r.target) {
     case "URL":
       return normalizeExactUrl(ctx.url) === normalizeExactUrl(r.value) ? `URL:${r.value}` : null;
@@ -214,10 +214,11 @@ function matchTarget(r, ctx, yt, host, hostCats) {
     case "YOUTUBE_CHANNEL":
       return yt.channelId === r.value || yt.channelHandle === r.value ? `YOUTUBE_CHANNEL:${r.value}` : null;
     case "DOMAIN":
-      return host && (host === r.value || host.endsWith(`.${r.value}`)) ? `DOMAIN:${r.value}` : null;
+      // Match the request host OR any CNAME-resolved canonical name (anti-cloaking).
+      return hosts.some((h) => h === r.value || h.endsWith(`.${r.value}`)) ? `DOMAIN:${r.value}` : null;
     case "CATEGORY":
-      // The request host's categories are precomputed from the snapshot's
-      // category→domain map; a CATEGORY rule matches when the host is in the set.
+      // Categories are precomputed over the host + its CNAME chain; a CATEGORY
+      // rule matches when any of those names is in the set.
       return hostCats.has(r.value) ? `CATEGORY:${r.value}` : null;
     // APPLICATION is not decided on-path in the extension.
     default:
@@ -239,9 +240,19 @@ function evaluate(snap, ctx) {
   } catch {
     /* leave host empty */
   }
+  // Request host + its CNAME chain (from ctx.resolvedHosts) — DOMAIN/CATEGORY
+  // rules evaluate over all of them so CNAME cloaking can't bypass a block.
+  const hosts = [...new Set(
+    [host, ...(ctx.resolvedHosts || [])]
+      .map((h) => (h || "").replace(/^www\./i, "").toLowerCase())
+      .filter(Boolean),
+  )];
   // Inline map (small deployments) UNION the cached Bloom filters (scalable path).
-  const hostCats = categoriesForHost(snap.categories, host);
-  for (const c of categoriesFromFilters(host)) hostCats.add(c);
+  const hostCats = new Set();
+  for (const h of hosts) {
+    for (const c of categoriesForHost(snap.categories, h)) hostCats.add(c);
+    for (const c of categoriesFromFilters(h)) hostCats.add(c);
+  }
 
   const applicable = (snap.rules || []).filter((r) => ruleAppliesToScope(r, ctx));
 
@@ -255,7 +266,7 @@ function evaluate(snap, ctx) {
         scopeSpecificity(b.scope) - scopeSpecificity(a.scope),
     );
   for (const t of temps) {
-    const hit = matchTarget(t, ctx, yt, host, hostCats);
+    const hit = matchTarget(t, ctx, yt, hosts, hostCats);
     if (hit) return { action: t.action, reason: `temporary:${t.grantKind}`, matchedKey: hit };
   }
 
@@ -277,7 +288,7 @@ function evaluate(snap, ctx) {
           scopeSpecificity(b.scope) - scopeSpecificity(a.scope),
       );
     for (const r of inTier) {
-      const hit = matchTarget(r, ctx, yt, host, hostCats);
+      const hit = matchTarget(r, ctx, yt, hosts, hostCats);
       if (hit) return { action: r.action, reason: `rule:${tier}`, matchedKey: hit };
     }
   }

@@ -11,6 +11,7 @@ import {
   AuthService, FamilyService, EnrollmentService, PolicyService, ApprovalService,
 } from "./domain/services.js";
 import { RepositoryCategoryProvider, seedCategoriesIfEmpty, type CategoryProvider } from "./categories/provider.js";
+import { NullResolver, type CnameResolver } from "./categories/resolver.js";
 
 export interface AppConfig {
   /** HMAC secret for bearer tokens. */
@@ -32,15 +33,17 @@ export class App {
   readonly policy: PolicyService;
   readonly approvals: ApprovalService;
   readonly categories: CategoryProvider;
+  readonly cnameResolver: CnameResolver;
 
   private constructor(repo: Repository, notifier: Notifier, hub: EventHub, cfg: AppConfig,
-                      signingPublicKeyB64: string, signingPrivateKeyB64: string) {
+                      signingPublicKeyB64: string, signingPrivateKeyB64: string, resolver: CnameResolver) {
     this.repo = repo;
     this.notifier = notifier;
     this.hub = hub;
     this.authSecret = cfg.authSecret;
     this.signingPublicKeyB64 = signingPublicKeyB64;
     this.categories = new RepositoryCategoryProvider(repo);
+    this.cnameResolver = resolver;
     this.auth = new AuthService(repo);
     this.family = new FamilyService(repo);
     this.enrollment = new EnrollmentService(repo);
@@ -49,7 +52,7 @@ export class App {
   }
 
   static async create(opts: {
-    repo?: Repository; notifier?: Notifier; config: AppConfig;
+    repo?: Repository; notifier?: Notifier; config: AppConfig; cnameResolver?: CnameResolver;
   }): Promise<App> {
     const repo = opts.repo ?? new MemoryStore();
     const hub = new EventHub();
@@ -61,7 +64,7 @@ export class App {
       const kp = await generateSigningKeyPair();
       pub = kp.publicKeyB64; priv = kp.privateKeyB64;
     }
-    const app = new App(repo, notifier, hub, opts.config, pub, priv);
+    const app = new App(repo, notifier, hub, opts.config, pub, priv, opts.cnameResolver ?? new NullResolver());
     // Seed the categorization dataset from the bundled starter list on first
     // boot only (no-op once a feed has been imported). Data, not hardcoding.
     await seedCategoriesIfEmpty(app.categories);

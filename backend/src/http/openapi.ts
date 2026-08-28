@@ -285,9 +285,12 @@ export const openapiDocument = {
         responses: { "200": { description: "Category stats", content: json({ type: "object", properties: { version: { type: "integer" }, categories: { type: "array", items: { $ref: "#/components/schemas/CategoryStat" } } } }) }, "401": errorResponses["401"] } },
     },
     "/v1/categories/lookup": {
-      get: { tags: ["categories"], summary: "Look up which categories a host belongs to", security: userAuth,
-        parameters: [{ name: "host", in: "query", required: true, schema: { type: "string" }, description: "Hostname to classify, e.g. m.tiktok.com" }],
-        responses: { "200": { description: "Categories for the host", content: json({ type: "object", properties: { host: { type: "string" }, categories: { type: "array", items: { type: "string" } } } }) }, "400": errorResponses["400"], "401": errorResponses["401"] } },
+      get: { tags: ["categories"], summary: "Look up which categories a host belongs to (follows CNAMEs)", security: userAuth,
+        parameters: [
+          { name: "host", in: "query", required: true, schema: { type: "string" }, description: "Hostname to classify, e.g. m.tiktok.com" },
+          { name: "resolve", in: "query", required: false, schema: { type: "string", enum: ["0", "1"] }, description: "Follow the CNAME chain (default on). `0` classifies only the literal host." },
+        ],
+        responses: { "200": { description: "Categories for the host and its CNAME chain", content: json({ type: "object", properties: { host: { type: "string" }, resolvedHosts: { type: "array", items: { type: "string" }, description: "Canonical names the host CNAMEs to" }, categories: { type: "array", items: { type: "string" } } } }) }, "400": errorResponses["400"], "401": errorResponses["401"] } },
     },
     "/v1/categories/dataset": {
       put: { tags: ["categories"], summary: "Replace the categorization dataset from a feed (ops)", security: userAuth,

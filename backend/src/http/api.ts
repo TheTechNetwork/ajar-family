@@ -84,7 +84,13 @@ export function buildRouter(app: App): Router {
     await requireUser(app, req);
     const host = (req.query.get("host") ?? "").trim();
     if (!host) return err(400, "host query param required", "BAD_REQUEST");
-    return ok({ host, categories: await app.categories.lookup(host) });
+    // Follow the CNAME chain (best-effort) so classification reflects the real
+    // destination, not a cloaking first-party alias. `resolve=0` opts out.
+    const resolve = req.query.get("resolve") !== "0";
+    const chain = resolve ? await app.cnameResolver.resolveChain(host) : [];
+    const cats = new Set<string>();
+    for (const h of [host, ...chain]) for (const c of await app.categories.lookup(h)) cats.add(c);
+    return ok({ host, resolvedHosts: chain, categories: [...cats] });
   });
   // Replace the entire categorization dataset from a feed (ops/admin action —
   // there is no admin role yet, so it requires an authenticated user; restrict

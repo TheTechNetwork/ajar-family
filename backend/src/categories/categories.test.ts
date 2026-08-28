@@ -79,3 +79,21 @@ test("filter asset since-check returns upToDate when the device is current", asy
   assert.deepEqual(await app.policy.categoryFilterAsset(v), { upToDate: true });
   assert.ok("set" in (await app.policy.categoryFilterAsset(v - 1)));
 });
+
+test("CNAME resolver classifies the resolved target, not just the literal host", async () => {
+  // A stub resolver stands in for DNS: a vanity subdomain CNAMEs onto tiktok.com.
+  const resolver = {
+    async resolveChain(host: string) {
+      return host === "videos.kidsite.example" ? ["edge.kidsite.example.tiktok.com", "tiktok.com"] : [];
+    },
+  };
+  const app = await App.create({ ...cfg, cnameResolver: resolver });
+  // Literal host is uncategorized...
+  assert.deepEqual(await app.categories.lookup("videos.kidsite.example"), []);
+  // ...but following the CNAME chain surfaces the real category.
+  const cats = new Set<string>();
+  const chain = await app.cnameResolver.resolveChain("videos.kidsite.example");
+  for (const h of ["videos.kidsite.example", ...chain]) for (const c of await app.categories.lookup(h)) cats.add(c);
+  assert.deepEqual([...cats], ["social"]);
+  assert.ok(chain.includes("tiktok.com"));
+});

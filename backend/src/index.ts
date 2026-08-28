@@ -8,6 +8,7 @@
  * build (esbuild → Node SEA).
  */
 import { App } from "./app.js";
+import { NodeCnameResolver } from "./categories/resolver.js";
 import { createNodeServer } from "./http/node-server.js";
 import { createNodeSqlite } from "./store/sql/database.js";
 import { SqlStore } from "./store/sql/sql-store.js";
@@ -36,6 +37,8 @@ async function main(): Promise<void> {
       signingPublicKeyB64: process.env.SIGNING_PUBLIC_KEY_B64,
       signingPrivateKeyB64: process.env.SIGNING_PRIVATE_KEY_B64,
     },
+    // Follow CNAME chains for category lookups via the host's system resolver.
+    cnameResolver: new NodeCnameResolver(),
   });
 
   createNodeServer(app).listen(port, () => {

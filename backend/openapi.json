@@ -947,7 +947,7 @@
         "tags": [
           "categories"
         ],
-        "summary": "Look up which categories a host belongs to",
+        "summary": "Look up which categories a host belongs to (follows CNAMEs)",
         "security": [
           {
             "bearerAuth": []
@@ -962,11 +962,24 @@
               "type": "string"
             },
             "description": "Hostname to classify, e.g. m.tiktok.com"
+          },
+          {
+            "name": "resolve",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ]
+            },
+            "description": "Follow the CNAME chain (default on). `0` classifies only the literal host."
           }
         ],
         "responses": {
           "200": {
-            "description": "Categories for the host",
+            "description": "Categories for the host and its CNAME chain",
             "content": {
               "application/json": {
                 "schema": {
@@ -974,6 +987,13 @@
                   "properties": {
                     "host": {
                       "type": "string"
+                    },
+                    "resolvedHosts": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Canonical names the host CNAMEs to"
                     },
                     "categories": {
                       "type": "array",

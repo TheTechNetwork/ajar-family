@@ -147,6 +147,33 @@ wired end-to-end for both extensions; delivering the same signed asset through
 the Windows Go service / macOS `SafariWebExtensionHandler` native hosts is the
 remaining integration step (the extensions already accept and cache it).
 
+**§CNAME — classify the whole chain, not the literal host.** A hostname is often
+a CNAME onto a third party ("CNAME cloaking": `metrics.kidsite.com → tracker.net`,
+or a vanity `videos.site.com → …tiktok.com`), so classifying only the typed host
+misses the real destination and hands children a trivial bypass of both DOMAIN
+and CATEGORY blocks. The engine therefore evaluates DOMAIN and CATEGORY rules
+over the request host **plus every canonical name in its CNAME chain**
+(`EvalContext.resolvedHosts`); a match on any of them blocks. **Where the chain
+is resolved depends on the enforcement point:**
+
+- **Backend / parent console** — `GET /v1/categories/lookup?host=` follows the
+  chain server-side (node:dns on a Node host, DNS-over-HTTPS on Workers;
+  best-effort, time-bounded, `resolve=0` opts out) and returns `resolvedHosts`,
+  so the console shows a site's *real* classification.
+- **iOS / macOS** — the network extension / an `NEDNSProxyProvider` observes the
+  resolved chain on the DNS/socket path and passes it into evaluation. This is
+  the right layer: it sees what the OS actually resolved.
+- **Windows** — the Go service (network layer: local proxy / WFP) resolves and
+  enforces CNAME-cloaked destinations for socket flows; it feeds `resolvedHosts`
+  to the extension for URL-level decisions.
+- **Chrome extension caveat (honest limit).** A Chrome MV3 `webRequest` hook is
+  synchronous and Chrome exposes **no DNS API**, so the extension itself cannot
+  resolve CNAMEs on-path. Coverage there comes from the **companion network-layer
+  enforcer** (the Windows service; on Firefox, `browser.dns.resolve` is available
+  and can populate `resolvedHosts` directly). The engine and both extension
+  mirrors already accept and fold `resolvedHosts`; wiring each platform's
+  resolver into it is the remaining per-platform integration.
+
 ---
 
 ## 3. Apple URL filtering — capabilities and hard limits
