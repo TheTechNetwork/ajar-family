@@ -1,0 +1,128 @@
+name: Release
+
+# Publishes prebuilt, self-contained binaries so a family installs Wren with NO
+# Node or Go toolchain on the box (see docs/INSTALL.md):
+#   - familyfilter.exe        Windows service (Go, static, amd64 + arm64)
+#   - wren-backend[.exe]      backend API + parent console as one SEA binary
+#                             (win / mac / linux), zipped with the web/ console
+#
+# Trigger by pushing a tag like v0.1.0-alpha, or run manually from the Actions tab.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the GitHub Release and upload assets
+
+jobs:
+  # ---- Windows service (Go), cross-compiled from Linux to both arches --------
+  windows-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: windows/agent/go.sum
+      - name: Cross-compile familyfilter.exe (amd64 + arm64)
+        working-directory: windows/agent
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            echo "building windows/$arch"
+            GOOS=windows GOARCH=$arch CGO_ENABLED=0 \
+              go build -trimpath -ldflags "-s -w" \
+              -o "../../out/familyfilter-windows-$arch.exe" .
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-agent
+          path: out/*.exe
+
+  # ---- Backend single-executable (SEA), one per OS runner --------------------
+  backend-sea:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: wren-backend-linux-x64
+            bin: wren-backend
+          - os: macos-latest
+            asset: wren-backend-macos-arm64
+            bin: wren-backend
+          - os: windows-latest
+            asset: wren-backend-windows-x64
+            bin: wren-backend.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Install (workspaces)
+        run: npm ci
+      - name: Build (shared -> backend)
+        run: npm run build
+      - name: Build SEA binary
+        working-directory: backend
+        run: node scripts/build-sea.mjs "dist/${{ matrix.bin }}"
+      # Package the binary next to the parent console + install docs into a zip.
+      # The binary auto-discovers ./web/parent (resolveUiDir in node-server.ts).
+      - name: Stage release folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="stage/${{ matrix.asset }}"
+          mkdir -p "$stage/web"
+          cp "backend/dist/${{ matrix.bin }}" "$stage/"
+          cp -r web/parent "$stage/web/parent"
+          cp docs/INSTALL.md "$stage/README.txt" 2>/dev/null || true
+      - name: Zip (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p out
+          ( cd "stage/${{ matrix.asset }}" && zip -r "../../out/${{ matrix.asset }}.zip" . )
+      - name: Zip (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Compress-Archive -Path "stage/${{ matrix.asset }}/*" -DestinationPath "out/${{ matrix.asset }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: out/*.zip
+
+  # ---- Collect every artifact and attach to the GitHub Release ---------------
+  publish:
+    needs: [windows-agent, backend-sea]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name '*.zip' -o -name '*.exe' \) -exec cp {} release/ \;
+          ls -la release
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          body: |
+            Wren — prebuilt binaries. No Node or Go toolchain needed on the box.
+
+            - `familyfilter-windows-{amd64,arm64}.exe` — Windows service. Install
+              elevated: `familyfilter-windows-amd64.exe install`.
+            - `wren-backend-{linux,macos,windows}-*.zip` — self-hostable backend
+              (API + parent console in one binary). Unzip and run the binary; it
+              serves the console at `/`.
+
+            See docs/INSTALL.md for step-by-step setup.
