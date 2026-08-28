@@ -14,6 +14,7 @@ import type {
   PolicyRule, TemporaryRule, DefaultPolicy, PolicyTargetType, RuleScope,
 } from "./model.js";
 import type { DevicePolicySnapshot } from "@ajar/shared/policy";
+import { DEFAULT_CATEGORY_DOMAINS } from "@ajar/shared/categories";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 
 const now = () => new Date().toISOString();
@@ -288,6 +289,7 @@ export class PolicyService {
 
     const unsigned: DevicePolicySnapshot = {
       version, familyId, childId, deviceId, defaults, rules, temporaryRules,
+      categories: DEFAULT_CATEGORY_DOMAINS,
       issuedAt: now(), signature: "",
     };
     unsigned.signature = await signSnapshot(unsigned, this.signingPrivateKeyB64);

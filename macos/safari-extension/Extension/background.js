@@ -127,8 +127,21 @@ function isActiveTemp(t, nowMs) {
   return nowMs >= start && nowMs < end;
 }
 
+/**
+ * Categories whose domain set contains `host` (host lowercased, no leading www.).
+ * Mirrors shared/categories/category-data.ts categoriesForHost.
+ */
+function categoriesForHost(categories, host) {
+  const out = new Set();
+  if (!categories || !host) return out;
+  for (const [cat, domains] of Object.entries(categories)) {
+    if (domains.some((d) => host === d || host.endsWith(`.${d}`))) out.add(cat);
+  }
+  return out;
+}
+
 /** Returns the matched policy key if `r` targets the request, else null. */
-function matchTarget(r, ctx, yt, host) {
+function matchTarget(r, ctx, yt, host, hostCats) {
   switch (r.target) {
     case "URL":
       return normalizeExactUrl(ctx.url) === normalizeExactUrl(r.value) ? `URL:${r.value}` : null;
@@ -142,7 +155,11 @@ function matchTarget(r, ctx, yt, host) {
       return yt.channelId === r.value || yt.channelHandle === r.value ? `YOUTUBE_CHANNEL:${r.value}` : null;
     case "DOMAIN":
       return host && (host === r.value || host.endsWith(`.${r.value}`)) ? `DOMAIN:${r.value}` : null;
-    // APPLICATION / CATEGORY are not decided on-path in the extension.
+    case "CATEGORY":
+      // The request host's categories are precomputed from the snapshot's
+      // category→domain map; a CATEGORY rule matches when the host is in the set.
+      return hostCats.has(r.value) ? `CATEGORY:${r.value}` : null;
+    // APPLICATION is not decided on-path in the extension.
     default:
       return null;
   }
@@ -162,6 +179,7 @@ function evaluate(snap, ctx) {
   } catch {
     /* leave host empty */
   }
+  const hostCats = categoriesForHost(snap.categories, host);
 
   const applicable = (snap.rules || []).filter((r) => ruleAppliesToScope(r, ctx));
 
@@ -175,7 +193,7 @@ function evaluate(snap, ctx) {
         scopeSpecificity(b.scope) - scopeSpecificity(a.scope),
     );
   for (const t of temps) {
-    const hit = matchTarget(t, ctx, yt, host);
+    const hit = matchTarget(t, ctx, yt, host, hostCats);
     if (hit) return { action: t.action, reason: `temporary:${t.grantKind}`, matchedKey: hit };
   }
 
@@ -186,6 +204,7 @@ function evaluate(snap, ctx) {
     "YOUTUBE_CHANNEL",
     "URL_PATTERN",
     "DOMAIN",
+    "CATEGORY",
   ];
   for (const tier of tierOrder) {
     const inTier = applicable
@@ -196,7 +215,7 @@ function evaluate(snap, ctx) {
           scopeSpecificity(b.scope) - scopeSpecificity(a.scope),
       );
     for (const r of inTier) {
-      const hit = matchTarget(r, ctx, yt, host);
+      const hit = matchTarget(r, ctx, yt, host, hostCats);
       if (hit) return { action: r.action, reason: `rule:${tier}`, matchedKey: hit };
     }
   }

@@ -17,6 +17,7 @@
  */
 
 import { normalizeYouTube, youTubePolicyKey } from "../youtube/youtube-normalize.js";
+import { categoriesForHost } from "../categories/category-data.js";
 
 // ---------------------------------------------------------------------------
 // Targets, actions, scopes
@@ -100,6 +101,9 @@ export interface DevicePolicySnapshot {
   defaults: DefaultPolicy;
   rules: PolicyRule[];
   temporaryRules: TemporaryRule[];
+  /** Category → domain map for CATEGORY rules (e.g. { social: [...], adult: [...] }).
+   *  Travels signed so every client enforces categories offline. Optional. */
+  categories?: Record<string, string[]>;
   issuedAt: string; // ISO-8601 UTC
   /** Ed25519 signature (base64) over the canonical JSON of everything above. */
   signature: string;
@@ -183,6 +187,7 @@ export function evaluate(
   } catch {
     /* leave host empty */
   }
+  const hostCats = categoriesForHost(snapshot.categories, host);
 
   const applicable = snapshot.rules.filter((r) => ruleAppliesToScope(r, ctx));
 
@@ -197,7 +202,7 @@ export function evaluate(
         scopeSpecificity(b.scope) - scopeSpecificity(a.scope),
     );
   for (const t of temps) {
-    const hit = matchTarget(t, ctx, yt, ytKey, host);
+    const hit = matchTarget(t, ctx, yt, ytKey, host, hostCats);
     if (hit) return { action: t.action, reason: `temporary:${t.grantKind}`, matchedRuleId: t.id, matchedKey: hit };
   }
 
@@ -222,7 +227,7 @@ export function evaluate(
           scopeSpecificity(b.scope) - scopeSpecificity(a.scope),
       );
     for (const r of inTier) {
-      const hit = matchTarget(r, ctx, yt, ytKey, host);
+      const hit = matchTarget(r, ctx, yt, ytKey, host, hostCats);
       if (hit) return { action: r.action, reason: `rule:${tier}`, matchedRuleId: r.id, matchedKey: hit };
     }
   }
@@ -242,6 +247,7 @@ function matchTarget(
   yt: ReturnType<typeof normalizeYouTube>,
   ytKey: string | null,
   host: string,
+  hostCats: Set<string>,
 ): string | null {
   switch (r.target) {
     case "URL":
@@ -259,10 +265,9 @@ function matchTarget(
     case "APPLICATION":
       return ctx.appId && ctx.appId === r.value ? `APPLICATION:${r.value}` : null;
     case "CATEGORY":
-      // Category membership is resolved by the platform/category service, not
-      // by URL shape; the reference evaluator treats it as non-matching here
-      // and documents that adapters inject category hits out-of-band.
-      return null;
+      // The request host's categories are precomputed from the snapshot's
+      // category→domain map; a CATEGORY rule matches when the host is in the set.
+      return hostCats.has(r.value) ? `CATEGORY:${r.value}` : null;
   }
 }
 

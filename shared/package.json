@@ -11,6 +11,10 @@
     "./youtube": {
       "types": "./dist/youtube/youtube-normalize.d.ts",
       "default": "./dist/youtube/youtube-normalize.js"
+    },
+    "./categories": {
+      "types": "./dist/categories/category-data.d.ts",
+      "default": "./dist/categories/category-data.js"
     }
   },
   "scripts": {

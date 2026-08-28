@@ -186,7 +186,21 @@ function matchesPattern(url, pattern) {
   return normalizeExactUrl(url) === normalizeExactUrl(pattern);
 }
 
-function matchTarget(r, ctx, yt, host) {
+/**
+ * Categories whose domain set contains `host` (host lowercased, no leading www.).
+ * Mirrors shared/categories/category-data.ts categoriesForHost.
+ * @returns {Set<string>}
+ */
+function categoriesForHost(categories, host) {
+  const out = new Set();
+  if (!categories || !host) return out;
+  for (const [cat, domains] of Object.entries(categories)) {
+    if (domains.some((d) => host === d || host.endsWith(`.${d}`))) out.add(cat);
+  }
+  return out;
+}
+
+function matchTarget(r, ctx, yt, host, hostCats) {
   switch (r.target) {
     case "URL":
       return normalizeExactUrl(ctx.url) === normalizeExactUrl(r.value) ? `URL:${r.value}` : null;
@@ -203,9 +217,9 @@ function matchTarget(r, ctx, yt, host) {
     case "APPLICATION":
       return ctx.appId && ctx.appId === r.value ? `APPLICATION:${r.value}` : null;
     case "CATEGORY":
-      // Category membership is resolved out-of-band by a category service, not by
-      // URL shape (identical to the shared evaluator). Non-matching here.
-      return null;
+      // The request host's categories are precomputed from the snapshot's
+      // category→domain map; a CATEGORY rule matches when the host is in the set.
+      return hostCats.has(r.value) ? `CATEGORY:${r.value}` : null;
     default:
       return null;
   }
@@ -223,6 +237,7 @@ function evaluate(snapshot, ctx) {
   } catch {
     /* leave host empty */
   }
+  const hostCats = categoriesForHost(snapshot.categories, host);
 
   const applicable = snapshot.rules.filter((r) => ruleAppliesToScope(r, ctx));
 
@@ -237,7 +252,7 @@ function evaluate(snapshot, ctx) {
         scopeSpecificity(b.scope) - scopeSpecificity(a.scope),
     );
   for (const t of temps) {
-    const hit = matchTarget(t, ctx, yt, host);
+    const hit = matchTarget(t, ctx, yt, host, hostCats);
     if (hit) return { action: t.action, reason: `temporary:${t.grantKind}`, matchedKey: hit };
   }
 
@@ -251,7 +266,7 @@ function evaluate(snapshot, ctx) {
           scopeSpecificity(b.scope) - scopeSpecificity(a.scope),
       );
     for (const r of inTier) {
-      const hit = matchTarget(r, ctx, yt, host);
+      const hit = matchTarget(r, ctx, yt, host, hostCats);
       if (hit) return { action: r.action, reason: `rule:${tier}`, matchedKey: hit };
     }
   }

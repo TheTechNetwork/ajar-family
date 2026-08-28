@@ -90,6 +90,20 @@ approval** → exact-URL allow → exact-URL block → YouTube video/playlist/ch
 and it is the single source of truth every adapter must reproduce (or compile a
 documented subset of).
 
+**Categories make the engine general.** "Block all social media" (or adult /
+gaming / gambling / streaming / shopping / messaging) is **one `CATEGORY` rule**
+whose action applies to every domain in that category — the mechanism behind the
+product's "restrict 90% of the internet, approve exceptions" posture. Because
+`CATEGORY` sits below the URL / DOMAIN / YOUTUBE_* tiers, a parent can carve out
+a single site, page, or video _above_ a blanket category block, and a temporary
+approval overrides it for its window. The category → domain map travels **inside
+the signed `DevicePolicySnapshot`** (`snapshot.categories`), so every platform
+evaluator enforces it offline and adding a site is a data-only change — no code
+ships to any client. The bundled `DEFAULT_CATEGORY_DOMAINS`
+(`shared/categories/category-data.ts`) is a **starter seed**; a production
+deployment swaps in a maintained categorization feed (millions of domains — on
+Apple that is the NEURLFilter Bloom/PIR blocklist path, [§3](#3-apple-url-filtering--capabilities-and-hard-limits)).
+
 ---
 
 ## 3. Apple URL filtering — capabilities and hard limits

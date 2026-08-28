@@ -127,6 +127,11 @@ const schemas = {
       deviceId: { type: "string" }, defaults: { $ref: "#/components/schemas/DefaultPolicy" },
       rules: { type: "array", items: { $ref: "#/components/schemas/PolicyRule" } },
       temporaryRules: { type: "array", items: { $ref: "#/components/schemas/TemporaryRule" } },
+      categories: {
+        type: "object",
+        description: "Category → domain map for CATEGORY rules (e.g. { social: [...] }). Travels signed so clients enforce categories offline.",
+        additionalProperties: { type: "array", items: { type: "string" } },
+      },
       issuedAt: { type: "string", format: "date-time" },
       signature: { type: "string", description: "base64 Ed25519 over canonical JSON" },
     },
