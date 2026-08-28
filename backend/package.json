@@ -8,13 +8,16 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "node --watch dist/index.js",
-    "test": "npm run build && node --test 'dist/**/*.test.js'"
+    "test": "npm run build && node --test 'dist/**/*.test.js'",
+    "bundle": "esbuild src/index.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/backend.cjs",
+    "sea:blob": "node --experimental-sea-config sea-config.json"
   },
   "dependencies": {
     "@contentfilter/shared": "*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "esbuild": "^0.24.2",
     "typescript": "^5.9.0"
   }
 }
