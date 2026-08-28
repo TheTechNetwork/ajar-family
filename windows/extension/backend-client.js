@@ -10,7 +10,7 @@
  * Every snapshot is Ed25519-verified (policy-verify.js) against the backend's
  * signing key before it is trusted — fail closed on a bad signature.
  */
-import { verifySnapshotSignature } from "./policy-verify.js";
+import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
 
 const CFG_KEY = "backendConfig";
 
@@ -89,6 +89,34 @@ export async function startPolicySync(onSnapshot) {
     } catch {
       await sleep(2000); // network error → back off, keep enforcing cached policy
     }
+  }
+}
+
+/**
+ * Poll the signed category Bloom-filter asset and hand verified sets to
+ * `onFilters(rawSet)`. Separate from policy sync because the dataset is global
+ * and changes rarely; a slow poll keeps the compact membership data fresh with
+ * no per-URL calls. Fails closed on a bad signature (keeps the cached set).
+ */
+export async function startCategoryFilterSync(onFilters) {
+  for (;;) {
+    let cfg = await getConfig();
+    if (!cfg.backendUrl || !cfg.deviceToken || !cfg.signingKeyB64) { await sleep(5000); continue; }
+    try {
+      const since = cfg.filterVersion ?? -1;
+      const res = await fetch(`${cfg.backendUrl}/v1/categories/filters?since=${since}`,
+        { headers: { authorization: `Bearer ${cfg.deviceToken}` } });
+      if (res.ok) {
+        const body = await res.json();
+        if (body && body.set && body.signature) {
+          if (await verifyCanonicalSignature(body.set, body.signature, cfg.signingKeyB64)) {
+            await setConfig({ filterVersion: body.set.version });
+            onFilters(body.set);
+          }
+        }
+      }
+    } catch { /* network error → keep the cached set */ }
+    await sleep(6 * 60 * 60 * 1000); // refresh a few times a day; version-gated
   }
 }
 

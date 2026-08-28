@@ -7,6 +7,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { App } from "../app.js";
 import { evaluate } from "@ajar/shared/policy";
+import { CategoryFilters } from "@ajar/shared/categories";
+import { verifyCanonical } from "../domain/signing.js";
 
 const cfg = { config: { authSecret: "test" } };
 
@@ -57,4 +59,23 @@ test("no CATEGORY rule → snapshot ships no category map (bounded)", async () =
   const app = await App.create(cfg);
   const snap = await app.policy.buildSnapshot("f2", "c2", "d2");
   assert.equal(snap.categories, undefined);
+});
+
+test("filter asset is signed, verifies, and enforces category membership on-device", async () => {
+  const app = await App.create(cfg);
+  const asset = await app.policy.categoryFilterAsset();
+  assert.ok("set" in asset && asset.signature, "asset carries a signed filter set");
+  // A device verifies with the public policy key before trusting it.
+  assert.equal(await verifyCanonical(asset.set, asset.signature, app.signingPublicKeyB64), true);
+  // ...then queries locally: a seeded social domain is a member, others are not.
+  const cf = new CategoryFilters(asset.set);
+  assert.deepEqual([...cf.categoriesForHost("m.tiktok.com")], ["social"]);
+  assert.deepEqual([...cf.categoriesForHost("khanacademy.org")], []);
+});
+
+test("filter asset since-check returns upToDate when the device is current", async () => {
+  const app = await App.create(cfg);
+  const v = await app.categories.version();
+  assert.deepEqual(await app.policy.categoryFilterAsset(v), { upToDate: true });
+  assert.ok("set" in (await app.policy.categoryFilterAsset(v - 1)));
 });

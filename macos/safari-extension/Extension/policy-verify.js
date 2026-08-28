@@ -37,10 +37,17 @@ function b64ToBytes(b64) {
 export async function verifySnapshotSignature(snapshot, spkiB64) {
   if (!snapshot || !snapshot.signature) return false;
   const { signature, ...rest } = snapshot;
+  return verifyCanonicalSignature(rest, signature, spkiB64);
+}
+
+/** Verify an Ed25519 signature over the canonical JSON of `obj` (backend
+ *  signCanonical). Used for the category filter asset { set, signature }. */
+export async function verifyCanonicalSignature(obj, signatureB64, spkiB64) {
+  if (!signatureB64) return false;
   try {
     const key = await crypto.subtle.importKey("spki", b64ToBytes(spkiB64), { name: "Ed25519" }, false, ["verify"]);
-    const data = new TextEncoder().encode(canonicalJSON(rest));
-    return await crypto.subtle.verify({ name: "Ed25519" }, key, b64ToBytes(signature), data);
+    const data = new TextEncoder().encode(canonicalJSON(obj));
+    return await crypto.subtle.verify({ name: "Ed25519" }, key, b64ToBytes(signatureB64), data);
   } catch {
     return false;
   }

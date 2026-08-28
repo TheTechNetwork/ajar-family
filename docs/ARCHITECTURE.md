@@ -111,10 +111,41 @@ indexed (`GET /v1/categories/lookup?host=` resolves a host with a single
 dataset grow past a hand-kept list. When it builds a device's snapshot, the
 backend inlines **only the categories that policy actually enforces**
 (`snapshot.categories`), sourced from the provider — bounded to what the device
-needs, still signed, still enforced offline. Scaling a single large category to
-millions of domains is the delivery frontier: a separately-cached signed dataset
-or a compact per-category filter (on Apple, the NEURLFilter Bloom/PIR blocklist
-path, [§3](#3-apple-url-filtering--capabilities-and-hard-limits)).
+needs, still signed, still enforced offline. That inline map is the
+small-deployment path; the scalable one is below.
+
+**On-device delivery at scale — Bloom filters, not per-URL calls or shipped
+lists.** On-device filtering rules out asking the backend per domain (privacy +
+latency + endless), and app-size / lookup limits rule out shipping millions of
+domains. The answer — the same one Apple's NEURLFilter uses — is a **compact
+probabilistic filter**:
+
+- The backend **compiles one Bloom filter per category** from the datastore
+  (`CategoryProvider.compileFilters`, `shared/categories/bloom.ts`): a few bits
+  per domain — ~1.2 MB per million at a 0.1% false-positive rate.
+- It serves them as a **signed, versioned asset**, `GET /v1/categories/filters`
+  (Ed25519 over the canonical set, same key as snapshots; `?since=N` no-ops when
+  unchanged). The device **downloads it once, verifies it, caches it**, and
+  refreshes only when the version bumps. It is a data asset — **not baked into
+  the app binary** (no size hit, no app update to refresh a blocklist).
+- Enforcement queries it **locally, O(k), with zero network** on the hot path.
+  The shared evaluator merges filter-derived categories with the inline map via
+  `EvalContext.categoryFilters`; the Windows and macOS extension mirrors run the
+  byte-identical query (`categoriesFromFilters`).
+- **Tradeoff = tunable false positives, never false negatives.** Under
+  default-deny category blocking a false positive is *fail-safe* (a safe site is
+  briefly over-blocked, never a blocked one leaked), and the existing
+  request→approve loop clears it in seconds (a URL/DOMAIN ALLOW sits above the
+  CATEGORY tier). On **Apple 26** the OS runs this exact Bloom prefilter and adds
+  a **private PIR** confirm to erase false positives without revealing the URL —
+  our own OHTTP+PIR gateway is the same shape one layer deeper
+  ([§3](#3-apple-url-filtering--capabilities-and-hard-limits)), and a binary-fuse
+  filter is a drop-in future compaction.
+
+Native-host transport note: the browser-fetch path (dev + browser-testable) is
+wired end-to-end for both extensions; delivering the same signed asset through
+the Windows Go service / macOS `SafariWebExtensionHandler` native hosts is the
+remaining integration step (the extensions already accept and cache it).
 
 ---
 

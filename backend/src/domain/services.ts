@@ -7,7 +7,8 @@ import { randomUUID } from "node:crypto";
 import type { Repository } from "../store/repository.js";
 import type { Notifier } from "../push/notifier.js";
 import type { EventHub } from "../push/hub.js";
-import { signSnapshot } from "./signing.js";
+import { signSnapshot, signCanonical } from "./signing.js";
+import type { CategoryFilterSet } from "@ajar/shared/categories";
 import type {
   User, Session, Family, FamilyMembership, Child, Device, EnrollmentToken,
   AccessRequest, ApprovalDecision, Role, Platform, ApprovalScope, ApprovalDuration,
@@ -318,6 +319,22 @@ export class PolicyService {
     const version = await this.repo.getPolicyVersion(familyId, childId);
     if (version <= sinceVersion) return null;
     return this.buildSnapshot(familyId, childId, deviceId);
+  }
+
+  /**
+   * The compact category-membership asset a device downloads and caches
+   * separately from its policy: per-category Bloom filters, signed with the same
+   * key as snapshots and versioned so the device only re-fetches on change. This
+   * is what lets a client enforce "block all social" over a huge domain set with
+   * no per-URL backend call and no multi-megabyte domain list in the app.
+   */
+  async categoryFilterAsset(since?: number):
+    Promise<{ upToDate: true } | { set: CategoryFilterSet; signature: string }> {
+    const version = await this.categories.version();
+    if (since !== undefined && since >= 0 && version <= since) return { upToDate: true };
+    const set = await this.categories.compileFilters();
+    const signature = await signCanonical(set, this.signingPrivateKeyB64);
+    return { set, signature };
   }
 
   private appliesToChildDevice(scope: RuleScope, childId: string, deviceId: string): boolean {

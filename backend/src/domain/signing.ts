@@ -47,6 +47,28 @@ export async function signSnapshot(
   return b64(sig);
 }
 
+/** Sign any JSON value over its canonical serialization (same key + alg as
+ *  snapshots). Used for the category filter asset devices fetch separately. */
+export async function signCanonical(obj: unknown, privateKeyB64: string): Promise<string> {
+  const key = await crypto.subtle.importKey("pkcs8", unb64(privateKeyB64), ALG, false, ["sign"]);
+  const u = new TextEncoder().encode(canonicalJSON(obj));
+  const bytes = u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer;
+  return b64(await crypto.subtle.sign(ALG, key, bytes));
+}
+
+/** Verify a `signCanonical` signature over any JSON value. */
+export async function verifyCanonical(obj: unknown, signature: string, publicKeyB64: string): Promise<boolean> {
+  if (!signature) return false;
+  try {
+    const key = await crypto.subtle.importKey("spki", unb64(publicKeyB64), ALG, false, ["verify"]);
+    const u = new TextEncoder().encode(canonicalJSON(obj));
+    const bytes = u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer;
+    return await crypto.subtle.verify(ALG, key, unb64(signature), bytes);
+  } catch {
+    return false;
+  }
+}
+
 export async function verifySnapshot(
   snapshot: DevicePolicySnapshot,
   publicKeyB64: string,

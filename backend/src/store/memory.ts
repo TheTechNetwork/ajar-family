@@ -4,7 +4,7 @@
  * Cloudflare D1) replaces this behind the same interface.
  */
 import type { Repository } from "./repository.js";
-import { hostCandidates, normalizeHost } from "./host-match.js";
+import { hostCandidates, normalizeHost } from "@ajar/shared/categories";
 import type {
   Session,
   User,

@@ -18,6 +18,7 @@
 
 import { normalizeYouTube, youTubePolicyKey } from "../youtube/youtube-normalize.js";
 import { categoriesForHost } from "../categories/category-data.js";
+import type { CategoryFilters } from "../categories/bloom.js";
 
 // ---------------------------------------------------------------------------
 // Targets, actions, scopes
@@ -122,6 +123,10 @@ export interface EvalContext {
   nowMs: number;
   /** Platform app identifier of the requesting process, when known. */
   appId?: string;
+  /** Prepared category Bloom filters the device downloaded + cached separately
+   *  from the snapshot (the scalable, millions-of-domains membership source).
+   *  When present, its categories are merged with the snapshot's inline map. */
+  categoryFilters?: CategoryFilters;
 }
 
 export interface EvalResult {
@@ -187,7 +192,11 @@ export function evaluate(
   } catch {
     /* leave host empty */
   }
+  // Host's categories: the snapshot's inline map (small deployments / the
+  // categories this policy enforces) UNION the device's cached Bloom filters
+  // (the scalable path for large datasets). Either may be absent.
   const hostCats = categoriesForHost(snapshot.categories, host);
+  if (ctx.categoryFilters) for (const c of ctx.categoryFilters.categoriesForHost(host)) hostCats.add(c);
 
   const applicable = snapshot.rules.filter((r) => ruleAppliesToScope(r, ctx));
 

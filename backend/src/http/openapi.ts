@@ -150,6 +150,26 @@ const schemas = {
     },
     required: ["categories"],
   },
+  SerializedBloom: {
+    type: "object",
+    description: "One category's Bloom filter: m bits, k hashes, n elements, base64 bit array.",
+    properties: { m: { type: "integer" }, k: { type: "integer" }, n: { type: "integer" }, bits: { type: "string", description: "base64 of m/8 bytes" } },
+    required: ["m", "k", "n", "bits"],
+  },
+  CategoryFilterSet: {
+    type: "object",
+    properties: {
+      version: { type: "integer" },
+      filters: { type: "object", additionalProperties: { $ref: "#/components/schemas/SerializedBloom" } },
+    },
+    required: ["version", "filters"],
+  },
+  CategoryFilterAsset: {
+    type: "object",
+    description: "The signed filter set. Verify `signature` (Ed25519, base64) over the canonical JSON of `set` with the policy public key before use.",
+    properties: { set: { $ref: "#/components/schemas/CategoryFilterSet" }, signature: { type: "string" } },
+    required: ["set", "signature"],
+  },
   AccessRequest: {
     type: "object",
     properties: {
@@ -274,6 +294,12 @@ export const openapiDocument = {
         description: "Replaces the entire domain→category dataset. The bundled list is only a seed; import a maintained feed here without a code change.",
         requestBody: { required: true, content: json({ $ref: "#/components/schemas/CategoryDatasetImport" }) },
         responses: { "200": { description: "New dataset version + stats", content: json({ type: "object", properties: { version: { type: "integer" }, categories: { type: "array", items: { $ref: "#/components/schemas/CategoryStat" } } } }) }, "400": errorResponses["400"], "401": errorResponses["401"] } },
+    },
+    "/v1/categories/filters": {
+      get: { tags: ["categories"], summary: "Signed per-category Bloom-filter asset (device)", security: [{ bearerAuth: [] }],
+        description: "Compact category-membership filters a child device downloads once and caches — local O(k) lookup, no per-URL call, no domain list in the app. Signed with the policy key; `?since=N` returns { upToDate: true } when unchanged.",
+        parameters: [{ name: "since", in: "query", required: false, schema: { type: "integer" }, description: "Dataset version the device already has." }],
+        responses: { "200": { description: "Signed filter set or up-to-date", content: json({ oneOf: [{ $ref: "#/components/schemas/CategoryFilterAsset" }, { type: "object", properties: { upToDate: { const: true } } }] }) }, "401": errorResponses["401"] } },
     },
     "/v1/auth/register": {
       post: { tags: ["auth"], summary: "Register a parent with a password", security: [],

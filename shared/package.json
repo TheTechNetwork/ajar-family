@@ -13,8 +13,8 @@
       "default": "./dist/youtube/youtube-normalize.js"
     },
     "./categories": {
-      "types": "./dist/categories/category-data.d.ts",
-      "default": "./dist/categories/category-data.js"
+      "types": "./dist/categories/index.d.ts",
+      "default": "./dist/categories/index.js"
     }
   },
   "scripts": {

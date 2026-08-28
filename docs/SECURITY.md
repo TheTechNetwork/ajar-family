@@ -33,7 +33,10 @@ living document for an alpha, not a completed audit.
   allows the default (with a warning); override with `ALLOW_INSECURE_AUTH=1`.
 - **Signed policy.** Device policy snapshots are Ed25519-signed by the backend;
   every client verifies the signature **fail-closed** before enforcing — on both
-  the backend-fetch path and the native-host message path (Windows + macOS).
+  the backend-fetch path and the native-host message path (Windows + macOS). The
+  **category Bloom-filter asset** (`GET /v1/categories/filters`) is signed the
+  same way (canonical JSON, same key) and verified before use, so a tampered
+  membership set can't widen or narrow enforcement.
 - **Authorization.** Every family-scoped mutation checks membership + role
   (`requireRole`/`requireManage`); no IDOR. All SQL is parameterized.
 - **CORS.** Permissive `*` by default (bearer tokens, no cookies — safe); set

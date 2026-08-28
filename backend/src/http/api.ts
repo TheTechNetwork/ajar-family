@@ -98,6 +98,16 @@ export function buildRouter(app: App): Router {
     const version = await app.categories.replace(b.categories);
     return ok({ version, categories: await app.categories.listCategories() });
   });
+  // Device-facing: the signed, versioned category Bloom-filter asset. A child
+  // device downloads this once, caches it, and queries it locally — no per-URL
+  // call, no domain list in the app. `?since=N` returns { upToDate: true } when
+  // the device already has the current version.
+  r.get("/v1/categories/filters", async (req) => {
+    await requireDevice(app, req);
+    const since = Number(req.query.get("since") ?? "-1");
+    const asset = await app.policy.categoryFilterAsset(Number.isFinite(since) ? since : -1);
+    return ok(asset);
+  });
 
   // --- auth (self-contained passwords, no external IdP) ---
   r.post("/v1/auth/register", async (req) => {

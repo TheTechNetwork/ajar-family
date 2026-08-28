@@ -10,7 +10,9 @@
  * unchanged because they only depend on `CategoryProvider`.
  */
 import type { Repository } from "../store/repository.js";
-import { DEFAULT_CATEGORY_DOMAINS } from "@ajar/shared/categories";
+import {
+  DEFAULT_CATEGORY_DOMAINS, normalizeHost, buildBloom, type CategoryFilterSet,
+} from "@ajar/shared/categories";
 
 export interface CategoryProvider {
   /** Categories a single host belongs to (indexed lookup; hot path + console). */
@@ -24,6 +26,9 @@ export interface CategoryProvider {
   version(): Promise<number>;
   /** Replace the whole dataset (feed import). Returns the new version. */
   replace(map: Record<string, string[]>): Promise<number>;
+  /** Compile per-category Bloom filters — the compact asset devices download +
+   *  cache instead of the domain lists (see @ajar/shared/categories bloom). */
+  compileFilters(categories?: string[]): Promise<CategoryFilterSet>;
 }
 
 export class RepositoryCategoryProvider implements CategoryProvider {
@@ -40,6 +45,15 @@ export class RepositoryCategoryProvider implements CategoryProvider {
 
   listCategories() { return this.repo.categoryStats(); }
   version() { return this.repo.getCategoryDatasetVersion(); }
+
+  async compileFilters(categories?: string[]): Promise<CategoryFilterSet> {
+    const map = await this.categoryMap(categories);
+    const filters: CategoryFilterSet["filters"] = {};
+    for (const [category, domains] of Object.entries(map)) {
+      filters[category] = buildBloom(domains.map(normalizeHost));
+    }
+    return { version: await this.version(), filters };
+  }
 
   replace(map: Record<string, string[]>) {
     const entries = Object.entries(map).flatMap(([category, domains]) =>

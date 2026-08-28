@@ -21,7 +21,7 @@
  */
 
 import { normalizeYouTube, youTubePolicyKey } from "./youtube-normalize.js";
-import { getConfig, startPolicySync, postAccessRequest } from "./backend-client.js";
+import { getConfig, startPolicySync, startCategoryFilterSync, postAccessRequest } from "./backend-client.js";
 import { verifySnapshotSignature } from "./policy-verify.js";
 
 const STORAGE_KEY = "devicePolicySnapshot";
@@ -40,8 +40,9 @@ let snapshot = null;
 
 async function loadSnapshot() {
   try {
-    const got = await browser.storage.local.get(STORAGE_KEY);
+    const got = await browser.storage.local.get([STORAGE_KEY, "categoryFilters"]);
     snapshot = got?.[STORAGE_KEY] ?? null;
+    if (got?.categoryFilters) setCategoryFilters(got.categoryFilters); // restore compact filters
   } catch (e) {
     // Fail closed for YouTube gating if we can't read policy (see evaluate()).
     console.warn("[guard] could not load snapshot:", e);
@@ -53,6 +54,9 @@ async function loadSnapshot() {
 browser.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes[STORAGE_KEY]) {
     snapshot = changes[STORAGE_KEY].newValue ?? null;
+  }
+  if (area === "local" && changes.categoryFilters) {
+    setCategoryFilters(changes.categoryFilters.newValue ?? null);
   }
 });
 
@@ -140,6 +144,62 @@ function categoriesForHost(categories, host) {
   return out;
 }
 
+// --- Category Bloom filters: LOCKSTEP query-side mirror of shared/categories/bloom.ts.
+// The compact membership asset (GET /v1/categories/filters) is fetched, signature-
+// verified, and cached; this evaluates it locally — no per-URL call, no domain list.
+const _FNV_PRIME = 0x01000193, _SEED_A = 0x811c9dc5, _SEED_B = 0x85ebca77;
+const _enc = new TextEncoder();
+function _fnv1a(bytes, seed) {
+  let h = seed >>> 0;
+  for (let i = 0; i < bytes.length; i++) { h ^= bytes[i]; h = Math.imul(h, _FNV_PRIME) >>> 0; }
+  return h >>> 0;
+}
+function _bloomIndices(item, m, k) {
+  const bytes = _enc.encode(item);
+  const h1 = _fnv1a(bytes, _SEED_A); let h2 = _fnv1a(bytes, _SEED_B) | 1;
+  const out = new Array(k); let x = h1 >>> 0;
+  for (let i = 0; i < k; i++) { out[i] = x % m; x = (x + h2) >>> 0; h2 = (h2 + i) >>> 0; }
+  return out;
+}
+function _b64ToBytes(b64) {
+  const s = atob(b64); const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+}
+function hostCandidates(host) {
+  const h = (host || "").replace(/^www\./i, "").toLowerCase();
+  if (!h) return [];
+  const parts = h.split("."); const out = [];
+  for (let i = 0; i < parts.length - 1; i++) out.push(parts.slice(i).join("."));
+  return out;
+}
+let CATEGORY_FILTERS = null;
+function setCategoryFilters(rawSet) {
+  if (!rawSet || !rawSet.filters) { CATEGORY_FILTERS = null; return; }
+  const filters = {};
+  for (const cat of Object.keys(rawSet.filters)) {
+    const f = rawSet.filters[cat];
+    filters[cat] = { m: f.m, k: f.k, bits: _b64ToBytes(f.bits) };
+  }
+  CATEGORY_FILTERS = { version: rawSet.version, filters };
+}
+function categoriesFromFilters(host) {
+  const cats = new Set();
+  if (!CATEGORY_FILTERS) return cats;
+  const cands = hostCandidates(host);
+  for (const cat of Object.keys(CATEGORY_FILTERS.filters)) {
+    const f = CATEGORY_FILTERS.filters[cat];
+    for (const cand of cands) {
+      let hit = true;
+      for (const idx of _bloomIndices(cand, f.m, f.k)) {
+        if ((f.bits[idx >>> 3] & (1 << (idx & 7))) === 0) { hit = false; break; }
+      }
+      if (hit) { cats.add(cat); break; }
+    }
+  }
+  return cats;
+}
+
 /** Returns the matched policy key if `r` targets the request, else null. */
 function matchTarget(r, ctx, yt, host, hostCats) {
   switch (r.target) {
@@ -179,7 +239,9 @@ function evaluate(snap, ctx) {
   } catch {
     /* leave host empty */
   }
+  // Inline map (small deployments) UNION the cached Bloom filters (scalable path).
   const hostCats = categoriesForHost(snap.categories, host);
+  for (const c of categoriesFromFilters(host)) hostCats.add(c);
 
   const applicable = (snap.rules || []).filter((r) => ruleAppliesToScope(r, ctx));
 
@@ -357,6 +419,10 @@ getConfig().then((cfg) => {
     startPolicySync(async (snap) => {
       snapshot = snap;
       await browser.storage.local.set({ [STORAGE_KEY]: snap });
+    });
+    startCategoryFilterSync(async (set) => {
+      setCategoryFilters(set);
+      await browser.storage.local.set({ categoryFilters: set });
     });
   } else {
     connectNative();

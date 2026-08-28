@@ -7,7 +7,7 @@
  * source and this HTTP path is for development; either way every snapshot is
  * Ed25519-verified (policy-verify.js) before it is trusted (fail closed).
  */
-import { verifySnapshotSignature } from "./policy-verify.js";
+import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
 
 const ext = globalThis.browser ?? globalThis.chrome;
 const store = ext.storage.local;
@@ -75,6 +75,28 @@ export async function startPolicySync(onSnapshot) {
     } catch {
       await sleep(2000);
     }
+  }
+}
+
+/** Poll the signed category Bloom-filter asset; hand verified sets to onFilters.
+ *  Global dataset, changes rarely → slow, version-gated poll, no per-URL calls. */
+export async function startCategoryFilterSync(onFilters) {
+  for (;;) {
+    const cfg = await getConfig();
+    if (!cfg.backendUrl || !cfg.deviceToken || !cfg.signingKeyB64) { await sleep(5000); continue; }
+    try {
+      const res = await fetch(`${cfg.backendUrl}/v1/categories/filters?since=${cfg.filterVersion ?? -1}`,
+        { headers: { authorization: `Bearer ${cfg.deviceToken}` } });
+      if (res.ok) {
+        const body = await res.json();
+        if (body && body.set && body.signature &&
+            await verifyCanonicalSignature(body.set, body.signature, cfg.signingKeyB64)) {
+          await setConfig({ filterVersion: body.set.version });
+          onFilters(body.set);
+        }
+      }
+    } catch { /* keep cached set */ }
+    await sleep(6 * 60 * 60 * 1000);
   }
 }
 

@@ -5,7 +5,7 @@
 import type { Repository } from "../repository.js";
 import type { SqlDatabase, SqlRow } from "./database.js";
 import { SCHEMA_SQL } from "./schema.js";
-import { hostCandidates, normalizeHost } from "../host-match.js";
+import { hostCandidates, normalizeHost } from "@ajar/shared/categories";
 import type {
   Session,
   User, Family, FamilyMembership, Child, Device, EnrollmentToken,

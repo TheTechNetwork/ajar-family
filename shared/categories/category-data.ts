@@ -29,16 +29,41 @@ export const DEFAULT_CATEGORY_DOMAINS: Record<string, string[]> = {
   shopping: ["amazon.com", "ebay.com", "temu.com", "shein.com", "aliexpress.com"],
 };
 
+/** Lowercase a host and drop a leading `www.` (the canonical form domains are
+ *  stored and compared in). */
+export function normalizeHost(host: string): string {
+  return host.replace(/^www\./i, "").toLowerCase();
+}
+
+/**
+ * A host's registrable-domain candidates: the finite set of suffixes a stored
+ * category domain could equal. `d` matches host `h` iff `d` is one of these —
+ * i.e. `h === d` or `h` ends with `.d`. Returning the finite list is what lets
+ * both the SQL store (`WHERE domain IN (...)`) and the Bloom filter resolve a
+ * host with O(labels) exact probes instead of scanning the dataset.
+ */
+export function hostCandidates(host: string): string[] {
+  const h = normalizeHost(host);
+  if (!h) return [];
+  const parts = h.split(".");
+  const out: string[] = [];
+  for (let i = 0; i < parts.length - 1; i++) out.push(parts.slice(i).join("."));
+  return out; // "m.old.reddit.com" → [m.old.reddit.com, old.reddit.com, reddit.com, com]
+}
+
 /** Categories whose domain set contains `host` (host already lowercased, no
- *  leading `www.`). Matches the registrable root and any subdomain. */
+ *  leading `www.`). Matches the registrable root and any subdomain. This is the
+ *  small-deployment / inline-map path; large datasets use Bloom filters
+ *  (see `./bloom`). */
 export function categoriesForHost(
   categories: Record<string, string[]> | undefined,
   host: string,
 ): Set<string> {
   const out = new Set<string>();
   if (!categories || !host) return out;
+  const cands = new Set(hostCandidates(host));
   for (const [cat, domains] of Object.entries(categories)) {
-    if (domains.some((d) => host === d || host.endsWith(`.${d}`))) out.add(cat);
+    if (domains.some((d) => cands.has(normalizeHost(d)))) out.add(cat);
   }
   return out;
 }
