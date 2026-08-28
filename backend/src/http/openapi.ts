@@ -171,6 +171,15 @@ const schemas = {
     },
     required: ["id", "userId", "kind", "token", "createdAt"],
   },
+  TokenResponse: {
+    type: "object",
+    description: "Access + refresh token pair. Send accessToken as `Authorization: Bearer <accessToken>`; when it expires, POST refreshToken to /v1/auth/refresh.",
+    properties: {
+      userId: { type: "string" }, tokenType: { const: "Bearer" }, expiresIn: { type: "integer", description: "access-token lifetime (seconds)" },
+      accessToken: { type: "string" }, refreshToken: { type: "string" },
+    },
+    required: ["userId", "tokenType", "expiresIn", "accessToken", "refreshToken"],
+  },
 } as const;
 
 const userAuth = [{ bearerAuth: [] }];
@@ -223,14 +232,28 @@ export const openapiDocument = {
         responses: { "200": { description: "OpenAPI 3.1 document", content: json({ type: "object", additionalProperties: true }) } } },
     },
     "/v1/auth/register": {
-      post: { tags: ["auth"], summary: "Register a parent and get a user token", security: [],
-        requestBody: { required: true, content: json({ type: "object", properties: { email: { type: "string", format: "email" }, displayName: { type: "string" } }, required: ["email", "displayName"] }) },
-        responses: { "200": { description: "Token", content: json({ type: "object", properties: { userId: { type: "string" }, token: { type: "string" } } }) }, "400": errorResponses["400"] } },
+      post: { tags: ["auth"], summary: "Register a parent with a password", security: [],
+        requestBody: { required: true, content: json({ type: "object", properties: { email: { type: "string", format: "email" }, password: { type: "string", minLength: 8 }, displayName: { type: "string" } }, required: ["email", "password", "displayName"] }) },
+        responses: { "201": { description: "Token pair", content: json({ $ref: "#/components/schemas/TokenResponse" }) }, "400": errorResponses["400"], "409": { description: "Email already registered", content: json({ $ref: "#/components/schemas/Error" }) } } },
     },
     "/v1/auth/login": {
-      post: { tags: ["auth"], summary: "Log in by email and get a user token", security: [],
-        requestBody: { required: true, content: json({ type: "object", properties: { email: { type: "string", format: "email" } }, required: ["email"] }) },
-        responses: { "200": { description: "Token", content: json({ type: "object", properties: { userId: { type: "string" }, token: { type: "string" } } }) }, "404": errorResponses["404"] } },
+      post: { tags: ["auth"], summary: "Log in with email + password", security: [],
+        requestBody: { required: true, content: json({ type: "object", properties: { email: { type: "string", format: "email" }, password: { type: "string" } }, required: ["email", "password"] }) },
+        responses: { "200": { description: "Token pair", content: json({ $ref: "#/components/schemas/TokenResponse" }) }, "401": { description: "Invalid email or password", content: json({ $ref: "#/components/schemas/Error" }) } } },
+    },
+    "/v1/auth/refresh": {
+      post: { tags: ["auth"], summary: "Exchange a refresh token for a fresh token pair", security: [],
+        requestBody: { required: true, content: json({ type: "object", properties: { refreshToken: { type: "string" } }, required: ["refreshToken"] }) },
+        responses: { "200": { description: "Token pair", content: json({ $ref: "#/components/schemas/TokenResponse" }) }, "401": errorResponses["401"] } },
+    },
+    "/v1/auth/logout": {
+      post: { tags: ["auth"], summary: "Sign out everywhere (revoke all tokens)", security: userAuth,
+        responses: { "200": { description: "Signed out", content: json({ type: "object", properties: { ok: { const: true } } }) }, "401": errorResponses["401"] } },
+    },
+    "/v1/auth/password": {
+      post: { tags: ["auth"], summary: "Change password (revokes other sessions)", security: userAuth,
+        requestBody: { required: true, content: json({ type: "object", properties: { currentPassword: { type: "string" }, newPassword: { type: "string", minLength: 8 } }, required: ["currentPassword", "newPassword"] }) },
+        responses: { "200": { description: "New token pair", content: json({ $ref: "#/components/schemas/TokenResponse" }) }, "400": errorResponses["400"], "401": errorResponses["401"] } },
     },
     "/v1/me": {
       get: { tags: ["auth"], summary: "Current user + family memberships", security: userAuth,

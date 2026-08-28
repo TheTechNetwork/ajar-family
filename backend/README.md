@@ -34,8 +34,12 @@ truth the iOS / macOS / Windows clients integrate against.
 - **Authored in** `src/http/openapi.ts`. A **contract test** (`src/http/openapi.test.ts`)
   fails if the document and the router drift, so every route stays documented.
 
-Two bearer identities: **user tokens** (from `/v1/auth/*`) and **device tokens**
-(from `/v1/enroll/redeem`). Long-poll endpoints (`/policy/wait`, `/requests/wait`)
+**Auth is self-contained — no external identity provider.** Parents register/log
+in with **email + password** (PBKDF2-HMAC-SHA256 via WebCrypto, in `auth/password.ts`);
+`/v1/auth/*` returns a short-lived **access token** + a **refresh token**
+(`/v1/auth/refresh`). Logout and password change bump a per-user token version,
+revoking every outstanding token. **Device tokens** are minted at enrollment
+(`/v1/enroll/redeem`). Long-poll endpoints (`/policy/wait`, `/requests/wait`)
 deliver changes in seconds without streaming.
 
 ## Test

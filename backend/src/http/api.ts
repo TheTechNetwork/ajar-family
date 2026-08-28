@@ -17,7 +17,23 @@ async function principal(app: App, req: HttpRequest): Promise<Principal | null> 
 async function requireUser(app: App, req: HttpRequest): Promise<string> {
   const p = await principal(app, req);
   if (!p || p.kind !== "user") throw Object.assign(new Error("login required"), { code: "UNAUTHORIZED" });
+  await app.auth.userForToken(p.userId, p.tv); // rejects a token revoked by logout / password change
   return p.userId;
+}
+
+// Access + refresh token pair for a signed-in user. Access is short-lived; the
+// refresh token mints new access tokens via /v1/auth/refresh. Both carry the
+// user's tokenVersion, so logout / password change revokes them.
+const ACCESS_TTL = 60 * 60; // 1h
+const REFRESH_TTL = 60 * 60 * 24 * 30; // 30d
+async function tokenPair(app: App, user: { id: string; tokenVersion: number }) {
+  return {
+    userId: user.id,
+    tokenType: "Bearer",
+    expiresIn: ACCESS_TTL,
+    accessToken: await issueToken(app.authSecret, { kind: "user", userId: user.id, tv: user.tokenVersion }, ACCESS_TTL),
+    refreshToken: await issueToken(app.authSecret, { kind: "refresh", userId: user.id, tv: user.tokenVersion }, REFRESH_TTL),
+  };
 }
 async function requireDevice(app: App, req: HttpRequest) {
   const p = await principal(app, req);
@@ -33,18 +49,38 @@ export function buildRouter(app: App): Router {
   // Machine-readable API contract (the source of truth clients integrate against).
   r.get("/openapi.json", async () => ok(openapiDocument));
 
-  // --- auth (skeleton) ---
+  // --- auth (self-contained passwords, no external IdP) ---
   r.post("/v1/auth/register", async (req) => {
-    const { email, displayName } = await req.json<{ email: string; displayName: string }>();
-    if (!email || !displayName) return err(400, "email and displayName required");
-    const user = await app.family.createUser(email, displayName);
-    return ok({ userId: user.id, token: await issueToken(app.authSecret, { kind: "user", userId: user.id }) });
+    const b = await req.json<{ email: string; password: string; displayName: string }>();
+    const user = await app.auth.register(b.email, b.password, b.displayName);
+    return ok(await tokenPair(app, user), 201);
   });
   r.post("/v1/auth/login", async (req) => {
-    const { email } = await req.json<{ email: string }>();
-    const user = await app.repo.getUserByEmail(email);
-    if (!user) return err(404, "no such user", "NOT_FOUND");
-    return ok({ userId: user.id, token: await issueToken(app.authSecret, { kind: "user", userId: user.id }) });
+    const b = await req.json<{ email: string; password: string }>();
+    const user = await app.auth.authenticate(b.email, b.password);
+    return ok(await tokenPair(app, user));
+  });
+  // Exchange a refresh token for a fresh access + refresh pair.
+  r.post("/v1/auth/refresh", async (req) => {
+    const { refreshToken } = await req.json<{ refreshToken: string }>();
+    const p = refreshToken ? await verifyToken(app.authSecret, refreshToken) : null;
+    if (!p || p.kind !== "refresh") return err(401, "invalid refresh token", "UNAUTHORIZED");
+    const user = await app.auth.userForToken(p.userId, p.tv); // rejects if revoked
+    return ok(await tokenPair(app, user));
+  });
+  // Sign out everywhere: bump the token version so all outstanding tokens die.
+  r.post("/v1/auth/logout", async (req) => {
+    const userId = await requireUser(app, req);
+    await app.auth.revokeAllSessions(userId);
+    return ok({ ok: true });
+  });
+  // Change password (verifies the current one); returns a fresh token pair since
+  // the change revokes every prior session.
+  r.post("/v1/auth/password", async (req) => {
+    const userId = await requireUser(app, req);
+    const b = await req.json<{ currentPassword: string; newPassword: string }>();
+    const user = await app.auth.changePassword(userId, b.currentPassword, b.newPassword);
+    return ok(await tokenPair(app, user));
   });
 
   r.get("/v1/me", async (req) => {

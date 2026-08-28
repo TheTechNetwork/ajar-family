@@ -40,6 +40,7 @@ export class MemoryStore implements Repository {
   private audit: AuditEvent[] = [];
 
   async createUser(u: User) { this.users.set(u.id, clone(u)); return clone(u); }
+  async updateUser(u: User) { this.users.set(u.id, clone(u)); return clone(u); }
   async getUser(id: string) { const v = this.users.get(id); return v ? clone(v) : null; }
   async getUserByEmail(email: string) {
     for (const u of this.users.values()) if (u.email === email) return clone(u);

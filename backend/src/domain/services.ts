@@ -14,12 +14,62 @@ import type {
   PolicyRule, TemporaryRule, DefaultPolicy, PolicyTargetType, RuleScope,
 } from "./model.js";
 import type { DevicePolicySnapshot } from "@ajar/shared/policy";
+import { hashPassword, verifyPassword } from "../auth/password.js";
 
 const now = () => new Date().toISOString();
 const uid = () => randomUUID();
 
 export class DomainError extends Error {
   constructor(message: string, public code = "BAD_REQUEST") { super(message); }
+}
+
+// ---------------------------------------------------------------------------
+// Auth — self-contained password credentials, no external identity provider.
+// ---------------------------------------------------------------------------
+
+export class AuthService {
+  constructor(private repo: Repository) {}
+
+  /** Register a parent with a password. Fails if the email is already taken. */
+  async register(email: string, password: string, displayName: string): Promise<User> {
+    if (!email || !displayName) throw new DomainError("email and displayName required");
+    if (await this.repo.getUserByEmail(email)) throw new DomainError("email already registered", "CONFLICT");
+    const passwordHash = await hashPassword(password); // throws on too-short
+    return this.repo.createUser({ id: uid(), email, displayName, passwordHash, tokenVersion: 0, createdAt: now() });
+  }
+
+  /** Verify email + password. One generic error either way (no user enumeration). */
+  async authenticate(email: string, password: string): Promise<User> {
+    const user = await this.repo.getUserByEmail(email);
+    const okUser = user && (await verifyPassword(password, user.passwordHash));
+    if (!user || !okUser) throw new DomainError("invalid email or password", "UNAUTHORIZED");
+    return user;
+  }
+
+  /** Change password after confirming the current one; bumps tokenVersion so all
+   *  other outstanding sessions are revoked. Returns the updated user. */
+  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<User> {
+    const user = await this.repo.getUser(userId);
+    if (!user) throw new DomainError("unknown user", "NOT_FOUND");
+    if (!(await verifyPassword(currentPassword, user.passwordHash)))
+      throw new DomainError("current password is incorrect", "UNAUTHORIZED");
+    const passwordHash = await hashPassword(newPassword);
+    return this.repo.updateUser({ ...user, passwordHash, tokenVersion: user.tokenVersion + 1 });
+  }
+
+  /** Revoke every outstanding token for the user (sign out everywhere). */
+  async revokeAllSessions(userId: string): Promise<User> {
+    const user = await this.repo.getUser(userId);
+    if (!user) throw new DomainError("unknown user", "NOT_FOUND");
+    return this.repo.updateUser({ ...user, tokenVersion: user.tokenVersion + 1 });
+  }
+
+  /** Load a user and confirm the token's version is still current (not revoked). */
+  async userForToken(userId: string, tv: number): Promise<User> {
+    const user = await this.repo.getUser(userId);
+    if (!user || user.tokenVersion !== tv) throw new DomainError("session expired", "UNAUTHORIZED");
+    return user;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -42,7 +92,7 @@ export class FamilyService {
   async createUser(email: string, displayName: string): Promise<User> {
     const existing = await this.repo.getUserByEmail(email);
     if (existing) return existing;
-    return this.repo.createUser({ id: uid(), email, displayName, createdAt: now() });
+    return this.repo.createUser({ id: uid(), email, displayName, tokenVersion: 0, createdAt: now() });
   }
 
   async createFamily(name: string, ownerUserId: string): Promise<Family> {

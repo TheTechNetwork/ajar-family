@@ -22,6 +22,7 @@ import type {
 export interface Repository {
   // users
   createUser(u: User): Promise<User>;
+  updateUser(u: User): Promise<User>;
   getUser(id: string): Promise<User | null>;
   getUserByEmail(email: string): Promise<User | null>;
 

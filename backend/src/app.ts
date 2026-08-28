@@ -8,7 +8,7 @@ import { ConsoleNotifier, HubNotifier, type Notifier } from "./push/notifier.js"
 import { EventHub } from "./push/hub.js";
 import { generateSigningKeyPair } from "./domain/signing.js";
 import {
-  FamilyService, EnrollmentService, PolicyService, ApprovalService,
+  AuthService, FamilyService, EnrollmentService, PolicyService, ApprovalService,
 } from "./domain/services.js";
 
 export interface AppConfig {
@@ -25,6 +25,7 @@ export class App {
   readonly hub: EventHub;
   readonly authSecret: string;
   readonly signingPublicKeyB64: string;
+  readonly auth: AuthService;
   readonly family: FamilyService;
   readonly enrollment: EnrollmentService;
   readonly policy: PolicyService;
@@ -37,6 +38,7 @@ export class App {
     this.hub = hub;
     this.authSecret = cfg.authSecret;
     this.signingPublicKeyB64 = signingPublicKeyB64;
+    this.auth = new AuthService(repo);
     this.family = new FamilyService(repo);
     this.enrollment = new EnrollmentService(repo);
     this.policy = new PolicyService(repo, signingPrivateKeyB64);

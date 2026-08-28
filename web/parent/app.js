@@ -10,20 +10,42 @@
 const $ = (id) => document.getElementById(id);
 const state = {
   backendUrl: localStorage.getItem("cf_backend") || "http://localhost:8787",
-  token: localStorage.getItem("cf_token") || null,
+  token: localStorage.getItem("cf_access") || null,        // short-lived access token
+  refresh: localStorage.getItem("cf_refresh") || null,     // long-lived refresh token
   familyId: localStorage.getItem("cf_family") || null,
 };
+function setTokens(out) {
+  state.token = out.accessToken; state.refresh = out.refreshToken;
+  localStorage.setItem("cf_access", out.accessToken);
+  localStorage.setItem("cf_refresh", out.refreshToken);
+}
+function clearTokens() {
+  state.token = null; state.refresh = null;
+  localStorage.removeItem("cf_access"); localStorage.removeItem("cf_refresh");
+}
 
 function flash(msg) {
   const f = $("flash"); f.textContent = msg; f.classList.add("show");
   setTimeout(() => f.classList.remove("show"), 1800);
 }
-async function api(path, { method = "GET", body, auth = true, signal } = {}) {
+async function rawApi(path, { method = "GET", body, auth = true, signal } = {}) {
   const headers = { "content-type": "application/json" };
   if (auth && state.token) headers.authorization = `Bearer ${state.token}`;
   const res = await fetch(state.backendUrl + path, { method, headers, body: body ? JSON.stringify(body) : undefined, signal });
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
+  return { res, data };
+}
+// On a 401, transparently refresh the access token once and retry.
+async function api(path, opts = {}) {
+  let { res, data } = await rawApi(path, opts);
+  if (res.status === 401 && opts.auth !== false && state.refresh) {
+    try {
+      const rr = await rawApi("/v1/auth/refresh", { method: "POST", auth: false, body: { refreshToken: state.refresh } });
+      if (rr.res.ok) { setTokens(rr.data); ({ res, data } = await rawApi(path, opts)); }
+      else clearTokens();
+    } catch { /* fall through to the error below */ }
+  }
   if (!res.ok) throw new Error(data.error || `${res.status}`);
   return data;
 }
@@ -37,10 +59,11 @@ async function auth(register) {
   $("authErr").textContent = "";
   try {
     const email = $("email").value.trim();
+    const password = $("password").value;
     const out = register
-      ? await api("/v1/auth/register", { method: "POST", auth: false, body: { email, displayName: $("name").value.trim() || email } })
-      : await api("/v1/auth/login", { method: "POST", auth: false, body: { email } });
-    state.token = out.token; localStorage.setItem("cf_token", out.token);
+      ? await api("/v1/auth/register", { method: "POST", auth: false, body: { email, password, displayName: $("name").value.trim() || email } })
+      : await api("/v1/auth/login", { method: "POST", auth: false, body: { email, password } });
+    setTokens(out);
     await afterLogin();
   } catch (e) { $("authErr").textContent = String(e.message || e); }
 }
@@ -202,6 +225,6 @@ async function decide(requestId, decision, scope, duration) {
 
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
-// Auto-resume a session.
+// Auto-resume a session (api() refreshes a stale access token automatically).
 $("backendUrl").value = state.backendUrl;
-if (state.token) afterLogin().catch(() => { state.token = null; localStorage.removeItem("cf_token"); });
+if (state.token || state.refresh) afterLogin().catch(() => clearTokens());

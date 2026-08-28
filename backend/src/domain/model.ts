@@ -29,7 +29,11 @@ export interface User {
   id: string;
   email: string;
   displayName: string;
-  /** Auth is a skeleton for the alpha: opaque credential ref, not a password store. */
+  /** PBKDF2 hash (auth/password.ts). Absent for users created without a password
+   *  (e.g. a co-parent added by id who hasn't set one yet) — they cannot log in. */
+  passwordHash?: string;
+  /** Bumped on logout / password change to revoke every outstanding token. */
+  tokenVersion: number;
   createdAt: string;
 }
 

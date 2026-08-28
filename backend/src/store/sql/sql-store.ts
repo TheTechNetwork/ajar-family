@@ -33,14 +33,23 @@ export class SqlStore implements Repository {
 
   // users
   async createUser(u: User) {
-    await this.db.run("INSERT INTO users(id,email,display_name,created_at) VALUES(?,?,?,?)",
-      [u.id, u.email, u.displayName, u.createdAt]);
+    await this.db.run("INSERT INTO users(id,email,display_name,password_hash,token_version,created_at) VALUES(?,?,?,?,?,?)",
+      [u.id, u.email, u.displayName, u.passwordHash ?? null, u.tokenVersion, u.createdAt]);
+    return u;
+  }
+  async updateUser(u: User) {
+    await this.db.run("UPDATE users SET email=?, display_name=?, password_hash=?, token_version=? WHERE id=?",
+      [u.email, u.displayName, u.passwordHash ?? null, u.tokenVersion, u.id]);
     return u;
   }
   async getUser(id: string) { return this.mapUser(await this.db.get("SELECT * FROM users WHERE id=?", [id])); }
   async getUserByEmail(email: string) { return this.mapUser(await this.db.get("SELECT * FROM users WHERE email=?", [email])); }
   private mapUser(r: SqlRow | null): User | null {
-    return r ? { id: r.id as string, email: r.email as string, displayName: r.display_name as string, createdAt: r.created_at as string } : null;
+    return r ? {
+      id: r.id as string, email: r.email as string, displayName: r.display_name as string,
+      passwordHash: (r.password_hash as string | null) ?? undefined,
+      tokenVersion: Number(r.token_version ?? 0), createdAt: r.created_at as string,
+    } : null;
   }
 
   // families & membership

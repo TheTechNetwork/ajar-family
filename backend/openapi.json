@@ -647,6 +647,35 @@
           "token",
           "createdAt"
         ]
+      },
+      "TokenResponse": {
+        "type": "object",
+        "description": "Access + refresh token pair. Send accessToken as `Authorization: Bearer <accessToken>`; when it expires, POST refreshToken to /v1/auth/refresh.",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "tokenType": {
+            "const": "Bearer"
+          },
+          "expiresIn": {
+            "type": "integer",
+            "description": "access-token lifetime (seconds)"
+          },
+          "accessToken": {
+            "type": "string"
+          },
+          "refreshToken": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "tokenType",
+          "expiresIn",
+          "accessToken",
+          "refreshToken"
+        ]
       }
     }
   },
@@ -736,7 +765,7 @@
         "tags": [
           "auth"
         ],
-        "summary": "Register a parent and get a user token",
+        "summary": "Register a parent with a password",
         "security": [],
         "requestBody": {
           "required": true,
@@ -749,12 +778,17 @@
                     "type": "string",
                     "format": "email"
                   },
+                  "password": {
+                    "type": "string",
+                    "minLength": 8
+                  },
                   "displayName": {
                     "type": "string"
                   }
                 },
                 "required": [
                   "email",
+                  "password",
                   "displayName"
                 ]
               }
@@ -762,26 +796,28 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Token",
+          "201": {
+            "description": "Token pair",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "userId": {
-                      "type": "string"
-                    },
-                    "token": {
-                      "type": "string"
-                    }
-                  }
+                  "$ref": "#/components/schemas/TokenResponse"
                 }
               }
             }
           },
           "400": {
             "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email already registered",
             "content": {
               "application/json": {
                 "schema": {
@@ -798,7 +834,7 @@
         "tags": [
           "auth"
         ],
-        "summary": "Log in by email and get a user token",
+        "summary": "Log in with email + password",
         "security": [],
         "requestBody": {
           "required": true,
@@ -810,10 +846,14 @@
                   "email": {
                     "type": "string",
                     "format": "email"
+                  },
+                  "password": {
+                    "type": "string"
                   }
                 },
                 "required": [
-                  "email"
+                  "email",
+                  "password"
                 ]
               }
             }
@@ -821,25 +861,174 @@
         },
         "responses": {
           "200": {
-            "description": "Token",
+            "description": "Token pair",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid email or password",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/refresh": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Exchange a refresh token for a fresh token pair",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refreshToken": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "refreshToken"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token pair",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign out everywhere (revoke all tokens)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Signed out",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "userId": {
-                      "type": "string"
-                    },
-                    "token": {
-                      "type": "string"
+                    "ok": {
+                      "const": true
                     }
                   }
                 }
               }
             }
           },
-          "404": {
-            "description": "Not found",
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Change password (revokes other sessions)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "currentPassword": {
+                    "type": "string"
+                  },
+                  "newPassword": {
+                    "type": "string",
+                    "minLength": 8
+                  }
+                },
+                "required": [
+                  "currentPassword",
+                  "newPassword"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New token pair",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
             "content": {
               "application/json": {
                 "schema": {
