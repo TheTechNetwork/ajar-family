@@ -1,10 +1,18 @@
-# contentfilter — Cross-Platform Parental URL Filtering Platform
+# Wren — Cross-Platform Parental URL Filtering Platform
+
+> **Wren** · *Say yes faster.* — product name and brand in
+> [`docs/BRAND.md`](docs/BRAND.md) (repo/package name stays `contentfilter`).
 
 A consumer (family) parental-control platform whose defining capability is
 **URL-level** enforcement, not just domain-level: block YouTube generally, but
 let a parent approve **one specific video** in seconds — permanently or
 temporarily — without granting all of YouTube, and **without a VPN or TLS
 interception on Apple platforms and without enterprise MDM**.
+
+**Install (no Node/Go on the box):** [`docs/INSTALL.md`](docs/INSTALL.md) —
+download two prebuilt binaries and run them. The child's PC runs only a single
+static service `.exe` + a store browser extension; the backend runs on Cloudflare
+Workers (or self-host it as one bundled binary).
 
 > **Repository status: Phase 0 complete + Phase 1 backend alpha underway.** The
 > architecture research and PoC scaffolds are in place, and the platform-agnostic
@@ -32,6 +40,9 @@ interception on Apple platforms and without enterprise MDM**.
 | `docs/MACOS_SAFARI_POC.md` | **PoC B** — macOS Safari Web Extension (per-video, unresolved). Never block Safari. |
 | `docs/WINDOWS_FILTER_POC.md` | **PoC C** — Windows policy-installed browser extension + hardened service (no MITM by default). |
 | `docs/APPLE_URL_FILTER_POC.md` | **PoC D (supplementary)** — `NEURLFilter` Bloom/PIR large-scale blocklist. |
+| `docs/INSTALL.md` | **Install with prebuilt binaries** — no Node/Go on the box; cloud or self-hosted backend. |
+| `docs/BRAND.md` | Product name (**Wren**), voice, microcopy, and palette. |
+| `docs/UX_PRINCIPLES.md` | Behavioral-science UX principles for the ask→approve→unblock loop, mapped to concrete UI changes. |
 | `docs/DEPLOYMENT.md` | Backend → Cloudflare Workers via GitHub Actions; secrets + signing-key generation. |
 | `docs/APPLE_ACCOUNT_SETUP.md` | Apple Developer account prep runbook (enrollment, App IDs, entitlements, Family Controls request, APNs). |
 | `docs/RELEASE_CHECKLIST.md` | The gate for merging PR #1 — "alpha ready → merge." |

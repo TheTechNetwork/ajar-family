@@ -1,12 +1,16 @@
 # Deploy & test — Windows end-to-end (alpha)
 
+> **Just want to install it?** Use **[INSTALL.md](INSTALL.md)** — download two
+> prebuilt binaries, no Node or Go on the box. **This page is the build-from-source
+> developer demo** (it compiles everything locally), useful for hacking on Wren.
+
 Full loop on one Windows 11 machine: backend + parent console + browser extension
 + hardened service. **Each step has a test and the ✅ result to expect.** Do them
 in order. Times are rough.
 
-**Prereqs:** Node 22, Go 1.24+, Chrome or Edge, a **standard (non-admin) child
-account** for the real test (you can dry-run as admin). PowerShell as Admin for the
-service steps.
+**Prereqs (from-source only):** Node 22, Go 1.24+, Chrome or Edge, a **standard
+(non-admin) child account** for the real test (you can dry-run as admin).
+PowerShell as Admin for the service steps.
 
 ---
 
@@ -22,12 +26,11 @@ cd backend ; $env:AUTH_SECRET="dev" ; node dist/index.js   # leave running
 
 ---
 
-## B. Parent console (1 min)
+## B. Parent console (30 sec)
 
-```powershell
-npx http-server web/parent -p 5500   # leave running; new terminal
-```
-1. Open `http://localhost:5500` → **Register** (any email + name).
+The backend from step A already serves the console — no separate web server.
+
+1. Open `http://localhost:8787/` → **Register** (any email + name).
 2. **Create family** → **Add child** "Jane" → click **Enroll a device**.
 
 **Test:** an enrollment **code** (6 digits) appears.
@@ -105,7 +108,7 @@ seconds → others blocked → auto-expires. No VPN, no TLS interception.
 ```powershell
 # elevated
 cd windows\agent ; .\install\uninstall.ps1     # stop+remove service, remove policies
-# stop the backend / http-server terminals (Ctrl+C); remove the unpacked extension in chrome://extensions
+# stop the backend terminal (Ctrl+C); remove the unpacked extension in chrome://extensions
 ```
 
 ## If something's off (fast checks)
