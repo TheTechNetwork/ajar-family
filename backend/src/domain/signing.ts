@@ -9,7 +9,7 @@
  * both runtimes' WebCrypto can import.
  */
 import { canonicalJSON } from "../util/canonical.js";
-import type { DevicePolicySnapshot } from "@contentfilter/shared/policy";
+import type { DevicePolicySnapshot } from "@ajar/shared/policy";
 
 const ALG = { name: "Ed25519" } as const;
 const b64 = (buf: ArrayBuffer) => Buffer.from(buf).toString("base64");

@@ -28,4 +28,4 @@ xcuserdata/
 
 # Go build artifacts
 *.exe
-windows/agent/familyfilter.exe
+windows/agent/ajar-agent.exe

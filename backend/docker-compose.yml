@@ -5,15 +5,15 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: contentfilter
-      POSTGRES_PASSWORD: contentfilter
-      POSTGRES_DB: contentfilter
+      POSTGRES_USER: ajar
+      POSTGRES_PASSWORD: ajar
+      POSTGRES_DB: ajar
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U contentfilter"]
+      test: ["CMD-SHELL", "pg_isready -U ajar"]
       interval: 5s
       timeout: 3s
       retries: 10

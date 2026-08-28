@@ -84,7 +84,7 @@ best of both: instantly understood, yet distinctive for our goods.
 | Child app / agent | **Ajar for Kids** (agent codename **Latch**) | The child's device agent. Its block/ask screen is the moment the door is *ajar* — a calm ask, never a "blocked" wall. |
 | iOS content-filter extensions | Ajar filter (data + control appex) | The classic `NEFilterDataProvider` + control provider path. |
 | macOS | **Ajar for Mac** (Safari Web Extension + helper) | Extension-based enforcement. Never blocks Safari. |
-| Windows service | **Ajar Agent** — service display name **"Ajar Family Agent"** | Avoids "guard/service" negativity in the user-visible name. (Code identifier stays `FamilyFilterAgent` until a coordinated rename.) |
+| Windows service | **Ajar Agent** — service display name **"Ajar Family Agent"** | Avoids "guard/service" negativity in the user-visible name. Service ID `AjarFamilyAgent`; binary `ajar-agent.exe`; data under `%ProgramData%\Ajar`. |
 | Backend / API | **Ajar Cloud** — `api.ajar.family` | The shared policy engine + approval loop. |
 
 **Reverse-DNS bundle prefix.** Tie to the domain we can register (`ajar.family`):

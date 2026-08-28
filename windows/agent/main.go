@@ -1,6 +1,6 @@
 //go:build windows
 
-// Family Filter Windows service (PoC C production path).
+// Ajar Windows service (PoC C production path).
 //
 // Responsibilities: apply the HKLM browser policies that force-install the
 // enforcement extension and close anti-bypass gaps, re-apply on a watchdog tick,
@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	serviceName = "FamilyFilterAgent"
+	serviceName = "AjarFamilyAgent"
 	displayName = "Ajar Family Agent"
 	description = "Applies parental-control browser policies and monitors for tampering. github.com/00o-sh/contentfilter"
 	version     = "0.1.0-alpha"
@@ -56,7 +56,7 @@ func main() {
 	case "version":
 		fmt.Println(serviceName, version)
 	default:
-		fmt.Printf(`Family Filter Agent %s
+		fmt.Printf(`Ajar Family Agent %s
 usage: %s <command>
   install     install + start the service (run elevated)
   uninstall   stop + remove the service and its policies

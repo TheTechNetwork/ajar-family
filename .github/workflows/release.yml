@@ -2,7 +2,7 @@ name: Release
 
 # Publishes prebuilt, self-contained binaries so a family installs Ajar with NO
 # Node or Go toolchain on the box (see docs/INSTALL.md):
-#   - familyfilter.exe        Windows service (Go, static, amd64 + arm64)
+#   - ajar-agent.exe        Windows service (Go, static, amd64 + arm64)
 #   - ajar-backend[.exe]      backend API + parent console as one SEA binary
 #                             (win / mac / linux), zipped with the web/ console
 #
@@ -25,7 +25,7 @@ jobs:
         with:
           go-version: "1.24"
           cache-dependency-path: windows/agent/go.sum
-      - name: Cross-compile familyfilter.exe (amd64 + arm64)
+      - name: Cross-compile ajar-agent.exe (amd64 + arm64)
         working-directory: windows/agent
         run: |
           set -euo pipefail
@@ -33,7 +33,7 @@ jobs:
             echo "building windows/$arch"
             GOOS=windows GOARCH=$arch CGO_ENABLED=0 \
               go build -trimpath -ldflags "-s -w" \
-              -o "../../out/familyfilter-windows-$arch.exe" .
+              -o "../../out/ajar-agent-windows-$arch.exe" .
           done
       - uses: actions/upload-artifact@v4
         with:
@@ -119,8 +119,8 @@ jobs:
           body: |
             Ajar — prebuilt binaries. No Node or Go toolchain needed on the box.
 
-            - `familyfilter-windows-{amd64,arm64}.exe` — Windows service. Install
-              elevated: `familyfilter-windows-amd64.exe install`.
+            - `ajar-agent-windows-{amd64,arm64}.exe` — Windows service. Install
+              elevated: `ajar-agent-windows-amd64.exe install`.
             - `ajar-backend-{linux,macos,windows}-*.zip` — self-hostable backend
               (API + parent console in one binary). Unzip and run the binary; it
               serves the console at `/`.

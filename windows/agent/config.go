@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-// Config is read from %ProgramData%\FamilyFilter\config.json (written by
+// Config is read from %ProgramData%\Ajar\config.json (written by
 // install.ps1). All fields have safe defaults so the service runs even if the
 // file is missing.
 type Config struct {
@@ -28,7 +28,7 @@ func programDataDir() string {
 	if pd == "" {
 		pd = `C:\ProgramData`
 	}
-	return filepath.Join(pd, "FamilyFilter")
+	return filepath.Join(pd, "Ajar")
 }
 
 func configPath() string { return filepath.Join(programDataDir(), "config.json") }

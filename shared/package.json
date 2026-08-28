@@ -1,5 +1,5 @@
 {
-  "name": "@contentfilter/shared",
+  "name": "@ajar/shared",
   "version": "0.0.0-alpha",
   "description": "Platform-agnostic source of truth: policy model + YouTube canonicalization",
   "type": "module",

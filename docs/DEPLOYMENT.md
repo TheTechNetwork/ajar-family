@@ -33,7 +33,7 @@
     `Repository` over SQLite, with a **node:sqlite** adapter (Node host, via
     `DATABASE_FILE`) and a **D1** adapter (Workers). Same interface, same schema,
     covered by a durability test. To make the Worker durable: `wrangler d1 create
-    contentfilter`, uncomment the **`[[d1_databases]]`** binding (`binding = "DB"`)
+    ajar`, uncomment the **`[[d1_databases]]`** binding (`binding = "DB"`)
     in `backend/wrangler.toml` with the returned id, and redeploy — `worker.ts`
     auto-selects D1 when `env.DB` is bound and creates the schema on first use.
     D1: <https://developers.cloudflare.com/d1/>.
@@ -54,7 +54,7 @@
       (`compatibility_flags = ["nodejs_compat"]`): the Worker uses `node:crypto`
       `randomUUID()` and `Buffer` via the Node compat layer. Node compatibility:
       <https://developers.cloudflare.com/workers/runtime-apis/nodejs/>.
-- Current `wrangler.toml` facts: `name = "contentfilter-backend"`,
+- Current `wrangler.toml` facts: `name = "ajar-backend"`,
   `main = "dist/worker.js"`, `compatibility_date = "2026-08-01"`, observability
   enabled.
 
@@ -67,10 +67,10 @@ backend):
 
 ```
 npm ci
-npm run build     # = build @contentfilter/shared, then @contentfilter/backend (tsc → dist/)
+npm run build     # = build @ajar/shared, then @ajar/backend (tsc → dist/)
 ```
 
-- `@contentfilter/shared` builds first (backend imports `@contentfilter/shared/policy`).
+- `@ajar/shared` builds first (backend imports `@ajar/shared/policy`).
 - The backend `tsc` emits `backend/dist/`, including **`dist/worker.js`** (the
   Workers entrypoint) and `dist/index.js` (the Node entrypoint).
 
@@ -92,9 +92,9 @@ wrangler deploy   # uses backend/wrangler.toml → main = dist/worker.js, nodejs
 Post-deploy smoke test (no state required — safe on the in-memory store):
 
 ```
-curl https://contentfilter-backend.<subdomain>.workers.dev/v1/health
+curl https://ajar-backend.<subdomain>.workers.dev/v1/health
 # → {"status":"ok","version":"0.0.0-alpha"}
-curl https://contentfilter-backend.<subdomain>.workers.dev/v1/signing-key
+curl https://ajar-backend.<subdomain>.workers.dev/v1/signing-key
 # → {"publicKeyB64":"...","alg":"Ed25519"}
 ```
 

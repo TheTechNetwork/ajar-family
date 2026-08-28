@@ -1,7 +1,8 @@
 # Ajar — Cross-Platform Parental URL Filtering Platform
 
 > **Ajar** · *Say yes faster.* — product name and brand in
-> [`docs/BRAND.md`](docs/BRAND.md) (repo/package name stays `contentfilter`).
+> [`docs/BRAND.md`](docs/BRAND.md). npm packages are `@ajar/*`; the GitHub repo
+> is still named `contentfilter` (rename pending in Settings).
 > Every rival is a locked door; Ajar is the door left open a crack — one tap and
 > just that one thing swings open.
 

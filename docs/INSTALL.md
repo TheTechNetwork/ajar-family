@@ -7,7 +7,7 @@ You download two things and run them. Each step has the **✅ result** to expect
 > - **Backend** (API + parent console): runs in the cloud on **Cloudflare
 >   Workers** — nothing on the child's box. (You *can* self-host the same
 >   backend as one binary; see §4.)
-> - **Child's Windows PC**: only the **Ajar service** (`familyfilter.exe`, a
+> - **Child's Windows PC**: only the **Ajar service** (`ajar-agent.exe`, a
 >   single static binary) + the **browser extension** (from the store).
 > - **Parent**: the console in any browser (served by the backend at `/`).
 
@@ -20,7 +20,7 @@ Download the latest binaries from the repo's **Releases** page:
 
 From Releases, download:
 
-- `familyfilter-windows-amd64.exe` — the Ajar service (use `arm64` on ARM PCs).
+- `ajar-agent-windows-amd64.exe` — the Ajar service (use `arm64` on ARM PCs).
 - (Self-host only) `ajar-backend-windows-x64.zip` (or `-macos-arm64` / `-linux-x64`).
 
 ✅ You have a `.exe` (and optionally a `.zip`). No installer, no runtime.
@@ -32,17 +32,17 @@ From Releases, download:
 Open **PowerShell as Administrator**, `cd` to the download folder, then:
 
 ```powershell
-.\familyfilter-windows-amd64.exe install `
+.\ajar-agent-windows-amd64.exe install `
   -BackendUrl https://api.ajar.family `
   -ChromeExtensionId <STORE_EXTENSION_ID> `
   -ChildUser "$env:COMPUTERNAME\Jane"
 ```
 
-**Test:** `sc.exe query FamilyFilterAgent`
+**Test:** `sc.exe query AjarFamilyAgent`
 ✅ `STATE : 4  RUNNING`.
 
 **Test (tamper-resist):** from the child's **standard** account, run
-`sc.exe stop FamilyFilterAgent`
+`sc.exe stop AjarFamilyAgent`
 ✅ `Access is denied.`
 
 > If install prints `WARNING: … IS A LOCAL ADMINISTRATOR`, the child account can
@@ -113,7 +113,7 @@ Point the service's `-BackendUrl` at this host instead of the cloud URL.
 
 | Binary | Built by | Toolchain on the box? |
 |---|---|---|
-| `familyfilter-*.exe` | Go, cross-compiled in CI (`.github/workflows/release.yml`) | **None** — static binary |
+| `ajar-agent-*.exe` | Go, cross-compiled in CI (`.github/workflows/release.yml`) | **None** — static binary |
 | `ajar-backend-*` | Node SEA, built per-OS in CI (`backend/scripts/build-sea.mjs`) | **None** — Node is baked in |
 | Browser extension | Published to Chrome Web Store / Edge Add-ons | **None** — installed by policy |
 

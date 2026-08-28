@@ -1,4 +1,4 @@
-module familyfilter/agent
+module ajar/agent
 
 go 1.24
 

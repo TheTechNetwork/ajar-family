@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { App } from "../app.js";
 import { InMemoryNotifier } from "../push/notifier.js";
 import { generateSigningKeyPair, verifySnapshot } from "./signing.js";
-import { evaluate } from "@contentfilter/shared/policy";
+import { evaluate } from "@ajar/shared/policy";
 
 const ALLOWED = "dQw4w9WgXcQ";
 const BLOCKED = "9bZkp7q19f0";

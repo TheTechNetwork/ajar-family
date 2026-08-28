@@ -42,20 +42,20 @@ The backend from step A already serves the console — no separate web server.
 
 ```powershell
 cd windows\agent
-$env:GOOS="windows"; $env:GOARCH="amd64"; go build -o familyfilter.exe .
+$env:GOOS="windows"; $env:GOARCH="amd64"; go build -o ajar-agent.exe .
 # Elevated PowerShell for install:
-.\install\install.ps1 -ExePath .\familyfilter.exe -ChromeExtensionId PLACEHOLDER `
+.\install\install.ps1 -ExePath .\ajar-agent.exe -ChromeExtensionId PLACEHOLDER `
   -BackendUrl http://localhost:8787 -ChildUser "$env:COMPUTERNAME\Jane"
 ```
-**Test 1 — service running:** `sc.exe query FamilyFilterAgent`
+**Test 1 — service running:** `sc.exe query AjarFamilyAgent`
 ✅ `STATE : 4 RUNNING`.
 
 **Test 2 — non-admin can't stop it:** from a **standard** user shell:
-`sc.exe stop FamilyFilterAgent`
+`sc.exe stop AjarFamilyAgent`
 ✅ `Access is denied.` (default service SD denies non-admin stop.)
 
-**Test 3 — auto-restart:** elevated: `taskkill /IM familyfilter.exe /F` → wait 5 s →
-`sc.exe query FamilyFilterAgent`
+**Test 3 — auto-restart:** elevated: `taskkill /IM ajar-agent.exe /F` → wait 5 s →
+`sc.exe query AjarFamilyAgent`
 ✅ back to `RUNNING` (SCM recovery restarts it).
 
 **Test 4 — admin-child warning:** if you passed an admin `-ChildUser`, install prints
@@ -115,5 +115,5 @@ cd windows\agent ; .\install\uninstall.ps1     # stop+remove service, remove pol
 - Extension not enforcing → reload it in `chrome://extensions`; re-check Options shows Enrolled.
 - Request not showing → confirm backend terminal is up; parent console Backend URL = `http://localhost:8787`.
 - Approved video still blocked → give it ~5 s (long-poll); hard-reload (Ctrl+F5).
-- Service won't install → PowerShell must be **elevated**; `familyfilter.exe status`.
+- Service won't install → PowerShell must be **elevated**; `ajar-agent.exe status`.
 - `curl` health fails → backend terminal died; restart Part A.

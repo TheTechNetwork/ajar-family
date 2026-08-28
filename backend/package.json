@@ -1,5 +1,5 @@
 {
-  "name": "@contentfilter/backend",
+  "name": "@ajar/backend",
   "version": "0.0.0-alpha",
   "description": "Cloud backend: family model, policy engine, temporary approvals, access requests, signed policy sync",
   "type": "module",
@@ -14,7 +14,7 @@
     "sea": "npm run bundle && node scripts/build-sea.mjs"
   },
   "dependencies": {
-    "@contentfilter/shared": "*"
+    "@ajar/shared": "*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -10,7 +10,7 @@ import type {
   RuleAction,
   PolicyTargetType,
   RuleScope,
-} from "@contentfilter/shared/policy";
+} from "@ajar/shared/policy";
 
 export type {
   PolicyRule,

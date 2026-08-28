@@ -14,7 +14,7 @@ Tiers C3–C5; the extension is C1–C2).
 
 ## Implementation (v1, built)
 
-A single Go binary (`familyfilter.exe`, no external runtime). What it does today:
+A single Go binary (`ajar-agent.exe`, no external runtime). What it does today:
 **applies the HKLM browser policies** (force-install the extension, block others,
 kill QUIC/DoH/ECH, disable incognito/devtools/guest — see
 `policies/registry-policies.md`), **re-applies on a watchdog tick**, **warns if the
@@ -24,20 +24,20 @@ non-admins. No TLS interception, no stealth/rootkit techniques.
 
 ```powershell
 # Build (from windows/agent/, needs Go 1.24+). Cross-compiles from any OS:
-$env:GOOS="windows"; $env:GOARCH="amd64"; go build -o familyfilter.exe .
+$env:GOOS="windows"; $env:GOARCH="amd64"; go build -o ajar-agent.exe .
 
 # Install (elevated PowerShell): copies the exe, writes an ACL-locked config,
 # creates+starts the service, checks the child isn't an admin.
-.\install\install.ps1 -ExePath .\familyfilter.exe `
+.\install\install.ps1 -ExePath .\ajar-agent.exe `
   -ChromeExtensionId <webstore-id> -BackendUrl http://localhost:8787 -ChildUser "PC\Jane"
 
-familyfilter.exe status     # service + console-user admin state
-familyfilter.exe apply      # (elevated) apply policies once, without the service — for testing
+ajar-agent.exe status     # service + console-user admin state
+ajar-agent.exe apply      # (elevated) apply policies once, without the service — for testing
 .\install\uninstall.ps1     # stop + remove service and policies
 ```
 
 Subcommands: `install | uninstall | run | apply | status | version`.
-Config: `%ProgramData%\FamilyFilter\config.json` (see `config.example.json`).
+Config: `%ProgramData%\Ajar\config.json` (see `config.example.json`).
 Full walkthrough with per-step tests: `docs/DEMO_WINDOWS.md`.
 
 **Not yet in v1 (documented follow-ups):** the native-messaging host for the

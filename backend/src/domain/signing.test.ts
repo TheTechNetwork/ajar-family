@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateSigningKeyPair, signSnapshot, verifySnapshot } from "./signing.js";
-import type { DevicePolicySnapshot } from "@contentfilter/shared/policy";
+import type { DevicePolicySnapshot } from "@ajar/shared/policy";
 
 function baseSnapshot(): DevicePolicySnapshot {
   return {

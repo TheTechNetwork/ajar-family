@@ -40,7 +40,7 @@ let SNAPSHOT = null;
  *  deltas rather than trusting Date.now() drift. */
 let CLOCK_ANCHOR = null; // { serverNowMs, perfNowAtAnchor }
 
-const NATIVE_HOST = "com.example.familyfilter.host"; // must match the service's registered native host name
+const NATIVE_HOST = "com.ajarfamily.host"; // must match the service's registered native host name
 const EXT_BLOCK_PAGE = chrome.runtime.getURL("blocked.html");
 
 // ---------------------------------------------------------------------------

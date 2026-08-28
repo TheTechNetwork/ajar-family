@@ -13,7 +13,7 @@ import type {
   AccessRequest, ApprovalDecision, Role, Platform, ApprovalScope, ApprovalDuration,
   PolicyRule, TemporaryRule, DefaultPolicy, PolicyTargetType, RuleScope,
 } from "./model.js";
-import type { DevicePolicySnapshot } from "@contentfilter/shared/policy";
+import type { DevicePolicySnapshot } from "@ajar/shared/policy";
 
 const now = () => new Date().toISOString();
 const uid = () => randomUUID();

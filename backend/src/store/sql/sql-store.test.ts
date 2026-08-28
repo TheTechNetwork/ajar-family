@@ -12,7 +12,7 @@ import { App } from "../../app.js";
 import { createNodeSqlite } from "./database.js";
 import { SqlStore } from "./sql-store.js";
 import { generateSigningKeyPair, verifySnapshot } from "../../domain/signing.js";
-import { evaluate } from "@contentfilter/shared/policy";
+import { evaluate } from "@ajar/shared/policy";
 
 const ALLOWED = "dQw4w9WgXcQ";
 const BLOCKED = "9bZkp7q19f0";

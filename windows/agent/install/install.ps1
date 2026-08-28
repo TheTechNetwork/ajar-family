@@ -1,11 +1,11 @@
 #requires -RunAsAdministrator
 <#
-  Installs the Family Filter agent as a hardened Windows service.
+  Installs the Ajar agent as a hardened Windows service.
   Run in an ELEVATED PowerShell. Builds nothing — point -ExePath at a prebuilt
-  familyfilter.exe (see windows/agent/README.md for the go build command).
+  ajar-agent.exe (see windows/agent/README.md for the go build command).
 
   Example:
-    .\install.ps1 -ExePath .\familyfilter.exe `
+    .\install.ps1 -ExePath .\ajar-agent.exe `
                   -ChromeExtensionId abcdefghijklmnopabcdefghijklmnop `
                   -EdgeExtensionId   abcdefghijklmnopabcdefghijklmnop `
                   -BackendUrl http://localhost:8787 `
@@ -20,11 +20,11 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
-$installDir = Join-Path $env:ProgramFiles "FamilyFilter"
-$dataDir    = Join-Path $env:ProgramData "FamilyFilter"
-$exeDest    = Join-Path $installDir "familyfilter.exe"
+$installDir = Join-Path $env:ProgramFiles "Ajar"
+$dataDir    = Join-Path $env:ProgramData "Ajar"
+$exeDest    = Join-Path $installDir "ajar-agent.exe"
 
-Write-Host "==> Installing Family Filter agent" -ForegroundColor Cyan
+Write-Host "==> Installing Ajar agent" -ForegroundColor Cyan
 
 # 1. Program files: copy the binary.
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
@@ -46,7 +46,7 @@ icacls $dataDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI
 
 # 4. Confirm the default service SD already denies SERVICE_STOP to non-admins.
 Write-Host "Service security descriptor:" -ForegroundColor DarkGray
-sc.exe sdshow FamilyFilterAgent
+sc.exe sdshow AjarFamilyAgent
 
 # 5. ADR-006: the child must be a STANDARD (non-admin) account.
 if ($ChildUser) {
@@ -60,4 +60,4 @@ if ($ChildUser) {
   }
 }
 
-Write-Host "==> Done. Check: sc.exe query FamilyFilterAgent  |  familyfilter.exe status" -ForegroundColor Cyan
+Write-Host "==> Done. Check: sc.exe query AjarFamilyAgent  |  ajar-agent.exe status" -ForegroundColor Cyan

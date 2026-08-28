@@ -3,7 +3,7 @@
 TypeScript backend implementing the platform-agnostic core: family model, roles,
 enrollment, policy engine, temporary approvals, access requests, approval
 decisions, push abstraction, and **signed, versioned policy sync**. Reuses the
-`@contentfilter/shared` policy model + YouTube canonicalization as the source of
+`@ajar/shared` policy model + YouTube canonicalization as the source of
 truth. See `docs/ARCHITECTURE.md §7–§8`.
 
 > **Alpha status:** runs on an **in-memory store** by default (zero external
@@ -18,8 +18,8 @@ truth. See `docs/ARCHITECTURE.md §7–§8`.
 ```sh
 npm ci                 # from the repo root (workspaces)
 npm run build          # builds shared → backend to dist/
-npm run start --workspace @contentfilter/backend   # or: cd backend && npm start
-# → contentfilter backend (alpha) listening on :8787
+npm run start --workspace @ajar/backend   # or: cd backend && npm start
+# → Ajar backend (alpha) listening on :8787
 curl localhost:8787/v1/health
 ```
 

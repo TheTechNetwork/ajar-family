@@ -3,7 +3,7 @@
 # Secrets (never in git): set with `wrangler secret put <NAME>`:
 #   AUTH_SECRET, SIGNING_PUBLIC_KEY_B64, SIGNING_PRIVATE_KEY_B64
 # See docs/DEPLOYMENT.md for generating the Ed25519 keypair and CI wiring.
-name = "contentfilter-backend"
+name = "ajar-backend"
 main = "dist/worker.js"
 compatibility_date = "2026-08-01"
 
@@ -15,13 +15,13 @@ compatibility_flags = ["nodejs_compat"]
 # PERSISTENCE: the durable store (SqlStore over D1) is implemented. Bind a D1
 # database as `DB` to switch the Worker from per-isolate in-memory to durable,
 # cross-isolate storage — the schema is created automatically on first use
-# (IF NOT EXISTS). Create it: `wrangler d1 create contentfilter`, then uncomment
+# (IF NOT EXISTS). Create it: `wrangler d1 create ajar`, then uncomment
 # and paste the id. See docs/DEPLOYMENT.md.
 # ---------------------------------------------------------------------------
 # [[d1_databases]]
 # binding = "DB"
-# database_name = "contentfilter"
-# database_id = "<created via: wrangler d1 create contentfilter>"
+# database_name = "ajar"
+# database_id = "<created via: wrangler d1 create ajar>"
 
 [observability]
 enabled = true
