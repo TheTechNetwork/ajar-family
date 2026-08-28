@@ -3,88 +3,88 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Blocked</title>
+  <title>Ask to unlock</title>
   <style>
+    /* Calm, non-punitive framing (UX_PRINCIPLES §4). Wren palette (docs/BRAND.md). */
     :root {
-      --bg: #f6f7f9;
-      --card: #ffffff;
-      --ink: #1c1e21;
-      --muted: #5b6270;
-      --line: #e3e6ea;
-      --accent: #2f6feb;
-      --accent-ink: #ffffff;
+      --bg: #F6F4EE; --card: #ffffff; --ink: #12241F; --muted: #5c6b64;
+      --line: #e3e1d8; --accent: #18A08C; --accent-ink: #ffffff;
+      --asked: #b7791f; --err: #a15b4a;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #14161a;
-        --card: #1d2026;
-        --ink: #eef0f3;
-        --muted: #a0a7b4;
-        --line: #2b2f37;
-        --accent: #4c86ff;
-        --accent-ink: #0b0d10;
+        --bg: #12211d; --card: #17423a20; --card: #1a2a26; --ink: #eaf1ee; --muted: #9fb1aa;
+        --line: #2b3a35; --accent: #35b7a2; --accent-ink: #0b1512; --asked: #e0b25a; --err: #d98c78;
       }
     }
     * { box-sizing: border-box; }
     body {
       margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
       background: var(--bg); color: var(--ink);
-      font: 16px/1.5 -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
-      padding: 24px;
+      font: 16px/1.5 -apple-system, "Segoe UI", Roboto, system-ui, sans-serif; padding: 24px;
     }
     .card {
-      background: var(--card); border: 1px solid var(--line); border-radius: 14px;
-      max-width: 520px; width: 100%; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,.06);
+      background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+      max-width: 520px; width: 100%; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,.05);
     }
     .badge {
       display: inline-flex; align-items: center; gap: 8px;
-      font-size: 13px; font-weight: 600; color: var(--muted);
-      text-transform: uppercase; letter-spacing: .04em; margin-bottom: 12px;
+      font-size: 13px; font-weight: 700; color: var(--muted); margin-bottom: 14px;
     }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: #e2554e; }
-    h1 { font-size: 22px; margin: 0 0 8px; }
+    h1 { font-size: 22px; margin: 0 0 8px; letter-spacing: -0.01em; }
     p { color: var(--muted); margin: 0 0 16px; }
+    /* Human label is the hero; the raw URL hides behind "Details" (§4). */
+    .resource { font-size: 17px; font-weight: 600; margin: 4px 0 14px; }
+    details { margin: -4px 0 18px; }
+    details summary { font-size: 13px; color: var(--muted); cursor: pointer; }
     .target {
       font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-      font-size: 13px; word-break: break-all; background: rgba(127,127,127,.10);
-      border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0 0 20px;
+      font-size: 12px; word-break: break-all; background: rgba(127,127,127,.10);
+      border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0 0;
     }
-    .reason { font-size: 13px; color: var(--muted); margin: -8px 0 20px; }
     label { display: block; font-size: 13px; font-weight: 600; margin: 0 0 6px; }
     textarea {
-      width: 100%; min-height: 72px; resize: vertical; border: 1px solid var(--line);
+      width: 100%; min-height: 64px; resize: vertical; border: 1px solid var(--line);
       border-radius: 8px; padding: 10px 12px; font: inherit; background: var(--bg); color: var(--ink);
       margin-bottom: 16px;
     }
     .row { display: flex; gap: 10px; flex-wrap: wrap; }
+    /* 44px min hit area (§8, WCAG 2.5.8 / HIG). */
     button {
-      font: inherit; font-weight: 600; border-radius: 8px; padding: 10px 18px; cursor: pointer;
-      border: 1px solid var(--line); background: var(--card); color: var(--ink);
+      font: inherit; font-weight: 700; border-radius: 10px; padding: 12px 20px; min-height: 44px;
+      cursor: pointer; border: 1px solid var(--line); background: var(--card); color: var(--ink);
     }
     button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
-    button:disabled { opacity: .55; cursor: default; }
-    .status { font-size: 13px; margin-top: 14px; min-height: 18px; }
-    .ok { color: #2c9c62; }
-    .err { color: #e2554e; }
+    button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+    button:disabled { opacity: .6; cursor: default; }
+    .status { font-size: 14px; margin-top: 14px; min-height: 20px; font-weight: 600; }
+    .status.ok { color: var(--asked); }
+    .status.err { color: var(--err); }
+    .privacy { font-size: 12px; color: var(--muted); margin-top: 18px; }
   </style>
 </head>
 <body>
   <main class="card">
-    <div class="badge"><span class="dot"></span> Blocked by Family Filter</div>
-    <h1>This page isn't available right now</h1>
-    <p>A parent set up filtering on this computer. You can ask a parent to allow this.</p>
+    <div class="badge">🐦 Wren</div>
+    <h1>You can ask to unlock this page</h1>
+    <p id="lede">Send a quick ask and a parent can open just this — they'll get a message right away.</p>
 
-    <div class="target" id="target">(loading…)</div>
-    <div class="reason" id="reason"></div>
+    <div class="resource" id="resource">(loading…)</div>
+    <details id="details">
+      <summary>Details</summary>
+      <div class="target" id="target">(loading…)</div>
+    </details>
 
-    <label for="note">Add a note for your parent (optional)</label>
-    <textarea id="note" placeholder="Why do you want to watch this?"></textarea>
+    <label for="note">Add a note (optional) — e.g. “it's for homework”</label>
+    <textarea id="note" placeholder="A quick note for your parent"></textarea>
 
     <div class="row">
-      <button class="primary" id="request">Request Access</button>
-      <button id="back">Go Back</button>
+      <button class="primary" id="request">Ask to unlock</button>
+      <button id="back">Go back</button>
     </div>
     <div class="status" id="status"></div>
+
+    <p class="privacy">Only pages you ask about are shared with your parent. Your other browsing isn't sent.</p>
   </main>
 
   <!-- Inline script is CSP-permitted for extension pages under MV3 (the extension

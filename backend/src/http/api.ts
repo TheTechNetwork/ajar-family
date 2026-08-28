@@ -152,6 +152,29 @@ export function buildRouter(app: App): Router {
     const status = req.query.get("status") ?? undefined;
     return ok(await app.repo.listAccessRequests(req.params.familyId!, status));
   });
+  // Long-poll the pending-request feed: returns the current PENDING list the
+  // instant a child files a request or a parent decides one (woken via the hub),
+  // or the unchanged list after the timeout. Lets the parent console react in
+  // seconds without a tight poll. `count` is the client's current pending size;
+  // if it already differs we return immediately. Cross-runtime (no streaming).
+  r.get("/v1/families/:familyId/requests/wait", async (req) => {
+    const userId = await requireUser(app, req);
+    await app.family.membership(req.params.familyId!, userId);
+    const known = Number(req.query.get("count") ?? "-1");
+    const timeout = Math.min(Math.max(Number(req.query.get("timeout") ?? "25000"), 0), 60000);
+    const deadline = Date.now() + timeout;
+    // Return immediately if the pending set already differs from what the client
+    // knows; otherwise park until a create/decide wakes us (return the fresh list
+    // on any wake, so a simultaneous decide+create that nets to the same length is
+    // still delivered) or the deadline passes.
+    const pending = await app.repo.listAccessRequests(req.params.familyId!, "PENDING");
+    if (pending.length !== known) return ok({ requests: pending });
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return ok({ requests: pending, upToDate: true });
+    const woken = await app.hub.wait(`family:${req.params.familyId}`, remaining);
+    if (!woken) return ok({ requests: pending, upToDate: true });
+    return ok({ requests: await app.repo.listAccessRequests(req.params.familyId!, "PENDING") });
+  });
   r.post("/v1/families/:familyId/requests/:requestId/decide", async (req) => {
     const userId = await requireUser(app, req);
     const b = await req.json<{ decision: RuleAction; scope: ApprovalScope; duration: ApprovalDuration }>();

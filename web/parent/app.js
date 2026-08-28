@@ -1,8 +1,11 @@
 /**
- * Parent Console — a minimal static web UI for the approval workflow, so the MVP
- * loop is clickable in a browser (the production parent experience is the iOS app;
- * a web admin was noted as optional in the brief). Talks to the backend REST API
- * with a bearer token; requires CORS on the backend (enabled for the alpha).
+ * Wren — Parent Console. A minimal static web UI for the approval loop, served by
+ * the backend at `/` (one process, no separate web server). Talks to the REST API
+ * with a bearer token (CORS enabled on the backend).
+ *
+ * UX (docs/UX_PRINCIPLES.md): the console reacts in seconds via a long-poll push
+ * (§1), and each ask collapses to ONE primary "Say yes" with the narrowest-useful
+ * default; the full scope/duration matrix hides behind "Change…" (§2/§3).
  */
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -15,10 +18,10 @@ function flash(msg) {
   const f = $("flash"); f.textContent = msg; f.classList.add("show");
   setTimeout(() => f.classList.remove("show"), 1800);
 }
-async function api(path, { method = "GET", body, auth = true } = {}) {
+async function api(path, { method = "GET", body, auth = true, signal } = {}) {
   const headers = { "content-type": "application/json" };
   if (auth && state.token) headers.authorization = `Bearer ${state.token}`;
-  const res = await fetch(state.backendUrl + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch(state.backendUrl + path, { method, headers, body: body ? JSON.stringify(body) : undefined, signal });
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
   if (!res.ok) throw new Error(data.error || `${res.status}`);
@@ -56,7 +59,7 @@ function renderFamilyPick(families) {
   const box = $("familyPick");
   if (!families.length) { box.innerHTML = `<div class="muted">No family yet — create one below.</div>`; return; }
   box.innerHTML = `<label>Family</label>` + families.map((f) =>
-    `<button class="${f.familyId === state.familyId ? "" : "secondary"}" data-fid="${f.familyId}">${f.family?.name ?? f.familyId} · ${f.role}</button>`
+    `<button class="${f.familyId === state.familyId ? "" : "secondary"}" data-fid="${f.familyId}">${escapeHtml(f.family?.name ?? f.familyId)} · ${f.role}</button>`
   ).join(" ");
   box.querySelectorAll("button").forEach((b) => (b.onclick = () => selectFamily(b.dataset.fid)));
 }
@@ -72,7 +75,7 @@ async function selectFamily(fid) {
   $("childrenBox").classList.remove("hide");
   $("requestsCard").classList.remove("hide");
   await refreshChildren();
-  startPolling();
+  startLiveRequests();
   const me = await api("/v1/me"); renderFamilyPick(me.families);
 }
 
@@ -80,7 +83,7 @@ async function selectFamily(fid) {
 async function refreshChildren() {
   const kids = await api(`/v1/families/${state.familyId}/children`);
   $("children").innerHTML = kids.length
-    ? kids.map((k) => `<div class="row" style="margin:0.25rem 0"><div>${k.displayName}</div><div style="flex:0"><button class="secondary" data-cid="${k.id}">Enroll a device</button></div></div>`).join("")
+    ? kids.map((k) => `<div class="row" style="margin:0.25rem 0"><div>${escapeHtml(k.displayName)}</div><div style="flex:0"><button class="secondary" data-cid="${k.id}">Enroll a device</button></div></div>`).join("")
     : `<div class="muted">No children yet.</div>`;
   $("children").querySelectorAll("button").forEach((b) => (b.onclick = () => enrollDevice(b.dataset.cid)));
 }
@@ -97,53 +100,104 @@ async function enrollDevice(childId) {
   flash("Enrollment code generated");
 }
 
-// ---- requests (polled) ----
+// ---- asks (live via long-poll push; §1) ----
 const DURATIONS = [
-  { label: "15m", d: { kind: "MINUTES", minutes: 15 } },
-  { label: "30m", d: { kind: "MINUTES", minutes: 30 } },
-  { label: "1h", d: { kind: "MINUTES", minutes: 60 } },
+  { label: "15 min", d: { kind: "MINUTES", minutes: 15 } },
+  { label: "30 min", d: { kind: "MINUTES", minutes: 30 } },
+  { label: "1 hour", d: { kind: "MINUTES", minutes: 60 } },
   { label: "End of day", d: { kind: "UNTIL_END_OF_DAY" } },
-  { label: "Once", d: { kind: "ONCE" } },
+  { label: "Just once", d: { kind: "ONCE" } },
   { label: "Always", d: { kind: "ALWAYS" } },
 ];
-let pollTimer = null;
-function startPolling() { if (pollTimer) clearInterval(pollTimer); refreshRequests(); pollTimer = setInterval(refreshRequests, 3000); }
+const DEFAULT_DURATION_I = 1; // 30 min — the narrowest-useful default (§3)
+const SCOPES = ["THIS_VIDEO", "THIS_CHANNEL", "THIS_URL", "THIS_DOMAIN", "THIS_DEVICE", "THIS_CHILD", "WHOLE_FAMILY", "THIS_REQUEST"];
+// Human noun for the primary button, per request target type.
+const TARGET_NOUN = {
+  YOUTUBE_VIDEO: "this video", YOUTUBE_CHANNEL: "this channel", YOUTUBE_PLAYLIST: "this playlist",
+  URL: "this page", DOMAIN: "this site", APPLICATION: "this app",
+};
 
-async function refreshRequests() {
-  let reqs;
-  try { reqs = await api(`/v1/families/${state.familyId}/requests?status=PENDING`); } catch { return; }
+let liveActive = false;
+let lastCount = -1;
+
+// Long-poll loop: park on the server until an ask arrives or is decided, then
+// re-render immediately. Falls back to a short delay + retry on any error.
+async function startLiveRequests() {
+  if (liveActive) return;
+  liveActive = true;
+  lastCount = -1;
+  while (liveActive && state.familyId) {
+    try {
+      const out = await api(`/v1/families/${state.familyId}/requests/wait?count=${lastCount}&timeout=25000`);
+      renderRequests(out.requests || []);
+    } catch {
+      // Backend unreachable or auth blip — brief pause, then retry (reconnect).
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+}
+
+function renderRequests(reqs) {
+  lastCount = reqs.length;
   $("reqCount").textContent = reqs.length;
+  $("liveDot").textContent = "· live";
   const box = $("requests");
-  if (!reqs.length) { box.innerHTML = `<div class="empty">No pending requests. Approvals appear here in real time.</div>`; return; }
+  if (!reqs.length) { box.innerHTML = `<div class="empty">No asks right now. New ones appear here the moment a child sends them.</div>`; return; }
   box.innerHTML = reqs.map((r) => renderRequest(r)).join("");
   reqs.forEach((r) => wireRequest(r));
 }
+
 function renderRequest(r) {
-  const scopes = ["THIS_VIDEO", "THIS_CHANNEL", "THIS_URL", "THIS_DOMAIN", "THIS_DEVICE", "THIS_CHILD", "WHOLE_FAMILY", "THIS_REQUEST"];
+  const noun = TARGET_NOUN[r.targetType] || "this";
+  const human = r.title || `${r.targetType} ${r.targetValue}`;
+  const defLabel = DURATIONS[DEFAULT_DURATION_I].label;
   return `<div class="req" id="req-${r.id}">
-    <div class="t">${escapeHtml(r.title || r.targetType)} <span class="pill">${r.targetType}:${escapeHtml(r.targetValue)}</span></div>
-    <div class="meta">${escapeHtml(r.url || "")}</div>
+    <div class="t">${escapeHtml(human)}</div>
+    <div class="meta">${escapeHtml(r.targetType)}:${escapeHtml(r.targetValue)}</div>
     ${r.reason ? `<div class="meta">“${escapeHtml(r.reason)}”</div>` : ""}
-    <label>Scope</label>
-    <select id="scope-${r.id}">${scopes.map((s) => `<option${s === "THIS_VIDEO" ? " selected" : ""}>${s}</option>`).join("")}</select>
+    ${r.url ? `<details><summary>Details</summary><div class="meta">${escapeHtml(r.url)}</div></details>` : ""}
     <div class="actions">
-      ${DURATIONS.map((x, i) => `<button class="ok" data-approve="${r.id}" data-di="${i}">Allow ${x.label}</button>`).join("")}
-      <button class="danger" data-deny="${r.id}">Deny</button>
+      <button class="yes" data-yes="${r.id}">Say yes · ${escapeHtml(noun)} · ${defLabel}</button>
+      <button class="notnow" data-notnow="${r.id}">Not now</button>
+      <button class="ghost" data-change="${r.id}">Change…</button>
+    </div>
+    <div class="change hide" id="change-${r.id}">
+      <label>Open</label>
+      <select id="scope-${r.id}">${SCOPES.map((s) => `<option${s === "THIS_VIDEO" ? " selected" : ""}>${s}</option>`).join("")}</select>
+      <label>For how long</label>
+      <div class="grid">
+        ${DURATIONS.map((x, i) => `<button class="secondary" data-approve="${r.id}" data-di="${i}">${escapeHtml(x.label)}</button>`).join("")}
+      </div>
+      <div class="grid" style="margin-top:0.4rem">
+        <button class="secondary" data-block="${r.id}">Block this</button>
+      </div>
     </div>
   </div>`;
 }
+
 function wireRequest(r) {
-  document.querySelectorAll(`[data-approve="${r.id}"]`).forEach((b) => (b.onclick = () => decide(r.id, "ALLOW", DURATIONS[+b.dataset.di].d)));
-  const deny = document.querySelector(`[data-deny="${r.id}"]`);
-  if (deny) deny.onclick = () => decide(r.id, "BLOCK", { kind: "ALWAYS" });
+  // Primary: narrowest-useful default (THIS_VIDEO / 30 min), one tap (§3).
+  const yes = document.querySelector(`[data-yes="${r.id}"]`);
+  if (yes) yes.onclick = () => decide(r.id, "ALLOW", "THIS_VIDEO", DURATIONS[DEFAULT_DURATION_I].d);
+  const notnow = document.querySelector(`[data-notnow="${r.id}"]`);
+  if (notnow) notnow.onclick = () => decide(r.id, "BLOCK", "THIS_REQUEST", { kind: "ONCE" });
+  const change = document.querySelector(`[data-change="${r.id}"]`);
+  if (change) change.onclick = () => $(`change-${r.id}`).classList.toggle("hide");
+  // Change… — explicit broaden: parent, not fatigue, chooses the wider scope.
+  document.querySelectorAll(`[data-approve="${r.id}"]`).forEach((b) =>
+    (b.onclick = () => decide(r.id, "ALLOW", $(`scope-${r.id}`).value, DURATIONS[+b.dataset.di].d)));
+  const block = document.querySelector(`[data-block="${r.id}"]`);
+  if (block) block.onclick = () => decide(r.id, "BLOCK", "THIS_DOMAIN", { kind: "ALWAYS" });
 }
-async function decide(requestId, decision, duration) {
-  const scope = $(`scope-${requestId}`).value;
+
+async function decide(requestId, decision, scope, duration) {
+  // Optimistic: drop the card immediately so the parent sees the tap land (§1).
+  const card = $(`req-${requestId}`); if (card) card.style.opacity = "0.5";
   try {
     await api(`/v1/families/${state.familyId}/requests/${requestId}/decide`, { method: "POST", body: { decision, scope, duration } });
-    flash(decision === "ALLOW" ? "Approved — child device will update in seconds" : "Denied");
-    refreshRequests();
-  } catch (e) { flash(String(e.message || e)); }
+    flash(decision === "ALLOW" ? "Unlocked — the device updates in seconds" : "Left closed");
+    // The decide wakes our own long-poll; it re-renders the fresh list.
+  } catch (e) { if (card) card.style.opacity = "1"; flash(String(e.message || e)); }
 }
 
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }

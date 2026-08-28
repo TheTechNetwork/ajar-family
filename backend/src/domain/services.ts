@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import type { Repository } from "../store/repository.js";
 import type { Notifier } from "../push/notifier.js";
+import type { EventHub } from "../push/hub.js";
 import { signSnapshot } from "./signing.js";
 import type {
   User, Family, FamilyMembership, Child, Device, EnrollmentToken,
@@ -253,7 +254,7 @@ export function mapScope(req: AccessRequest, scope: ApprovalScope):
 }
 
 export class ApprovalService {
-  constructor(private repo: Repository, private notifier: Notifier) {}
+  constructor(private repo: Repository, private notifier: Notifier, private hub?: EventHub) {}
 
   /** Called by the child device when it hits blocked content. */
   async createRequest(input: {
@@ -287,6 +288,8 @@ export class ApprovalService {
         });
       }
     }
+    // Wake any parent long-poll waiting on this family's pending-request feed.
+    this.hub?.notify(`family:${input.familyId}`);
     return req;
   }
 
@@ -356,6 +359,8 @@ export class ApprovalService {
         { title: "policy_update", body: "sync", data: { kind: "policy_update", childId: req.childId } },
       );
     }
+    // Wake parent consoles long-polling this family: the pending set just shrank.
+    this.hub?.notify(`family:${input.familyId}`);
     return { decision, request: req };
   }
 }

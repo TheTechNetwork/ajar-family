@@ -3,43 +3,57 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Family Filter — Parent Console</title>
+  <title>Wren — Parent Console</title>
   <style>
-    :root { --bg:#f7f7f8; --card:#fff; --line:#e4e4e7; --ink:#18181b; --muted:#71717a; --accent:#2563eb; --danger:#dc2626; --ok:#16a34a; }
+    /* Wren palette (docs/BRAND.md): calm teal + coral "yes", soft signal states. */
+    :root {
+      --bg:#F6F4EE; --card:#fff; --line:#e3e1d8; --ink:#12241F; --muted:#5c6b64;
+      --accent:#18A08C; --accent-ink:#0f7a6a; --yes:#FF8A5B; --yes-ink:#e4703f;
+      --asked:#b7791f; --danger:#a15b4a;
+    }
     * { box-sizing: border-box; }
-    body { font: 15px/1.5 system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--ink); }
+    body { font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--ink); }
     header { background: var(--card); border-bottom: 1px solid var(--line); padding: 0.75rem 1rem; display: flex; gap: 1rem; align-items: center; }
-    header h1 { font-size: 1.05rem; margin: 0; }
+    header h1 { font-size: 1.05rem; margin: 0; font-weight: 700; letter-spacing:-0.01em; }
     header .who { margin-left: auto; color: var(--muted); font-size: 0.9rem; }
     main { max-width: 52rem; margin: 1.25rem auto; padding: 0 1rem; }
-    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
     .card h2 { font-size: 1rem; margin: 0 0 0.75rem; }
     label { display:block; font-weight:600; margin: 0.5rem 0 0.2rem; font-size: 0.85rem; }
-    input, select { width: 100%; padding: 0.45rem; font-size: 0.95rem; border:1px solid var(--line); border-radius: 6px; }
+    input, select { width: 100%; padding: 0.6rem; font-size: 1rem; border:1px solid var(--line); border-radius: 8px; min-height: 44px; }
     .row { display:flex; gap: 0.5rem; flex-wrap: wrap; align-items: flex-end; }
     .row > * { flex: 1; min-width: 8rem; }
-    button { padding: 0.45rem 0.8rem; font-size: 0.9rem; border:0; border-radius: 6px; background: var(--accent); color:#fff; cursor:pointer; }
-    button.secondary { background:#e4e4e7; color: var(--ink); }
-    button.danger { background: var(--danger); }
-    button.ok { background: var(--ok); }
+    /* 44px min hit area everywhere (WCAG 2.5.8 / Apple HIG — UX_PRINCIPLES §8). */
+    button { min-height: 44px; padding: 0.5rem 1rem; font-size: 0.95rem; font-weight: 600; border:0; border-radius: 8px; background: var(--accent); color:#fff; cursor:pointer; }
+    button:focus-visible { outline: 3px solid var(--yes); outline-offset: 2px; }
+    button.secondary { background:#eceae1; color: var(--ink); }
+    button.ghost { background:transparent; color: var(--accent-ink); min-height: 36px; padding: 0.25rem 0.5rem; font-weight:600; text-decoration: underline; }
+    button.yes { background: var(--yes); color:#3a1e12; }
+    button.notnow { background:#eceae1; color: var(--ink); }
     .muted { color: var(--muted); font-size: 0.85rem; }
-    .code { font: 700 1.6rem/1 ui-monospace, monospace; letter-spacing: 0.2rem; background:#eef2ff; color: var(--accent); padding: 0.5rem 0.75rem; border-radius: 8px; display:inline-block; }
-    .req { border:1px solid var(--line); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.75rem; }
-    .req .t { font-weight: 600; }
+    .code { font: 700 1.6rem/1 ui-monospace, monospace; letter-spacing: 0.2rem; background:#e7f4f1; color: var(--accent-ink); padding: 0.5rem 0.75rem; border-radius: 8px; display:inline-block; }
+    .req { border:1px solid var(--line); border-radius: 10px; padding: 0.85rem; margin-bottom: 0.75rem; }
+    .req .t { font-weight: 700; font-size: 1.02rem; }
     .req .meta { color: var(--muted); font-size: 0.85rem; word-break: break-all; }
-    .actions { display:flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.5rem; }
-    .actions button { font-size: 0.82rem; padding: 0.35rem 0.6rem; }
-    .pill { display:inline-block; font-size:0.72rem; background:#eef2ff; color:var(--accent); padding:0.1rem 0.45rem; border-radius:999px; }
+    .req details { margin-top: 0.35rem; }
+    .req details summary { color: var(--muted); font-size: 0.82rem; cursor: pointer; }
+    .actions { display:flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.65rem; align-items:center; }
+    .change { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px dashed var(--line); }
+    .change .grid { display:flex; gap:0.4rem; flex-wrap:wrap; }
+    .change button { min-height: 40px; font-weight:600; }
+    .pill { display:inline-block; font-size:0.72rem; background:#e7f4f1; color:var(--accent-ink); padding:0.15rem 0.5rem; border-radius:999px; }
     .empty { color: var(--muted); text-align:center; padding: 1.5rem; }
     .hide { display:none; }
     .err { color: var(--danger); font-size: 0.85rem; }
-    .flash { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background:#111; color:#fff; padding:0.5rem 1rem; border-radius: 8px; opacity:0; transition: opacity .2s; }
-    .flash.show { opacity: 0.95; }
+    .flash { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background:#12241F; color:#fff; padding:0.6rem 1.1rem; border-radius: 10px; opacity:0; transition: opacity .2s; }
+    .flash.show { opacity: 0.97; }
+    /* Respect reduced-motion (UX_PRINCIPLES §8 / WCAG 2.3.3). */
+    @media (prefers-reduced-motion: reduce) { .flash { transition: none; } }
   </style>
 </head>
 <body>
   <header>
-    <h1>👨‍👩‍👧 Family Filter — Parent Console</h1>
+    <h1>🐦 Wren — Parent Console</h1>
     <span class="who" id="who"></span>
   </header>
   <main>
@@ -83,8 +97,8 @@
 
     <!-- Requests -->
     <section class="card hide" id="requestsCard">
-      <h2>Pending requests <span class="pill" id="reqCount">0</span></h2>
-      <div id="requests"><div class="empty">No pending requests. Approvals appear here in real time.</div></div>
+      <h2>Asks <span class="pill" id="reqCount">0</span> <span class="muted" id="liveDot" title="Updating live"></span></h2>
+      <div id="requests"><div class="empty">No asks right now. New ones appear here the moment a child sends them.</div></div>
     </section>
   </main>
   <div class="flash" id="flash"></div>

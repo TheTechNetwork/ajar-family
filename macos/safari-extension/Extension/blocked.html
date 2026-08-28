@@ -17,13 +17,15 @@
   -->
   <style>
     :root {
-      --bg: #f5f6f8; --card: #ffffff; --fg: #1c1d21; --muted: #6b6f76;
-      --accent: #2f6df6; --accent-fg: #ffffff; --border: #e2e4e9; --chip: #eef1f6;
+      --bg: #F6F4EE; --card: #ffffff; --fg: #12241F; --muted: #5c6b64;
+      --accent: #18A08C; --accent-fg: #ffffff; --border: #e3e1d8; --chip: #e7f4f1;
+      --asked: #b7791f;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #16171b; --card: #1e2026; --fg: #f2f3f5; --muted: #a2a7b0;
-        --accent: #4d86ff; --accent-fg: #0b0c0f; --border: #2c2f37; --chip: #262a32;
+        --bg: #12211d; --card: #1a2a26; --fg: #eaf1ee; --muted: #9fb1aa;
+        --accent: #35b7a2; --accent-fg: #0b1512; --border: #2b3a35; --chip: #1f322d;
+        --asked: #e0b25a;
       }
     }
     * { box-sizing: border-box; }
@@ -42,7 +44,6 @@
       display: inline-flex; align-items: center; gap: 8px; font-weight: 600;
       font-size: 13px; color: var(--muted); letter-spacing: .02em; text-transform: uppercase;
     }
-    .dot { width: 9px; height: 9px; border-radius: 50%; background: #e5484d; }
     h1 { font-size: 21px; margin: 12px 0 6px; }
     p.sub { color: var(--muted); margin: 0 0 18px; }
     .resource {
@@ -64,37 +65,41 @@
     }
     .primary { background: var(--accent); color: var(--accent-fg); }
     .secondary { background: var(--chip); color: var(--fg); }
-    button:disabled { opacity: .55; cursor: default; }
-    .status { margin-top: 16px; font-size: 13px; color: var(--muted); min-height: 18px; }
-    .status.ok { color: #2f9e44; }
-    .status.err { color: #e5484d; }
+    button { min-height: 44px; }
+    button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+    button:disabled { opacity: .6; cursor: default; }
+    .status { margin-top: 16px; font-size: 14px; font-weight: 600; color: var(--muted); min-height: 20px; }
+    .status.ok { color: var(--asked); }
+    .status.err { color: #c0563f; }
     footer { margin-top: 18px; font-size: 12px; color: var(--muted); }
   </style>
 </head>
 <body>
   <main class="card" role="main">
-    <span class="badge"><span class="dot"></span> Blocked by parental controls</span>
-    <h1>This video isn't available right now</h1>
-    <p class="sub">You can ask a parent to allow it. They'll get your request and can approve just this video.</p>
+    <span class="badge">🐦 Wren</span>
+    <h1>You can ask to unlock this video</h1>
+    <p class="sub">Send a quick ask and a parent can open just this video — they'll get a message right away.</p>
 
-    <div class="resource">
-      <div class="key" id="keyLine">YOUTUBE_VIDEO:…</div>
-      <div class="url" id="urlLine">…</div>
+    <div class="resource" id="resource">
+      <div class="key" id="humanLine">A YouTube video</div>
+      <details><summary style="cursor:pointer;color:var(--muted);font-size:12px">Details</summary>
+        <div class="url" id="urlLine" style="margin-top:6px">…</div>
+      </details>
     </div>
 
-    <label for="reason">Why do you want to watch it? (optional)</label>
-    <textarea id="reason" placeholder="e.g. It's for my science homework"></textarea>
+    <label for="reason">Add a note (optional) — e.g. “it's for homework”</label>
+    <textarea id="reason" placeholder="A quick note for your parent"></textarea>
 
     <div class="row">
       <button class="secondary" id="backBtn" type="button">Go back</button>
-      <button class="primary" id="requestBtn" type="button">Request access</button>
+      <button class="primary" id="requestBtn" type="button">Ask to unlock</button>
     </div>
 
     <div class="status" id="status" aria-live="polite"></div>
 
     <footer>
-      Safari is still fully available — only this specific video is being held for
-      approval. Your parent decides whether to allow it.
+      Only pages you ask about are shared with your parent — your other browsing
+      isn't sent. Safari stays fully available; just this video is held for a yes.
     </footer>
   </main>
 
@@ -104,14 +109,16 @@
     const originalUrl = params.get("u") || "";
     const canonicalKey = params.get("k") || "";
 
-    const keyLine = document.getElementById("keyLine");
+    const humanLine = document.getElementById("humanLine");
     const urlLine = document.getElementById("urlLine");
     const statusEl = document.getElementById("status");
     const requestBtn = document.getElementById("requestBtn");
     const backBtn = document.getElementById("backBtn");
     const reasonEl = document.getElementById("reason");
 
-    keyLine.textContent = canonicalKey || "(unrecognized YouTube resource)";
+    // Human label is the hero; the raw key/URL live behind Details (UX §4).
+    const NOUN = { YOUTUBE_VIDEO: "A YouTube video", YOUTUBE_CHANNEL: "A YouTube channel", YOUTUBE_PLAYLIST: "A YouTube playlist" };
+    humanLine.textContent = NOUN[(canonicalKey.split(":")[0] || "").toUpperCase()] || "This video";
     urlLine.textContent = originalUrl || "(no URL)";
 
     backBtn.addEventListener("click", () => history.back());
@@ -122,8 +129,10 @@
     }
 
     requestBtn.addEventListener("click", async () => {
+      // Optimistic: show the ask landed immediately, reconcile below (UX §1).
       requestBtn.disabled = true;
-      setStatus("Sending your request…");
+      requestBtn.textContent = "Asked ✓";
+      setStatus("Asked ✓ — this opens by itself if a parent says yes.", "ok");
 
       const payload = {
         type: "REQUEST_ACCESS",
@@ -162,10 +171,10 @@
         }
       }
 
-      if (delivered) {
-        setStatus("Request sent. A parent will review it soon.", "ok");
-      } else {
-        setStatus("Couldn't send the request. Check the parental-controls app is running.", "err");
+      if (!delivered) {
+        // Reconcile to a non-dead-end error with an inline retry (UX §2/§8).
+        setStatus("⚠ Couldn't send — tap Try again.", "err");
+        requestBtn.textContent = "Try again";
         requestBtn.disabled = false;
       }
     });

@@ -3,13 +3,13 @@
  *
  * Reads the blocked URL + reason from the query string that background.js put on
  * the redirect (blocked.html?u=<enc>&reason=<enc>&key=<enc>), shows a friendly
- * reason, and on "Request Access" posts the blocked canonical id to the service
- * via the background worker's native-messaging connection.
+ * human label (the raw URL hides behind Details — UX_PRINCIPLES §4), and on
+ * "Ask to unlock" posts the blocked canonical id to the service via the
+ * background worker's native-messaging connection.
  *
- * STUB: this posts { type: "requestAccess" } to the background worker, which
- * forwards it to the LocalSystem native-messaging host, which (Phase 1) signs it
- * and forwards to the backend AccessRequest workflow (ARCHITECTURE.md §7). The
- * native host + backend leg is not implemented in this PoC.
+ * The ask is optimistic: the button flips to "Asked ✓" the instant it's tapped
+ * and reconciles in the background (§1), so the child never watches a spinner
+ * decide whether asking "worked".
  */
 
 const params = new URLSearchParams(location.search);
@@ -17,32 +17,55 @@ const blockedUrl = params.get("u") || "";
 const reason = params.get("reason") || "";
 const key = params.get("key") || "";
 
+// Why it's closed (kept honest, situation-focused, never a verdict on the child).
 const REASON_COPY = {
-  "default:youtube": "YouTube is set to allow only approved videos.",
-  "default:web": "This site isn't on the allowed list.",
-  "rule:YOUTUBE_VIDEO": "This specific video is blocked.",
-  "rule:YOUTUBE_CHANNEL": "This channel is blocked.",
-  "rule:YOUTUBE_PLAYLIST": "This playlist is blocked.",
-  "rule:DOMAIN": "This website is blocked.",
-  "rule:URL": "This exact page is blocked.",
-  "failclosed:no-snapshot": "Filtering is still starting up. Try again in a moment.",
+  "default:youtube": "YouTube is set to open only approved videos.",
+  "default:web": "This site isn't on the open list yet.",
+  "rule:YOUTUBE_VIDEO": "This video isn't open yet.",
+  "rule:YOUTUBE_CHANNEL": "This channel isn't open yet.",
+  "rule:YOUTUBE_PLAYLIST": "This playlist isn't open yet.",
+  "rule:DOMAIN": "This site isn't open yet.",
+  "rule:URL": "This page isn't open yet.",
+  "failclosed:no-snapshot": "Wren is still starting up. Try again in a moment.",
 };
 
+// Human noun for the hero label, derived from the canonical key prefix.
+const NOUN = {
+  YOUTUBE_VIDEO: "A YouTube video",
+  YOUTUBE_CHANNEL: "A YouTube channel",
+  YOUTUBE_PLAYLIST: "A YouTube playlist",
+  DOMAIN: "A website",
+  URL: "A web page",
+};
+function humanLabel() {
+  const type = (key.split(":")[0] || "").toUpperCase();
+  if (NOUN[type]) return NOUN[type];
+  try { return new URL(blockedUrl).hostname || "This page"; } catch { return "This page"; }
+}
+
+document.getElementById("resource").textContent = humanLabel();
 document.getElementById("target").textContent = blockedUrl || "(unknown)";
-const reasonEl = document.getElementById("reason");
-reasonEl.textContent = REASON_COPY[reason] || (key ? `Blocked: ${key}` : "");
+if (!blockedUrl) document.getElementById("details").style.display = "none";
+const lede = document.getElementById("lede");
+if (REASON_COPY[reason]) lede.textContent = `${REASON_COPY[reason]} Send a quick ask and a parent can open just this.`;
 
 const statusEl = document.getElementById("status");
+const btn = document.getElementById("request");
 
 document.getElementById("back").addEventListener("click", () => {
   history.length > 1 ? history.back() : window.close();
 });
 
-document.getElementById("request").addEventListener("click", () => {
-  const btn = document.getElementById("request");
+function setStatus(text, kind) {
+  statusEl.textContent = text;
+  statusEl.className = kind ? `status ${kind}` : "status";
+}
+
+btn.addEventListener("click", () => {
+  // Optimistic: show success immediately, reconcile in the background (§1).
   btn.disabled = true;
-  statusEl.textContent = "Sending request…";
-  statusEl.className = "status";
+  btn.textContent = "Asked ✓";
+  setStatus("Asked ✓ — this page opens by itself if a parent says yes.", "ok");
 
   chrome.runtime.sendMessage(
     {
@@ -52,14 +75,11 @@ document.getElementById("request").addEventListener("click", () => {
       userReason: document.getElementById("note").value || null,
     },
     (resp) => {
-      if (resp && resp.ok) {
-        statusEl.textContent = "Request sent. A parent will be notified.";
-        statusEl.className = "status ok";
-      } else {
+      if (!(resp && resp.ok)) {
+        // Reconcile to a non-dead-end error with an inline retry (§2/§8).
         btn.disabled = false;
-        statusEl.textContent =
-          "Couldn't send the request (the filter service may be unreachable). Try again.";
-        statusEl.className = "status err";
+        btn.textContent = "Try again";
+        setStatus("⚠ Couldn't send — tap Try again.", "err");
       }
     },
   );

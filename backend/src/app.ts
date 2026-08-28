@@ -40,7 +40,7 @@ export class App {
     this.family = new FamilyService(repo);
     this.enrollment = new EnrollmentService(repo);
     this.policy = new PolicyService(repo, signingPrivateKeyB64);
-    this.approvals = new ApprovalService(repo, notifier);
+    this.approvals = new ApprovalService(repo, notifier, hub);
   }
 
   static async create(opts: {

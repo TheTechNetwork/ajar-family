@@ -93,6 +93,33 @@ test("MVP flow: approve one video for 30m, others stay blocked, auto-expire", as
   assert.equal(await app.policy.syncSince(fam.id, child.id, device.id, current), null, "no change → null");
 });
 
+test("parent long-poll: createRequest and decide wake the family channel", async () => {
+  // Backs GET /v1/families/:id/requests/wait so the parent console reacts in
+  // seconds (UX_PRINCIPLES §1) instead of polling.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const owner = await app.family.createUser("live@example.com", "Live");
+  const fam = await app.family.createFamily("Live Family", owner.id);
+  const child = await app.family.addChild(fam.id, owner.id, "Kid");
+  const tok = await app.enrollment.createToken(fam.id, owner.id, child.id, "WINDOWS");
+  const device = await app.enrollment.redeem(tok.code, "pk", "PC");
+
+  // A parent is parked on the family channel; creating a request must wake it.
+  const wokenByCreate = app.hub.wait(`family:${fam.id}`, 1000);
+  const req = await app.approvals.createRequest({
+    familyId: fam.id, childId: child.id, deviceId: device.id,
+    targetType: "YOUTUBE_VIDEO", targetValue: "9bZkp7q19f0", title: "A video",
+  });
+  assert.equal(await wokenByCreate, true, "createRequest wakes family long-poll");
+
+  // Deciding it must wake the channel again (the pending set shrank).
+  const wokenByDecide = app.hub.wait(`family:${fam.id}`, 1000);
+  await app.approvals.decide({
+    familyId: fam.id, requestId: req.id, decidedBy: owner.id,
+    decision: "ALLOW", scope: "THIS_VIDEO", duration: { kind: "MINUTES", minutes: 30 }, policy: app.policy,
+  });
+  assert.equal(await wokenByDecide, true, "decide wakes family long-poll");
+});
+
 test("enrollment token is single-use and expires", async () => {
   const app = await App.create({ config: { authSecret: "test" } });
   const owner = await app.family.createUser("o2@example.com", "O2");
