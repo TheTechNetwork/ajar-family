@@ -21,9 +21,14 @@
  */
 
 import { normalizeYouTube, youTubePolicyKey } from "./youtube-normalize.js";
+import { getConfig, startPolicySync, postAccessRequest } from "./backend-client.js";
 
 const STORAGE_KEY = "devicePolicySnapshot";
 const BLOCKED_PAGE = "blocked.html";
+
+/** Policy source: backend HTTP mode (dev, enrolled via the options page) vs the
+ *  native-host mode (production child agent). Selected at startup. */
+let BACKEND_MODE = false;
 
 // ---------------------------------------------------------------------------
 // Policy snapshot cache (synced from the native host)
@@ -294,20 +299,39 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
   }
 
   if (msg?.type === "REQUEST_ACCESS") {
-    // blocked.html submitted a Request-Access; hand the blocked canonical id to
-    // the app/backend (B2).
+    // blocked.html submitted a Request-Access. Derive the canonical target from
+    // the blocked URL so the parent approves the right object (B2).
+    const yt = normalizeYouTube(msg.url);
+    const key = msg.key || (yt.isYouTube ? youTubePolicyKey(yt) : null);
+    if (BACKEND_MODE) {
+      const [targetType, targetValue] = key ? key.split(/:(.+)/) : ["URL", msg.url];
+      try {
+        await postAccessRequest({ targetType, targetValue, title: msg.title || undefined, url: msg.url, reason: msg.reason || undefined });
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e) };
+      }
+    }
+    // Native-host mode: hand the blocked canonical id to the app/backend bridge.
     sendAccessRequest({
-      canonicalKey: msg.key,
-      url: msg.url,
-      reason: msg.reason || "",
-      childId: snapshot?.childId,
-      deviceId: snapshot?.deviceId,
-      requestedAt: new Date().toISOString(),
+      canonicalKey: key, url: msg.url, reason: msg.reason || "",
+      childId: snapshot?.childId, deviceId: snapshot?.deviceId, requestedAt: new Date().toISOString(),
     });
     return { ok: true };
   }
 });
 
-// Prime the cache + native connection on worker start.
+// Prime the cache and select the policy source on worker start.
 loadSnapshot();
-connectNative();
+getConfig().then((cfg) => {
+  if (cfg.backendUrl && cfg.deviceToken) {
+    BACKEND_MODE = true;
+    // backend-client verifies each snapshot's Ed25519 signature before calling us.
+    startPolicySync(async (snap) => {
+      snapshot = snap;
+      await browser.storage.local.set({ [STORAGE_KEY]: snap });
+    });
+  } else {
+    connectNative();
+  }
+});

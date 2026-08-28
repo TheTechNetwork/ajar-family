@@ -43,7 +43,7 @@ interception on Apple platforms and without enterprise MDM**.
 | `apple/poc-contentfilter/` | PoC A scaffold (Xcode 26 / iOS 26, on-device). |
 | `apple/poc-urlfilter/` | PoC D scaffold (NEURLFilter + Bloom builder + PIR server config). |
 | `apple/child-agent/`, `apple/parent-app/` | Later-phase placeholders. |
-| `macos/safari-extension/` | PoC B skeleton (Safari Web Extension). |
+| `macos/safari-extension/` | Safari Web Extension — enforcing client, backend-wired (same client modules as Windows; Safari gates via webNavigation + content-script since it lacks blocking webRequest). |
 | `windows/agent/`, `windows/extension/` | PoC C skeleton (service + MV3 extension). |
 
 ## Enforcement, per platform (research summary)

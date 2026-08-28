@@ -13,6 +13,12 @@
     "type": "module"
   },
 
+  "options_ui": {
+    "_note": "Dev/browser-testable enrollment: point the extension at the backend and redeem a six-digit code. In production the macOS child agent is the policy source and this page is unnecessary.",
+    "page": "options.html",
+    "open_in_tab": true
+  },
+
   "content_scripts": [
     {
       "_note": "Runs on the YouTube app surfaces. document_start so the SPA history patch installs before YouTube's own router. YouTube is an SPA — route changes via history.pushState do NOT hit the network, so content.js must catch them and ask the background worker to re-evaluate (B3).",
@@ -48,9 +54,11 @@
     "*://youtu.be/*",
     "*://m.youtube.com/*",
     "*://*.youtube-nocookie.com/*",
-    "*://youtubei.googleapis.com/*"
+    "*://youtubei.googleapis.com/*",
+    "*://localhost/*",
+    "*://127.0.0.1/*"
   ],
-  "_host_permissions_note": "Scoped to YouTube surfaces (+ the InnerTube API host). We deliberately do NOT request all-URLs. The media CDN *.googlevideo.com and other YOUTUBE_PLAYBACK_SUPPORT_HOSTS are NOT gated here — they must stay reachable while any video is approved (B7); gating happens at the watch page / SPA route, which is per-video.",
+  "_host_permissions_note": "Scoped to YouTube surfaces (+ the InnerTube API host). We deliberately do NOT request all-URLs. The media CDN *.googlevideo.com and other YOUTUBE_PLAYBACK_SUPPORT_HOSTS are NOT gated here — they must stay reachable while any video is approved (B7); gating happens at the watch page / SPA route, which is per-video. localhost/127.0.0.1 are added so the background worker can reach a LOCAL backend in dev (options-page enrollment + policy long-poll); for a hosted backend add its exact origin here instead of using <all_urls>.",
 
   "web_accessible_resources": [
     {

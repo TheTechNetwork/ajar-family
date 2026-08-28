@@ -11,6 +11,39 @@ following the experiment protocol.
 > to assume it away. And the absolute rule: **never block Safari to gain
 > enforcement — Safari must stay fully functional** (ARCHITECTURE §5, ADR-004).
 
+## Two policy sources: native host (production) and backend HTTP (dev)
+
+Like the Windows extension, the enforcement path only ever reads an in-memory
+**signed** snapshot; two sources populate it, selected at startup:
+
+- **Native-host mode (production macOS):** the child agent pushes signed snapshots
+  through the containing app's `SafariWebExtensionHandler`.
+- **Backend HTTP mode (dev):** enroll from the **options page** and the extension
+  talks straight to the backend — `backend-client.js` long-polls
+  `GET /v1/devices/:id/policy/wait` and posts access requests to `POST /v1/requests`.
+  Every snapshot is **Ed25519-verified** in-extension (`policy-verify.js`) before
+  it is trusted (fail closed). These three modules are kept **in lockstep** with
+  `windows/extension/` — identical contract, `browser`/`chrome` namespace shim.
+
+The Safari enforcement mechanism differs from Windows by necessity: **Safari has no
+blocking `webRequest`**, so this extension gates via `webNavigation` + a
+content-script SPA-route interceptor that redirects blocked YouTube navigations to
+`blocked.html` (never touching non-YouTube browsing). The *policy source, signing,
+and request flow are identical* to the Windows client — which was verified
+end-to-end over HTTP (approval delivered to a parked long-poll in single-digit ms).
+
+### Try the loop (on a Mac, no MDM, no Apple hardware entitlements)
+
+1. Run the backend (`npm ci && npm run build && (cd backend && AUTH_SECRET=dev node dist/index.js)`).
+2. In Xcode, wrap `Extension/` with a Safari Web Extension app target
+   (`xcrun safari-web-extension-converter Extension/`), build, and enable it in
+   **Safari → Settings → Extensions** (grant host access to YouTube + your backend).
+3. Create a family/child + enrollment code (parent web console `web/parent/` or the API).
+4. Extension **Options** → backend URL + six-digit code → enroll.
+5. Open a YouTube video → blocked → **Request Access** → approve from the parent
+   console → the extension's long-poll applies the signed policy within seconds and
+   the exact video plays; others stay blocked; the grant auto-expires.
+
 ## Why a Safari Web Extension here
 
 On native macOS neither native NetworkExtension path gives per-video control of
