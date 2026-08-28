@@ -12,9 +12,14 @@ living document for an alpha, not a completed audit.
   carrying the user's `tokenVersion`. **Logout and password change bump it,
   revoking every outstanding token** (`/v1/auth/logout`, `/v1/auth/password`).
   `requireUser` rejects a token whose version is stale.
-- **Rate limiting.** `/v1/auth/{login,register,refresh}` and `/v1/enroll/redeem`
-  are rate-limited per client (`backend/src/http/rate-limit.ts`). In-memory /
-  per-instance — back it with Redis or a Durable Object for multi-instance scale.
+- **Rate limiting (layered).** A generous **baseline limit on every route**
+  (600/min per client) via a router pre-dispatch guard — it applies to authed
+  routes and unmatched paths too, so it blunts general abuse and endpoint
+  scanning — **plus stricter caps on the sensitive endpoints**
+  (`/v1/auth/{login,register,refresh}` 10/min, `/v1/enroll/redeem` 20/min).
+  Per client (proxy IP header, else a shared bucket), in-memory / per-instance —
+  back it with Redis or a Durable Object for multi-instance scale
+  (`backend/src/http/rate-limit.ts`).
 - **Enrollment codes.** 8 chars from a 32-symbol unambiguous alphabet via a
   CSPRNG (~40 bits), single-use, 15-minute TTL, redeemed over a rate-limited
   endpoint. (Replaced a 6-digit `Math.random` code.)

@@ -45,8 +45,16 @@ export function corsHeaders(origin = "*"): Record<string, string> {
  *  lock it down for production. */
 export const CORS_HEADERS: Record<string, string> = corsHeaders();
 
+/** A pre-dispatch guard: return a response to short-circuit, or null to continue. */
+export type PreGuard = (req: HttpRequest) => HttpResponse | null | Promise<HttpResponse | null>;
+
 export class Router {
   private routes: Route[] = [];
+  private guards: PreGuard[] = [];
+
+  /** Register a guard that runs on every request before route matching (e.g. a
+   *  baseline rate limit). Guards run in order; the first to return a response wins. */
+  before(guard: PreGuard): this { this.guards.push(guard); return this; }
 
   add(method: string, path: string, handler: Handler): this {
     this.routes.push({ method: method.toUpperCase(), parts: split(path), handler });
@@ -63,6 +71,10 @@ export class Router {
   }
 
   async handle(req: HttpRequest): Promise<HttpResponse> {
+    for (const g of this.guards) {
+      const short = await g(req);
+      if (short) return short;
+    }
     const reqParts = split(req.path);
     for (const r of this.routes) {
       if (r.method !== req.method.toUpperCase()) continue;

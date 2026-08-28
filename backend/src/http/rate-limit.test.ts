@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { RateLimiter, clientKey } from "./rate-limit.js";
 import { App } from "../app.js";
 import { buildRouter } from "./api.js";
-import type { HttpRequest } from "./router.js";
+import { Router, ok, err, type HttpRequest } from "./router.js";
 
 test("RateLimiter allows up to the limit, then blocks", () => {
   const rl = new RateLimiter(3, 60_000);
@@ -22,6 +22,23 @@ test("clientKey prefers forwarded IP headers, falls back to shared", () => {
   assert.equal(clientKey({ "cf-connecting-ip": "1.2.3.4" }), "1.2.3.4");
   assert.equal(clientKey({ "x-forwarded-for": "9.9.9.9, 10.0.0.1" }), "9.9.9.9");
   assert.equal(clientKey({}), "shared");
+});
+
+test("a before() guard applies to every route (baseline limit)", async () => {
+  const r = new Router();
+  r.get("/anything", async () => ok({ ok: true }));
+  let n = 0;
+  r.before(() => (n++ >= 2 ? err(429, "slow down", "RATE_LIMITED") : null));
+  const call = () => r.handle({
+    method: "GET", path: "/anything", query: new URLSearchParams(),
+    headers: {}, params: {}, json: async () => ({}) as never,
+  } as HttpRequest);
+  assert.equal((await call()).status, 200);
+  assert.equal((await call()).status, 200);
+  assert.equal((await call()).status, 429, "guard short-circuits before dispatch");
+  // The guard even fires for unmatched paths (blocks scanning), not just 404.
+  const miss = await r.handle({ method: "GET", path: "/nope", query: new URLSearchParams(), headers: {}, params: {}, json: async () => ({}) as never } as HttpRequest);
+  assert.equal(miss.status, 429);
 });
 
 test("login endpoint 429s after too many attempts", async () => {

@@ -45,11 +45,16 @@ async function requireDevice(app: App, req: HttpRequest) {
 export function buildRouter(app: App): Router {
   const r = new Router();
 
-  // Brute-force protection on the sensitive unauthenticated endpoints.
+  // Layered rate limiting: a generous baseline on EVERY route (abuse / scanning /
+  // authed hammering), plus stricter caps on the sensitive unauthenticated ones.
+  // Per-client (proxy IP header, else a shared bucket); per-process — front with
+  // Redis / a Durable Object at multi-instance scale. See docs/SECURITY.md.
+  const globalLimiter = new RateLimiter(600, 60_000); // 600/min per client, all routes
   const authLimiter = new RateLimiter(10, 60_000);    // 10/min per client for auth
   const enrollLimiter = new RateLimiter(20, 60_000);  // 20/min per client for redeem
   const limited = (lim: RateLimiter, req: HttpRequest) =>
     !lim.allow(clientKey(req.headers)) ? err(429, "too many attempts — slow down", "RATE_LIMITED") : null;
+  r.before((req) => limited(globalLimiter, req));
 
   r.get("/v1/health", async () => ok({ status: "ok", version: "0.0.0-alpha" }));
   r.get("/v1/signing-key", async () => ok({ publicKeyB64: app.signingPublicKeyB64, alg: "Ed25519" }));
