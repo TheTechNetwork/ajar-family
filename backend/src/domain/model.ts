@@ -75,7 +75,7 @@ export interface Device {
 /** Short-lived, single-use enrollment token binding a device to a family+child. */
 export interface EnrollmentToken {
   id: string;
-  code: string; // six-digit or opaque; single-use
+  code: string; // opaque single-use code (crypto-random)
   familyId: string;
   childId: string;
   platform: Platform;

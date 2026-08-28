@@ -29,8 +29,8 @@
   <form id="form">
     <label for="backendUrl">Backend URL</label>
     <input id="backendUrl" type="url" placeholder="http://localhost:8787" value="http://localhost:8787" required />
-    <label for="code">Enrollment code (6 digits from the parent app)</label>
-    <input id="code" inputmode="numeric" pattern="[0-9]{6}" placeholder="123456" required />
+    <label for="code">Enrollment code (from the parent app)</label>
+    <input id="code" autocapitalize="characters" pattern="[A-Za-z0-9]{6,12}" placeholder="K7M2P9QR" required />
     <label for="name">Device name</label>
     <input id="name" type="text" placeholder="Windows PC (Chrome)" value="Windows PC (Chrome)" required />
     <button type="submit">Enroll this browser</button>

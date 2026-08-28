@@ -102,7 +102,7 @@ Point the service's `-BackendUrl` at this host instead of the cloud URL.
 
 1. Open the console (cloud URL, or `http://localhost:8787/` when self-hosting).
 2. **Register** → **Create family** → **Add child** → **Enroll a device**
-   (enter the 6-digit code in the child's extension → Options).
+   (enter the one-time code in the child's extension → Options).
 3. When the child asks, the ask appears **live**. Tap **Say yes**.
 
 ✅ The child's page unlocks within seconds; every other video stays closed.

@@ -31,12 +31,19 @@ export const err = (status: number, message: string, code?: string): HttpRespons
  * the origin. Applied by both transport adapters; OPTIONS preflight is answered
  * transport-side with 204.
  */
-export const CORS_HEADERS: Record<string, string> = {
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-  "access-control-allow-headers": "authorization,content-type",
-  "access-control-max-age": "86400",
-};
+export function corsHeaders(origin = "*"): Record<string, string> {
+  return {
+    "access-control-allow-origin": origin,
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+    "access-control-allow-headers": "authorization,content-type",
+    "access-control-max-age": "86400",
+    ...(origin === "*" ? {} : { vary: "Origin" }),
+  };
+}
+/** Default permissive CORS (bearer tokens, no cookies, so `*` is safe). Set an
+ *  explicit origin via ALLOWED_ORIGIN (Node) / env.ALLOWED_ORIGIN (Workers) to
+ *  lock it down for production. */
+export const CORS_HEADERS: Record<string, string> = corsHeaders();
 
 export class Router {
   private routes: Route[] = [];

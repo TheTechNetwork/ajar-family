@@ -30,11 +30,11 @@ sources can populate it, selected automatically at startup:
 1. Run the backend: `npm ci && npm run build && (cd backend && AUTH_SECRET=dev PORT=8787 node dist/index.js)`.
 2. Create a family/child and an enrollment code via the API (see `backend/README.md`):
    register → `POST /v1/families` → `POST /v1/families/:id/children` →
-   `POST /v1/families/:id/enroll` returns a six-digit `code`.
+   `POST /v1/families/:id/enroll` returns a one-time `code`.
 3. `chrome://extensions` → **Developer mode** → **Load unpacked** → select
    `windows/extension/`. (Loading unpacked grants blocking `webRequest` for dev, the
    same capability force-install grants in production.)
-4. Open the extension **Options**, enter the backend URL + the six-digit code → enroll.
+4. Open the extension **Options**, enter the backend URL + the one-time code → enroll.
 5. Browse to a YouTube video → it's blocked (default-deny) → **Request Access** →
    approve it from the parent side (`POST /v1/families/:id/requests/:reqId/decide`
    with `scope:"THIS_VIDEO"`, `duration:{kind:"MINUTES",minutes:30}`) → the extension's

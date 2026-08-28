@@ -33,8 +33,8 @@ The backend from step A already serves the console — no separate web server.
 1. Open `http://localhost:8787/` → **Register** (any email + name).
 2. **Create family** → **Add child** "Jane" → click **Enroll a device**.
 
-**Test:** an enrollment **code** (6 digits) appears.
-✅ e.g. `482913`. Keep it — it expires in 15 min.
+**Test:** an enrollment **code** (8 characters) appears.
+✅ e.g. `K7M2P9QR`. Keep it — it expires in 15 min.
 
 ---
 

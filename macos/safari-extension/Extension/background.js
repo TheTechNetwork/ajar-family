@@ -22,6 +22,7 @@
 
 import { normalizeYouTube, youTubePolicyKey } from "./youtube-normalize.js";
 import { getConfig, startPolicySync, postAccessRequest } from "./backend-client.js";
+import { verifySnapshotSignature } from "./policy-verify.js";
 
 const STORAGE_KEY = "devicePolicySnapshot";
 const BLOCKED_PAGE = "blocked.html";
@@ -72,7 +73,14 @@ function connectNative() {
     nativePort = browser.runtime.connectNative("com.example.youtubeguard.host");
     nativePort.onMessage.addListener(async (msg) => {
       if (msg?.type === "POLICY_SNAPSHOT" && msg.snapshot) {
-        // TODO(prod): verify msg.snapshot.signature before trusting it.
+        // Fail closed: verify the Ed25519 signature before trusting a snapshot
+        // from the native host (a local process could otherwise inject an
+        // allow-all policy). Same check as the backend path in backend-client.js.
+        const cfg = await getConfig();
+        if (!cfg.signingKeyB64 || !(await verifySnapshotSignature(msg.snapshot, cfg.signingKeyB64))) {
+          console.warn("[guard] rejected native snapshot: missing key or bad signature");
+          return;
+        }
         await browser.storage.local.set({ [STORAGE_KEY]: msg.snapshot });
         snapshot = msg.snapshot;
       }

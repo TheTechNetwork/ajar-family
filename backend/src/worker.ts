@@ -11,7 +11,7 @@
  */
 import { App } from "./app.js";
 import { buildRouter } from "./http/api.js";
-import { CORS_HEADERS, type HttpRequest, type Router } from "./http/router.js";
+import { corsHeaders, type HttpRequest, type Router } from "./http/router.js";
 import { createD1, type D1Like } from "./store/sql/database.js";
 import { SqlStore } from "./store/sql/sql-store.js";
 
@@ -21,6 +21,8 @@ export interface Env {
   SIGNING_PRIVATE_KEY_B64?: string;
   /** Bind a D1 database as `DB` in wrangler.toml for durable, cross-isolate state. */
   DB?: D1Like;
+  /** Lock CORS to a specific origin in production (default `*`). */
+  ALLOWED_ORIGIN?: string;
 }
 
 let appPromise: Promise<App> | null = null;
@@ -34,7 +36,7 @@ async function getRouter(env: Env): Promise<Router> {
       return App.create({
         repo,
         config: {
-          authSecret: env.AUTH_SECRET ?? "dev-insecure-secret-change-me",
+          authSecret: env.AUTH_SECRET!, // guaranteed present: fetch() rejects when unset
           signingPublicKeyB64: env.SIGNING_PUBLIC_KEY_B64,
           signingPrivateKeyB64: env.SIGNING_PRIVATE_KEY_B64,
         },
@@ -47,8 +49,16 @@ async function getRouter(env: Env): Promise<Router> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const CORS = corsHeaders(env.ALLOWED_ORIGIN);
     // CORS preflight.
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+
+    // Fail closed: never run with forgeable tokens. On Workers AUTH_SECRET is a
+    // required secret (`wrangler secret put AUTH_SECRET`) — no insecure default.
+    if (!env.AUTH_SECRET) {
+      return new Response(JSON.stringify({ error: "server misconfigured: AUTH_SECRET is not set", code: "MISCONFIGURED" }),
+        { status: 500, headers: { "content-type": "application/json", ...CORS } });
+    }
 
     const url = new URL(request.url);
     const headers: Record<string, string> = {};
@@ -67,7 +77,7 @@ export default {
     const r = await (await getRouter(env)).handle(req);
     return new Response(JSON.stringify(r.body), {
       status: r.status,
-      headers: { "content-type": "application/json", ...CORS_HEADERS },
+      headers: { "content-type": "application/json", ...CORS },
     });
   },
 };

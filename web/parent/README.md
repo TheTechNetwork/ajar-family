@@ -7,7 +7,7 @@ to demo and test the backend without curl.
 
 ## What it does
 
-Sign in (register/login) → create a family → add a child → **generate a six-digit
+Sign in (register/login) → create a family → add a child → **generate a one-time
 enrollment code** (enter it in the child's browser extension Options) → watch
 **pending requests** stream in (polled) → **approve** with a scope (default
 `THIS_VIDEO`) and a duration (15m / 30m / 1h / end-of-day / once / always) or deny.

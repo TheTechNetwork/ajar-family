@@ -19,6 +19,17 @@ import { hashPassword, verifyPassword } from "../auth/password.js";
 const now = () => new Date().toISOString();
 const uid = () => randomUUID();
 
+// Enrollment code: 8 chars from a 32-symbol unambiguous alphabet (no 0/O/1/I/L)
+// drawn from a CSPRNG => ~40 bits of entropy. With a 15-min TTL and rate-limited
+// redemption this is not brute-forceable (vs. the old 6-digit Math.random code).
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+function enrollmentCode(len = 8): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(len));
+  let out = "";
+  for (let i = 0; i < len; i++) out += CODE_ALPHABET[bytes[i]! & 31];
+  return out;
+}
+
 export class DomainError extends Error {
   constructor(message: string, public code = "BAD_REQUEST") { super(message); }
 }
@@ -33,7 +44,9 @@ export class AuthService {
   /** Register a parent with a password. Fails if the email is already taken. */
   async register(email: string, password: string, displayName: string): Promise<User> {
     if (!email || !displayName) throw new DomainError("email and displayName required");
-    if (await this.repo.getUserByEmail(email)) throw new DomainError("email already registered", "CONFLICT");
+    // Generic message (don't confirm which specific field is taken). Full
+    // non-enumeration would require an email-verification flow — see SECURITY.md.
+    if (await this.repo.getUserByEmail(email)) throw new DomainError("could not create an account with those details", "CONFLICT");
     const passwordHash = await hashPassword(password); // throws on too-short
     return this.repo.createUser({ id: uid(), email, displayName, passwordHash, tokenVersion: 0, createdAt: now() });
   }
@@ -156,7 +169,7 @@ export class EnrollmentService {
     if (!m || !canManagePolicy(m.role)) throw new DomainError("cannot enroll devices", "FORBIDDEN");
     const child = await this.repo.getChild(childId);
     if (!child || child.familyId !== familyId) throw new DomainError("unknown child");
-    const code = String(Math.floor(100000 + Math.random() * 900000)); // six-digit
+    const code = enrollmentCode(); // crypto-strong, ~40 bits (see below)
     return this.repo.createEnrollmentToken({
       id: uid(), code, familyId, childId, platform,
       expiresAt: new Date(Date.now() + ttlMinutes * 60_000).toISOString(),

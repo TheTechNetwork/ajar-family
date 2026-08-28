@@ -36,7 +36,7 @@ function b64(bytes) {
   return btoa(s);
 }
 
-/** Enroll this browser as a device using a six-digit code from the parent app. */
+/** Enroll this browser as a device using a one-time code from the parent app. */
 export async function enroll(backendUrl, code, displayName) {
   // Generate a device keypair (the backend records the public key at enrollment;
   // device auth uses the returned bearer token).

@@ -16,9 +16,18 @@ async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? 8787);
 
   // DATABASE_FILE → durable SQLite (survives restart). Unset → in-memory (dev).
-  const repo = process.env.DATABASE_FILE
-    ? await SqlStore.create(await createNodeSqlite(process.env.DATABASE_FILE))
+  const durable = !!process.env.DATABASE_FILE;
+  const repo = durable
+    ? await SqlStore.create(await createNodeSqlite(process.env.DATABASE_FILE!))
     : undefined;
+
+  // Fail closed: a durable deployment must set AUTH_SECRET, or every token is
+  // forgeable via the public default. The in-memory dev path still allows it.
+  if (!process.env.AUTH_SECRET && durable && process.env.ALLOW_INSECURE_AUTH !== "1") {
+    // eslint-disable-next-line no-console
+    console.error("Refusing to start: set AUTH_SECRET when DATABASE_FILE is configured (or ALLOW_INSECURE_AUTH=1 to override for local testing).");
+    process.exit(1);
+  }
 
   const app = await App.create({
     repo,

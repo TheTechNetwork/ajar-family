@@ -11,7 +11,10 @@ import { existsSync } from "node:fs";
 import { resolve, normalize, join, extname, dirname } from "node:path";
 import type { App } from "../app.js";
 import { buildRouter } from "./api.js";
-import { CORS_HEADERS, type HttpRequest, type Router } from "./router.js";
+import { corsHeaders, type HttpRequest, type Router } from "./router.js";
+
+// Permissive by default; set ALLOWED_ORIGIN to lock CORS to one origin.
+const CORS_HEADERS = corsHeaders(process.env.ALLOWED_ORIGIN);
 
 // Where the static parent console lives. PARENT_UI_DIR wins (empty string
 // disables static serving). Otherwise pick the first directory that exists among

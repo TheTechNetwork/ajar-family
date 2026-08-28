@@ -7,6 +7,7 @@ import type { App } from "../app.js";
 import { Router, ok, err, type HttpRequest, type HttpResponse } from "./router.js";
 import { issueToken, verifyToken, type Principal } from "../auth/tokens.js";
 import { openapiDocument } from "./openapi.js";
+import { RateLimiter, clientKey } from "./rate-limit.js";
 import type { ApprovalDuration, ApprovalScope, Platform, RuleAction, PolicyTargetType, Role } from "../domain/model.js";
 
 async function principal(app: App, req: HttpRequest): Promise<Principal | null> {
@@ -25,7 +26,7 @@ async function requireUser(app: App, req: HttpRequest): Promise<string> {
 // refresh token mints new access tokens via /v1/auth/refresh. Both carry the
 // user's tokenVersion, so logout / password change revokes them.
 const ACCESS_TTL = 60 * 60; // 1h
-const REFRESH_TTL = 60 * 60 * 24 * 30; // 30d
+const REFRESH_TTL = 60 * 60 * 24 * 14; // 14d (logout / password change revokes all)
 async function tokenPair(app: App, user: { id: string; tokenVersion: number }) {
   return {
     userId: user.id,
@@ -44,6 +45,12 @@ async function requireDevice(app: App, req: HttpRequest) {
 export function buildRouter(app: App): Router {
   const r = new Router();
 
+  // Brute-force protection on the sensitive unauthenticated endpoints.
+  const authLimiter = new RateLimiter(10, 60_000);    // 10/min per client for auth
+  const enrollLimiter = new RateLimiter(20, 60_000);  // 20/min per client for redeem
+  const limited = (lim: RateLimiter, req: HttpRequest) =>
+    !lim.allow(clientKey(req.headers)) ? err(429, "too many attempts — slow down", "RATE_LIMITED") : null;
+
   r.get("/v1/health", async () => ok({ status: "ok", version: "0.0.0-alpha" }));
   r.get("/v1/signing-key", async () => ok({ publicKeyB64: app.signingPublicKeyB64, alg: "Ed25519" }));
   // Machine-readable API contract (the source of truth clients integrate against).
@@ -51,17 +58,20 @@ export function buildRouter(app: App): Router {
 
   // --- auth (self-contained passwords, no external IdP) ---
   r.post("/v1/auth/register", async (req) => {
+    const capped = limited(authLimiter, req); if (capped) return capped;
     const b = await req.json<{ email: string; password: string; displayName: string }>();
     const user = await app.auth.register(b.email, b.password, b.displayName);
     return ok(await tokenPair(app, user), 201);
   });
   r.post("/v1/auth/login", async (req) => {
+    const capped = limited(authLimiter, req); if (capped) return capped;
     const b = await req.json<{ email: string; password: string }>();
     const user = await app.auth.authenticate(b.email, b.password);
     return ok(await tokenPair(app, user));
   });
   // Exchange a refresh token for a fresh access + refresh pair.
   r.post("/v1/auth/refresh", async (req) => {
+    const capped = limited(authLimiter, req); if (capped) return capped;
     const { refreshToken } = await req.json<{ refreshToken: string }>();
     const p = refreshToken ? await verifyToken(app.authSecret, refreshToken) : null;
     if (!p || p.kind !== "refresh") return err(401, "invalid refresh token", "UNAUTHORIZED");
@@ -167,6 +177,7 @@ export function buildRouter(app: App): Router {
     return ok({ code: tok.code, expiresAt: tok.expiresAt }, 201);
   });
   r.post("/v1/enroll/redeem", async (req) => {
+    const capped = limited(enrollLimiter, req); if (capped) return capped;
     const b = await req.json<{ code: string; devicePublicKey: string; displayName: string }>();
     const device = await app.enrollment.redeem(b.code, b.devicePublicKey, b.displayName);
     const token = await issueToken(app.authSecret,
