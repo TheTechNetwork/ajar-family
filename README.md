@@ -1,7 +1,9 @@
-# Wren — Cross-Platform Parental URL Filtering Platform
+# Ajar — Cross-Platform Parental URL Filtering Platform
 
-> **Wren** · *Say yes faster.* — product name and brand in
+> **Ajar** · *Say yes faster.* — product name and brand in
 > [`docs/BRAND.md`](docs/BRAND.md) (repo/package name stays `contentfilter`).
+> Every rival is a locked door; Ajar is the door left open a crack — one tap and
+> just that one thing swings open.
 
 A consumer (family) parental-control platform whose defining capability is
 **URL-level** enforcement, not just domain-level: block YouTube generally, but
@@ -41,7 +43,7 @@ Workers (or self-host it as one bundled binary).
 | `docs/WINDOWS_FILTER_POC.md` | **PoC C** — Windows policy-installed browser extension + hardened service (no MITM by default). |
 | `docs/APPLE_URL_FILTER_POC.md` | **PoC D (supplementary)** — `NEURLFilter` Bloom/PIR large-scale blocklist. |
 | `docs/INSTALL.md` | **Install with prebuilt binaries** — no Node/Go on the box; cloud or self-hosted backend. |
-| `docs/BRAND.md` | Product name (**Wren**), voice, microcopy, and palette. |
+| `docs/BRAND.md` | Product name (**Ajar**), voice, microcopy, and palette. |
 | `docs/UX_PRINCIPLES.md` | Behavioral-science UX principles for the ask→approve→unblock loop, mapped to concrete UI changes. |
 | `docs/DEPLOYMENT.md` | Backend → Cloudflare Workers via GitHub Actions; secrets + signing-key generation. |
 | `docs/APPLE_ACCOUNT_SETUP.md` | Apple Developer account prep runbook (enrollment, App IDs, entitlements, Family Controls request, APNs). |

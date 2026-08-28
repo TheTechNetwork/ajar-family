@@ -1,5 +1,5 @@
 /**
- * Wren — Parent Console. A minimal static web UI for the approval loop, served by
+ * Ajar — Parent Console. A minimal static web UI for the approval loop, served by
  * the backend at `/` (one process, no separate web server). Talks to the REST API
  * with a bearer token (CORS enabled on the backend).
  *

@@ -1,9 +1,9 @@
 name: Release
 
-# Publishes prebuilt, self-contained binaries so a family installs Wren with NO
+# Publishes prebuilt, self-contained binaries so a family installs Ajar with NO
 # Node or Go toolchain on the box (see docs/INSTALL.md):
 #   - familyfilter.exe        Windows service (Go, static, amd64 + arm64)
-#   - wren-backend[.exe]      backend API + parent console as one SEA binary
+#   - ajar-backend[.exe]      backend API + parent console as one SEA binary
 #                             (win / mac / linux), zipped with the web/ console
 #
 # Trigger by pushing a tag like v0.1.0-alpha, or run manually from the Actions tab.
@@ -47,14 +47,14 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            asset: wren-backend-linux-x64
-            bin: wren-backend
+            asset: ajar-backend-linux-x64
+            bin: ajar-backend
           - os: macos-latest
-            asset: wren-backend-macos-arm64
-            bin: wren-backend
+            asset: ajar-backend-macos-arm64
+            bin: ajar-backend
           - os: windows-latest
-            asset: wren-backend-windows-x64
-            bin: wren-backend.exe
+            asset: ajar-backend-windows-x64
+            bin: ajar-backend.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -117,11 +117,11 @@ jobs:
           files: release/*
           generate_release_notes: true
           body: |
-            Wren — prebuilt binaries. No Node or Go toolchain needed on the box.
+            Ajar — prebuilt binaries. No Node or Go toolchain needed on the box.
 
             - `familyfilter-windows-{amd64,arm64}.exe` — Windows service. Install
               elevated: `familyfilter-windows-amd64.exe install`.
-            - `wren-backend-{linux,macos,windows}-*.zip` — self-hostable backend
+            - `ajar-backend-{linux,macos,windows}-*.zip` — self-hostable backend
               (API + parent console in one binary). Unzip and run the binary; it
               serves the console at `/`.
 

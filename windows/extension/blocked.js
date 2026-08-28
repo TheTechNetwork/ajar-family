@@ -26,7 +26,7 @@ const REASON_COPY = {
   "rule:YOUTUBE_PLAYLIST": "This playlist isn't open yet.",
   "rule:DOMAIN": "This site isn't open yet.",
   "rule:URL": "This page isn't open yet.",
-  "failclosed:no-snapshot": "Wren is still starting up. Try again in a moment.",
+  "failclosed:no-snapshot": "Ajar is still starting up. Try again in a moment.",
 };
 
 // Human noun for the hero label, derived from the canonical key prefix.

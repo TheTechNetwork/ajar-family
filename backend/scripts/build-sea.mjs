@@ -24,7 +24,7 @@ const isWin = process.platform === "win32";
 const isMac = process.platform === "darwin";
 
 const outfile = resolve(
-  process.argv[2] ?? join(distDir, isWin ? "wren-backend.exe" : "wren-backend"),
+  process.argv[2] ?? join(distDir, isWin ? "ajar-backend.exe" : "ajar-backend"),
 );
 
 const FUSE = "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";

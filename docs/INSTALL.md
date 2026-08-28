@@ -1,4 +1,4 @@
-# Install Wren — prebuilt binaries (no Node, no Go)
+# Install Ajar — prebuilt binaries (no Node, no Go)
 
 The target machine needs **nothing installed** — no Node, no Go, no toolchain.
 You download two things and run them. Each step has the **✅ result** to expect.
@@ -7,7 +7,7 @@ You download two things and run them. Each step has the **✅ result** to expect
 > - **Backend** (API + parent console): runs in the cloud on **Cloudflare
 >   Workers** — nothing on the child's box. (You *can* self-host the same
 >   backend as one binary; see §4.)
-> - **Child's Windows PC**: only the **Wren service** (`familyfilter.exe`, a
+> - **Child's Windows PC**: only the **Ajar service** (`familyfilter.exe`, a
 >   single static binary) + the **browser extension** (from the store).
 > - **Parent**: the console in any browser (served by the backend at `/`).
 
@@ -20,20 +20,20 @@ Download the latest binaries from the repo's **Releases** page:
 
 From Releases, download:
 
-- `familyfilter-windows-amd64.exe` — the Wren service (use `arm64` on ARM PCs).
-- (Self-host only) `wren-backend-windows-x64.zip` (or `-macos-arm64` / `-linux-x64`).
+- `familyfilter-windows-amd64.exe` — the Ajar service (use `arm64` on ARM PCs).
+- (Self-host only) `ajar-backend-windows-x64.zip` (or `-macos-arm64` / `-linux-x64`).
 
 ✅ You have a `.exe` (and optionally a `.zip`). No installer, no runtime.
 
 ---
 
-## 2. Install the Wren service on the child's PC (2 min)
+## 2. Install the Ajar service on the child's PC (2 min)
 
 Open **PowerShell as Administrator**, `cd` to the download folder, then:
 
 ```powershell
 .\familyfilter-windows-amd64.exe install `
-  -BackendUrl https://api.wren.family `
+  -BackendUrl https://api.ajar.family `
   -ChromeExtensionId <STORE_EXTENSION_ID> `
   -ChildUser "$env:COMPUTERNAME\Jane"
 ```
@@ -57,7 +57,7 @@ The service force-installs it by policy on next browser launch. To confirm:
 1. Close and reopen Chrome/Edge on the child's account.
 2. Visit any blocked YouTube video.
 
-✅ You land on the **Wren** "You can ask to unlock this video" page.
+✅ You land on the **Ajar** "You can ask to unlock this video" page.
 
 ---
 
@@ -69,20 +69,20 @@ no Node required.
 
 ```powershell
 # Windows
-Expand-Archive wren-backend-windows-x64.zip -DestinationPath wren-backend
-cd wren-backend
+Expand-Archive ajar-backend-windows-x64.zip -DestinationPath ajar-backend
+cd ajar-backend
 $env:AUTH_SECRET="<a-long-random-secret>"
-.\wren-backend.exe            # leave running
+.\ajar-backend.exe            # leave running
 ```
 
 ```bash
 # macOS / Linux
-unzip wren-backend-macos-arm64.zip -d wren-backend && cd wren-backend
-AUTH_SECRET="<a-long-random-secret>" ./wren-backend   # leave running
+unzip ajar-backend-macos-arm64.zip -d ajar-backend && cd ajar-backend
+AUTH_SECRET="<a-long-random-secret>" ./ajar-backend   # leave running
 ```
 
 **Test:** open `http://localhost:8787/` in a browser.
-✅ The **Wren Parent Console** loads (and `curl http://localhost:8787/v1/health`
+✅ The **Ajar Parent Console** loads (and `curl http://localhost:8787/v1/health`
 returns `{"status":"ok",...}`).
 
 Point the service's `-BackendUrl` at this host instead of the cloud URL.
@@ -114,7 +114,7 @@ Point the service's `-BackendUrl` at this host instead of the cloud URL.
 | Binary | Built by | Toolchain on the box? |
 |---|---|---|
 | `familyfilter-*.exe` | Go, cross-compiled in CI (`.github/workflows/release.yml`) | **None** — static binary |
-| `wren-backend-*` | Node SEA, built per-OS in CI (`backend/scripts/build-sea.mjs`) | **None** — Node is baked in |
+| `ajar-backend-*` | Node SEA, built per-OS in CI (`backend/scripts/build-sea.mjs`) | **None** — Node is baked in |
 | Browser extension | Published to Chrome Web Store / Edge Add-ons | **None** — installed by policy |
 
 The Node/Go you see in `docs/DEMO_WINDOWS.md` is only for building **from

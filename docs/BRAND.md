@@ -1,21 +1,21 @@
-# BRAND — Wren
+# BRAND — Ajar
 
-> Brand foundation + recommended name for the cross-platform family web-approval
-> platform (URL-level, per-video, phone-driven). Decisive by design: **we are
-> adopting the #1 pick.** Availability notes here are lightweight signals, not
-> legal clearance — **verify trademark + domain before committing.**
+> Brand foundation + adopted name for the cross-platform family web-approval
+> platform (URL-level, per-video, phone-driven). **Adopted name: `Ajar`.**
+> Availability notes here are lightweight signals, not legal clearance — **run a
+> formal USPTO/EUIPO class-9/42/45 clearance before public launch.**
 
-**Recommended name: `Wren` · Recommended tagline: "Say yes faster."**
+**Name: `Ajar` · Tagline: "Say yes faster."** (alt: *"Open, just enough."*)
 
 ---
 
 ## 1. Positioning + core promise
 
 **Positioning.** For busy parents who want to give kids the open internet without
-the all-or-nothing fight, **Wren** is a family web-approval platform that opens
+the all-or-nothing fight, **Ajar** is a family web-approval platform that opens
 *exactly one thing* — one video, one page — in seconds, from your phone, across
 every device your child uses. Where blunt filters and screen-time blockers build
-walls and cast kids as suspects, Wren turns a "no" into a fast, calm "yes": the
+walls and cast kids as suspects, Ajar turns a "no" into a fast, calm "yes": the
 child asks with one tap, the parent approves with one tap, and only that one
 thing opens — for as long as the parent chooses, then it closes on its own.
 
@@ -27,128 +27,99 @@ is the hero ("approve before the impulse wins"); calm and agency are the feeling
 
 ---
 
-## 2. Candidate names
+## 2. Why "Ajar"
 
-Tone target: focus / calm / trust / agency / speed. Hard "no" on the category's
-tired negativity — *filter, guard, lock, nanny, spy, monitor, shield, restrict.*
+Every competitor is a **locked door**. Ajar is the door left open a crack — a
+standing invitation, a yes already half-given; one small push (one tap) and just
+that one thing swings open. It is the rare name where the product's whole
+strategic reframe — *not a wall, a door* — lives inside the literal meaning of
+the word, and it lands before the tagline even loads.
 
-| Name | Why it fits | Tone | Verb / human | Risks |
-|---|---|---|---|---|
-| **Wren** ⭐ | A small, quick, bright songbird — free to fly, always has a nest to return to. Agency + safety in one image, and it's a real first name, so it feels human, not corporate. | Calm, warm, premium, unfussy | Human name (soft as a verb) | Exact `.com` is taken (unrelated brands); "Wren" is a fashionable startup name lately. **No parental-control collision** — the point that matters. |
-| **Kite** | The single most on-strategy metaphor: the child flies free while the parent holds the string and can gently reel in just one thing. Empowering, never a cage. | Light, playful, hopeful | Weak verb; evocative noun | **In-category collision:** "SPC Kite" is a parental-control app (regional OEM). Also Zerodha **Kite** (trading), the defunct **Kite** dev-AI. Category crowding is the exact risk to avoid. |
-| **Yonder** | The open world "out there" — exploration with a parent's blessing. Optimistic, non-punitive, memorable. | Warm, folksy, open | Loose | Slightly whimsical/older tone; soft on speed. An unrelated IoT "Yonder" app exists; no parental-control collision. |
-| **Perch** | A calm, safe place to land and look out — and a natural name for the child's ask-screen (a pause, not a punishment). Pairs beautifully with Wren. | Gentle, safe, quiet | Verb ("perch here") | Small/quiet as a standalone master brand; better as a sub-brand (see §5). |
-| **Loop** | The product *is* a fast request→approve loop; reads as speed and closure. Verb-friendly. | Quick, modern, casual | Strong verb | Very crowded app name; generic; hard to own. |
-| **Greenlight** | Perfect literal meaning — "go," approve, the fast yes — and a natural verb ("greenlight it"). | Confident, kinetic | Strong verb | **Dead on arrival:** Greenlight is a major kids-&-family fintech/safety incumbent (greenlight.com). Listed only to show the meaning we're chasing. |
-| **Sona** *(coined)* | Short, soft, brandable; hums of "song" and "sonar" (a quiet signal between parent and child). Clean, ownable-feeling. | Calm, modern, human | Human-ish name | Coined → needs meaning-building; scattered unrelated "Sona" brands (HR, derm). |
-| **Kindra** *(coined)* | "kin" + "kind" — family + warmth + trust, with a real human cadence. | Warm, trustworthy | Human name | Coined; an unrelated women's-health brand uses "Kindra"; no parental-control collision. |
-| **Nook** | A cozy, calm, safe corner. Non-negative, human, easy. | Cozy, soft | Noun | Barnes & Noble "Nook" e-reader association; light on speed/agency. |
-| **Aya** *(coined-human)* | Bright, affirming, one breath to say; a real given name in several cultures. Feels like a quick, kind "yes." | Bright, warm, quick | Human name | Common name; unrelated brands (e.g. Aya Healthcare); low distinctiveness. |
+Why it holds up on every axis that matters:
 
-Coined/short brandables in the set: **Sona, Kindra, Aya** (plus **Perch** as a
-sub-brand). Master-brand shortlist carried to §3–4: **Wren, Kite, Yonder.**
+- **Operates before the brain does.** Two syllables, "uh-JAR." Any US parent says
+  it and spells it right on first contact — the same principle the product itself
+  is built on (see `UX_PRINCIPLES.md`). No reconstruction, no hesitation.
+- **Distinctive & defensible.** "Ajar" is a common word applied to an unrelated
+  product — an **arbitrary mark**, one of the strongest, most registrable kinds.
+- **Category-clear (the decisive test).** No parental-control, screen-time, kids,
+  or family app is named Ajar. The only "AJAR" in software is a *defunct*
+  Motorola/TTPCom feature-phone platform (2002–2008); unrelated non-software
+  namesakes exist (a Kuwaiti rent-payments fintech; an InDesign-plugin maker) —
+  none in our space.
+- **Voice-native.** The block screen writes itself: *"Not open yet — want in?"*
+  is native to the name.
 
----
-
-## 3. Lightweight availability signal (shortlist)
-
-Signal only — a couple of quick checks each. **Not a clearance. Verify trademark
-(USPTO/EUIPO) + domain before committing.**
-
-- **Wren** — No parental-control / EdTech product named "Wren" surfaced. Exact
-  `wren.com` resolves to unrelated legacy uses; `wren.co` is a carbon-offset
-  startup; **Wren Kitchens** (UK retail) is the biggest "Wren" but a different
-  category. Net: **clear in our category; exact `.com` is not ours** → plan on a
-  modified domain (see §5). Verify TM in software/family-services classes.
-- **Kite** — **"SPC Kite" is an actual parental-control app**; "Kite" is also a
-  well-known trading app (Zerodha) and a shuttered dev-AI. Same-category use is a
-  real flag. Treat as backup only, pending TM search in our class.
-- **Yonder** — No parental-control incumbent found; an unrelated IoT/asset app
-  and assorted `yonder.*` sites exist. Likely workable; verify TM + a gettable
-  domain.
-- **Greenlight** — Confirmed **major incumbent** in kids/family (banking + family
-  safety). Do not pursue.
-- **Grove** *(considered, dropped)* — Too crowded: Grove Collaborative
-  (commerce) **and** `grovefamily.app` (a co-parenting family app). Family-
-  adjacent collision; not recommended.
-- **Vero** *(considered, dropped)* — Existing social network "Vero — True
-  Social." Not recommended.
+**Domain (verified available):** flagship **`ajar.family`** (~$10/yr) — exactly
+the `.family` pattern this doc always planned. `ajar.com` / `ajar.app` are held
+by unrelated parties; `.family` is on-brand and sufficient.
 
 ---
 
-## 4. Recommendation
+## 3. Naming journey (what we rejected, and why it matters)
 
-### ⭐ #1 — **Wren**  (adopt today)
+The bar that finally worked is **three gates at once**: say-it-once + no in-category
+collision + an ownable domain. Names die when they miss any one.
 
-**Why.** It is the rare name that is *clean in our category*, ownable as a brand,
-and emotionally exact. A wren is small, quick, and free — but nests; that is the
-whole product in one image: **let the child fly, keep them safe, be one tap
-away.** It is a human first name, so it reads warm and calm, never like
-enforcement software. It sidesteps every negative-category cliché, sits at a
-premium/modern altitude, and gives us a rich, non-punitive visual and voice world
-(birds, flight, nests, a quick flick of a line that is also a checkmark). The one
-real cost — the bare `.com` is taken — is a domain-modifier problem, not a brand
-problem, and every strong signal says the *category* is clear. We can build the
-tagline and voice to carry the speed the word itself only implies.
+| Candidate | Why rejected |
+|---|---|
+| **Wren** | Loved the sound; category-clear. But the exact `.com` is taken and, in the end, so was `wren.family`. Good name, no ownable flagship. |
+| **Chirp** | Instantly sayable and we secured `chirp.family` — but **HIGH legal risk**: two live parental-control apps already use "Chirp" (incl. one literally named "Chirp Family"), plus CHIRP registered for software (class 9/42) and a pending Google mark. Same-category collision = exactly the lawsuit risk to avoid. |
+| Kithaya / Nesria / Yendria | Coined and ownable, but 3-syllable and ambiguous to pronounce — failed the say-it-once bar. |
+| Gladewing | Available `.com`, but a live musician + an indie game share the exact name *and* the bird-in-forest metaphor; primary handle taken. |
+| Nara, Lumo, Onni, Faro, Umi, Okko … | **Fatal** in-category hits — existing kids/family/parental products. |
 
-### Backups
-
-- **#2 — Kite.** Strongest metaphor (fly free / parent holds the string) and more
-  instantly evocative than Wren. Held at #2 **only** because of the same-category
-  "SPC Kite" collision — a beautiful name you might have to abandon is worse than
-  a clean one. Promote to #1 **only if** a trademark search comes back clean.
-- **#3 — Yonder.** Warm, open, ownable, no category collision; the safe,
-  characterful fallback if both above hit legal snags.
+**Lesson:** for a lawsuit-averse consumer app, a *distinctive* word (arbitrary or
+coined) beats a crowded common one. Ajar is a common word used arbitrarily — the
+best of both: instantly understood, yet distinctive for our goods.
 
 ---
 
-## 5. Naming system (using Wren)
+## 4. Naming system (using Ajar)
 
 | Layer | Name | Notes |
 |---|---|---|
-| Platform / company | **Wren** | One master brand across web, cloud, and apps. |
-| Parent app (hero) | **Wren** | App Store: "Wren — Family Web Approvals." The parent lives here; the brand *is* the parent app. |
-| Child app / agent | **Wren for Kids** (agent codename **Perch**) | The child's device agent. Its block/ask screen is the **Perch** — a calm place to land and ask, never a "blocked" wall. |
-| iOS content-filter extensions | Wren filter (data + control appex) | Bundled with the child agent; the classic `NEFilterDataProvider` + control provider path. |
-| macOS | **Wren for Mac** (Safari Web Extension + helper) | Same brand, extension-based enforcement. Never blocks Safari. |
-| Windows service | **Wren Agent** — service display name **"Wren Family Agent"** | Avoids "guard/service" negativity in the user-visible name; binary `wren-agent` / `WrenAgentSvc`. Ships with the Wren browser extension. |
-| Backend / API | **Wren Cloud** — `api.wren.family` | The shared policy engine + approval loop. |
+| Platform / company | **Ajar** | One master brand across web, cloud, and apps. |
+| Parent app (hero) | **Ajar** | App Store: "Ajar — Family Web Approvals." The brand *is* the parent app. |
+| Child app / agent | **Ajar for Kids** (agent codename **Latch**) | The child's device agent. Its block/ask screen is the moment the door is *ajar* — a calm ask, never a "blocked" wall. |
+| iOS content-filter extensions | Ajar filter (data + control appex) | The classic `NEFilterDataProvider` + control provider path. |
+| macOS | **Ajar for Mac** (Safari Web Extension + helper) | Extension-based enforcement. Never blocks Safari. |
+| Windows service | **Ajar Agent** — service display name **"Ajar Family Agent"** | Avoids "guard/service" negativity in the user-visible name. (Code identifier stays `FamilyFilterAgent` until a coordinated rename.) |
+| Backend / API | **Ajar Cloud** — `api.ajar.family` | The shared policy engine + approval loop. |
 
-**Reverse-DNS bundle prefix.** Ideal: `app.wren.*`. Pragmatic (tie to a domain we
-can actually register, see below): **`com.wrenfamily.*`** —
+**Reverse-DNS bundle prefix.** Tie to the domain we can register (`ajar.family`):
+**`com.ajarfamily.*`** —
 
 ```
-com.wrenfamily.parent                 # parent iOS app
-com.wrenfamily.child                  # child agent (iOS)
-com.wrenfamily.child.filterdata       # NEFilterDataProvider appex
-com.wrenfamily.child.filtercontrol    # NEFilterControlProvider appex
-com.wrenfamily.child.urlfilter        # NEURLFilter control provider appex
-com.wrenfamily.child.safari           # macOS Safari Web Extension
-group.com.wrenfamily.child            # App Group (signed policy cache share)
+com.ajarfamily.parent                 # parent iOS app
+com.ajarfamily.child                  # child agent (iOS)
+com.ajarfamily.child.filterdata       # NEFilterDataProvider appex
+com.ajarfamily.child.filtercontrol    # NEFilterControlProvider appex
+com.ajarfamily.child.urlfilter        # NEURLFilter control provider appex
+com.ajarfamily.child.safari           # macOS Safari Web Extension
+group.com.ajarfamily.child            # App Group (signed policy cache share)
 ```
 
-**Primary domain to try (in order):**
-`wren.family` (on-brand, likely available) → `trywren.com` → `wrenfamily.com` →
-`getwren.com`. Register the matching handle set (@wrenfamily) at the same time.
+**Domains:** register **`ajar.family`** (flagship) + defensive `ajar.app` /
+`getajar.com` if available at purchase time, and the matching handle set
+(@ajarfamily / @ajarapp) together.
 
 ---
 
-## 6. Tagline
+## 5. Tagline
 
 1. **"Say yes faster."** ⭐ — verb-forward, reframes the category from *blocking*
    to *approving*, and names the hero (speed / "approve before the impulse wins").
-2. **"The calm way to say yes."** — leads with feeling; good for a softer,
-   trust-first campaign.
-3. **"Room to explore. You're one tap away."** — agency + presence; the nest/kite
-   idea in plain words.
+2. **"Open, just enough."** — leans on the name's own image: the door ajar, only
+   this one thing, only for now. Pairs beautifully with "Ajar."
+3. **"One little push, and they're in."** — the single-tap approval as a picture.
 
-**Recommended: "Say yes faster."** Short, active, unmistakably positive, and it
-does the strategic heavy lifting — it tells parents this product is about opening
-things, fast, not locking them down.
+**Recommended: "Say yes faster."** as the benefit-led promise; **"Open, just
+enough."** as the evocative brand line that leans on the name.
 
 ---
 
-## 7. Brand voice
+## 6. Brand voice
 
 **Adjectives:** Calm · Warm · Confident · Plain-spoken *(and quietly quick)*.
 
@@ -166,20 +137,20 @@ things, fast, not locking them down.
 - No fear-based or surveillance framing. No "gotcha." No infantilizing the child.
 - No corporate/security jargon in anything a family reads.
 
-**Microcopy rewrites (block screen + approval button), in voice**
+**Microcopy (block screen + approval button), in voice**
 
-| Where | Typical / off-brand | Wren |
+| Where | Typical / off-brand | Ajar |
 |---|---|---|
 | Child block screen (headline + helper) | "Access Denied. This content is blocked by your administrator." | **"Not open yet — want in?"** · helper: *"Send a quick ask and a parent can unlock just this."* |
-| Child request button | "Request Access" | **"Ask for this"** (or *"Ask a parent"*) |
+| Child request button | "Request Access" | **"Ask to unlock"** |
 | Parent approval button | "Approve Request" | **"Say yes"** — primary, with a duration chip: *"Just this video · 30 min"* |
 
-Post-approval child confirmation (bonus, same voice): **"You're in. Have fun —
-this closes on its own later."**
+Post-approval child confirmation: **"You're in. Have fun — this closes on its own
+later."**
 
 ---
 
-## 8. Visual direction
+## 7. Visual direction
 
 **Color.** Calm and alive, not corporate-cold, not alarm-red. A confident teal-
 green that nods at "go / greenlight" without the literal traffic light, warmed by
@@ -187,7 +158,7 @@ a friendly coral for the *yes* action.
 
 | Role | Name | Hex |
 |---|---|---|
-| Primary | Wren Teal | `#18A08C` |
+| Primary | Ajar Teal | `#18A08C` |
 | Ink / text | Deep Pine | `#12241F` |
 | Surface | Warm Paper | `#F6F4EE` |
 | Accent — the "yes"/action | Sunrise Coral | `#FF8A5B` |
@@ -196,18 +167,17 @@ Signal states stay soft (muted amber for "asked," calm teal for "open"), never
 harsh red/green enforcement colors.
 
 **Type vibe.** A friendly humanist sans — rounded but grown-up, approachable, not
-techy-monospace and not clinical (think the warmth of Inter/Söhne with soft
-terminals). Wordmark set in **lowercase — `wren`** — to feel human, quiet, and
-modern. Nothing about the type should read "security product."
+techy-monospace and not clinical (the warmth of Inter/Söhne with soft terminals).
+Wordmark set in **lowercase — `ajar`** — to feel human, quiet, and modern.
+Nothing about the type should read "security product."
 
-**Logo concept.** One continuous, quick line that is *both* a small wren in flight
-*and* a subtle upward checkmark — a single gesture that says "bird" and "yes" at
-once. The line's speed (a light flick, not a heavy icon) carries the brand's
-promise of a fast, calm approval. Alternate lockup: a minimalist wren perched on a
-single horizontal line (the "string"/the nest edge), tail flicked up into that
-same tick. One-color-capable, rounded, weightless.
+**Logo concept.** A single door **ajar** — a simple rounded rectangle with one
+edge swung open a few degrees, a warm sliver of Sunrise Coral light spilling
+through the gap. The whole mark reads as "open, just enough" in one glance;
+the open leaf can double as a checkmark's upstroke. One-color-capable, rounded,
+weightless. (The interim UI mark is the 🚪 glyph until the custom logo lands.)
 
 ---
 
-*Adopt: **Wren** · "Say yes faster." — then run a formal trademark + domain check
-before public launch.*
+*Adopt: **Ajar** · "Say yes faster." — then run a formal trademark + domain check
+(USPTO/EUIPO classes 9/42/45) before public launch.*

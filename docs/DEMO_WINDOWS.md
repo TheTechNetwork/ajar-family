@@ -2,7 +2,7 @@
 
 > **Just want to install it?** Use **[INSTALL.md](INSTALL.md)** — download two
 > prebuilt binaries, no Node or Go on the box. **This page is the build-from-source
-> developer demo** (it compiles everything locally), useful for hacking on Wren.
+> developer demo** (it compiles everything locally), useful for hacking on Ajar.
 
 Full loop on one Windows 11 machine: backend + parent console + browser extension
 + hardened service. **Each step has a test and the ✅ result to expect.** Do them
