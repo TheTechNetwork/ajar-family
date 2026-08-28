@@ -25,7 +25,7 @@ import (
 
 const (
 	serviceName = "FamilyFilterAgent"
-	displayName = "Family Filter Agent"
+	displayName = "Ajar Family Agent"
 	description = "Applies parental-control browser policies and monitors for tampering. github.com/00o-sh/contentfilter"
 	version     = "0.1.0-alpha"
 )

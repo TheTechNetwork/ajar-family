@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Family Filter (PoC C)",
+  "name": "Ajar (PoC C)",
   "version": "0.1.0",
-  "description": "Per-video YouTube enforcement for the parental-control PoC. Policy-installed; enforces the shared policy model with full-URL blocking webRequest.",
+  "description": "Ajar — per-video YouTube approvals. Policy-installed; enforces the shared policy model with full-URL blocking webRequest.",
 
   "//policy_install_note": "webRequestBlocking is honored ONLY because this extension is force-installed by enterprise policy (ExtensionInstallForcelist). Chrome's MV3 migration guide states policy-installed extensions keep the blocking form of webRequest: https://developer.chrome.com/docs/extensions/develop/migrate/blocking-web-requests . A store-installed MV3 extension could not use webRequestBlocking and would be limited to declarativeNetRequest. See windows/extension/README.md.",
 

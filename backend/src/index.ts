@@ -31,7 +31,7 @@ async function main(): Promise<void> {
 
   createNodeServer(app).listen(port, () => {
     // eslint-disable-next-line no-console
-    console.log(`contentfilter backend (alpha) on http://localhost:${port}  ·  parent console at /`);
+    console.log(`Ajar backend (alpha) on http://localhost:${port}  ·  parent console at /`);
     if (!process.env.SIGNING_PRIVATE_KEY_B64) {
       // eslint-disable-next-line no-console
       console.log("WARNING: ephemeral policy-signing key (dev only). Set SIGNING_*_KEY_B64 for stable verification.");

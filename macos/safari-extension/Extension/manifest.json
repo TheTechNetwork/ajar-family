@@ -3,9 +3,9 @@
   "_absolute_rule": "NEVER block Safari to gain enforcement. This extension gates per-video inside Safari and redirects blocked navigations to blocked.html; Safari itself stays fully functional.",
 
   "manifest_version": 3,
-  "name": "YouTube Guard (PoC B)",
+  "name": "Ajar (PoC B)",
   "version": "0.0.1",
-  "description": "Per-video YouTube enforcement in Safari, consuming the shared parental-control policy model. Experiment scaffold — not production.",
+  "description": "Ajar — per-video YouTube approvals in Safari, consuming the shared policy model. Experiment scaffold — not production.",
 
   "background": {
     "_note_safari": "Safari supports MV3 background service workers. Safari may unload the worker aggressively (B4/B5): background.js must tolerate reconnects to the native host and can fall back to polling browser.storage. Safari uses 'service_worker' like Chrome; 'scripts'/persistent pages are the older Firefox style and are not relied on here.",
