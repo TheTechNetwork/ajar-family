@@ -15,25 +15,36 @@ async function principal(app: App, req: HttpRequest): Promise<Principal | null> 
   if (!auth?.startsWith("Bearer ")) return null;
   return verifyToken(app.authSecret, auth.slice(7));
 }
-async function requireUser(app: App, req: HttpRequest): Promise<string> {
+const UNAUTH = (msg: string) => Object.assign(new Error(msg), { code: "UNAUTHORIZED" });
+
+/** Resolve + fully validate a user token: signature/exp, tokenVersion (global
+ *  revocation), and — if the token carries a session id — that the session is
+ *  still live (per-device revocation). Returns the userId and its session id. */
+async function userPrincipal(app: App, req: HttpRequest): Promise<{ userId: string; sid?: string }> {
   const p = await principal(app, req);
-  if (!p || p.kind !== "user") throw Object.assign(new Error("login required"), { code: "UNAUTHORIZED" });
-  await app.auth.userForToken(p.userId, p.tv); // rejects a token revoked by logout / password change
-  return p.userId;
+  if (!p || p.kind !== "user") throw UNAUTH("login required");
+  await app.auth.userForToken(p.userId, p.tv);
+  if (p.sid && !(await app.auth.sessionActive(p.sid))) throw UNAUTH("session revoked");
+  return { userId: p.userId, sid: p.sid };
+}
+async function requireUser(app: App, req: HttpRequest): Promise<string> {
+  return (await userPrincipal(app, req)).userId;
 }
 
-// Access + refresh token pair for a signed-in user. Access is short-lived; the
+// Access + refresh token pair for one session (sid). Access is short-lived; the
 // refresh token mints new access tokens via /v1/auth/refresh. Both carry the
-// user's tokenVersion, so logout / password change revokes them.
+// user's tokenVersion (global revoke) AND the session id (per-device revoke).
 const ACCESS_TTL = 60 * 60; // 1h
-const REFRESH_TTL = 60 * 60 * 24 * 14; // 14d (logout / password change revokes all)
-async function tokenPair(app: App, user: { id: string; tokenVersion: number }) {
+const REFRESH_TTL = 60 * 60 * 24 * 14; // 14d
+const deviceLabel = (req: HttpRequest) =>
+  req.headers["x-device-label"] || req.headers["user-agent"] || "Unknown device";
+async function tokenPair(app: App, user: { id: string; tokenVersion: number }, sid: string) {
   return {
     userId: user.id,
     tokenType: "Bearer",
     expiresIn: ACCESS_TTL,
-    accessToken: await issueToken(app.authSecret, { kind: "user", userId: user.id, tv: user.tokenVersion }, ACCESS_TTL),
-    refreshToken: await issueToken(app.authSecret, { kind: "refresh", userId: user.id, tv: user.tokenVersion }, REFRESH_TTL),
+    accessToken: await issueToken(app.authSecret, { kind: "user", userId: user.id, tv: user.tokenVersion, sid }, ACCESS_TTL),
+    refreshToken: await issueToken(app.authSecret, { kind: "refresh", userId: user.id, tv: user.tokenVersion, sid }, REFRESH_TTL),
   };
 }
 async function requireDevice(app: App, req: HttpRequest) {
@@ -66,36 +77,60 @@ export function buildRouter(app: App): Router {
     const capped = limited(authLimiter, req); if (capped) return capped;
     const b = await req.json<{ email: string; password: string; displayName: string }>();
     const user = await app.auth.register(b.email, b.password, b.displayName);
-    return ok(await tokenPair(app, user), 201);
+    const s = await app.auth.startSession(user.id, deviceLabel(req), REFRESH_TTL);
+    return ok(await tokenPair(app, user, s.id), 201);
   });
   r.post("/v1/auth/login", async (req) => {
     const capped = limited(authLimiter, req); if (capped) return capped;
     const b = await req.json<{ email: string; password: string }>();
     const user = await app.auth.authenticate(b.email, b.password);
-    return ok(await tokenPair(app, user));
+    const s = await app.auth.startSession(user.id, deviceLabel(req), REFRESH_TTL);
+    return ok(await tokenPair(app, user, s.id));
   });
-  // Exchange a refresh token for a fresh access + refresh pair.
+  // Exchange a refresh token for a fresh pair (same session). Rejected if the
+  // session was revoked (this device) or the user's tokenVersion changed (all).
   r.post("/v1/auth/refresh", async (req) => {
     const capped = limited(authLimiter, req); if (capped) return capped;
     const { refreshToken } = await req.json<{ refreshToken: string }>();
     const p = refreshToken ? await verifyToken(app.authSecret, refreshToken) : null;
     if (!p || p.kind !== "refresh") return err(401, "invalid refresh token", "UNAUTHORIZED");
-    const user = await app.auth.userForToken(p.userId, p.tv); // rejects if revoked
-    return ok(await tokenPair(app, user));
+    const { user, sid } = await app.auth.refreshSession(p.userId, p.tv, p.sid);
+    return ok(await tokenPair(app, user, sid));
   });
-  // Sign out everywhere: bump the token version so all outstanding tokens die.
+  // Sign out THIS device (revoke the current session only).
   r.post("/v1/auth/logout", async (req) => {
+    const { userId, sid } = await userPrincipal(app, req);
+    if (sid) await app.auth.revokeSession(userId, sid);
+    return ok({ ok: true });
+  });
+  // Sign out EVERYWHERE (revoke all sessions + bump tokenVersion).
+  r.post("/v1/auth/logout-all", async (req) => {
     const userId = await requireUser(app, req);
     await app.auth.revokeAllSessions(userId);
     return ok({ ok: true });
   });
-  // Change password (verifies the current one); returns a fresh token pair since
-  // the change revokes every prior session.
+  // Change password (verifies the current one); revokes all prior sessions and
+  // returns a fresh token pair on a new session so the caller stays signed in.
   r.post("/v1/auth/password", async (req) => {
-    const userId = await requireUser(app, req);
+    const { userId } = await userPrincipal(app, req);
     const b = await req.json<{ currentPassword: string; newPassword: string }>();
     const user = await app.auth.changePassword(userId, b.currentPassword, b.newPassword);
-    return ok(await tokenPair(app, user));
+    const s = await app.auth.startSession(user.id, deviceLabel(req), REFRESH_TTL);
+    return ok(await tokenPair(app, user, s.id));
+  });
+  // List this user's active sessions (per-device); mark which is the caller's.
+  r.get("/v1/me/sessions", async (req) => {
+    const { userId, sid } = await userPrincipal(app, req);
+    const sessions = await app.auth.listSessions(userId);
+    return ok(sessions.map((s) => ({
+      id: s.id, label: s.label, createdAt: s.createdAt, lastUsedAt: s.lastUsedAt, current: s.id === sid,
+    })));
+  });
+  // Revoke one session by id (remote sign-out of another device).
+  r.del("/v1/me/sessions/:sessionId", async (req) => {
+    const userId = await requireUser(app, req);
+    await app.auth.revokeSession(userId, req.params.sessionId!);
+    return ok({ revoked: true });
   });
 
   r.get("/v1/me", async (req) => {

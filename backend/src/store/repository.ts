@@ -17,6 +17,7 @@ import type {
   PolicyRule,
   TemporaryRule,
   DefaultPolicy,
+  Session,
 } from "../domain/model.js";
 
 export interface Repository {
@@ -25,6 +26,12 @@ export interface Repository {
   updateUser(u: User): Promise<User>;
   getUser(id: string): Promise<User | null>;
   getUserByEmail(email: string): Promise<User | null>;
+
+  // sessions (one per signed-in device; enables per-device token revocation)
+  createSession(s: Session): Promise<Session>;
+  getSession(id: string): Promise<Session | null>;
+  updateSession(s: Session): Promise<Session>;
+  listSessionsForUser(userId: string): Promise<Session[]>;
 
   // families & membership
   createFamily(f: Family): Promise<Family>;

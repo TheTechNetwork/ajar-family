@@ -14,8 +14,8 @@ const unb64url = (s: string) =>
   new Uint8Array(Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64"));
 
 export type Principal =
-  | { kind: "user"; userId: string; tv: number }
-  | { kind: "refresh"; userId: string; tv: number }
+  | { kind: "user"; userId: string; tv: number; sid?: string }
+  | { kind: "refresh"; userId: string; tv: number; sid?: string }
   | { kind: "device"; deviceId: string; familyId: string; childId: string };
 
 interface Payload extends Record<string, unknown> { exp: number }
@@ -40,9 +40,9 @@ export async function verifyToken(secret: string, token: string): Promise<Princi
   try { payload = JSON.parse(Buffer.from(unb64url(body)).toString("utf8")); } catch { return null; }
   if (typeof payload.exp !== "number" || payload.exp < Math.floor(Date.now() / 1000)) return null;
   if (payload.kind === "user" && typeof payload.userId === "string")
-    return { kind: "user", userId: payload.userId, tv: Number(payload.tv ?? 0) };
+    return { kind: "user", userId: payload.userId, tv: Number(payload.tv ?? 0), sid: payload.sid as string | undefined };
   if (payload.kind === "refresh" && typeof payload.userId === "string")
-    return { kind: "refresh", userId: payload.userId as string, tv: Number(payload.tv ?? 0) };
+    return { kind: "refresh", userId: payload.userId as string, tv: Number(payload.tv ?? 0), sid: payload.sid as string | undefined };
   if (payload.kind === "device" && typeof payload.deviceId === "string")
     return { kind: "device", deviceId: payload.deviceId as string, familyId: payload.familyId as string, childId: payload.childId as string };
   return null;

@@ -84,6 +84,18 @@ export interface EnrollmentToken {
   createdBy: string; // user id
 }
 
+/** One signed-in session per device/browser. The refresh + access tokens carry
+ *  its `id` (sid); revoking a session invalidates that device only, immediately. */
+export interface Session {
+  id: string;
+  userId: string;
+  label: string; // best-effort device/client label (User-Agent or client-provided)
+  createdAt: string;
+  lastUsedAt: string;
+  expiresAt: string; // matches the refresh-token lifetime
+  revokedAt?: string;
+}
+
 export type AccessRequestStatus = "PENDING" | "APPROVED" | "DENIED" | "EXPIRED";
 
 export interface AccessRequest {

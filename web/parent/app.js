@@ -68,9 +68,16 @@ async function auth(register) {
   } catch (e) { $("authErr").textContent = String(e.message || e); }
 }
 
+$("signout").onclick = async () => {
+  try { await api("/v1/auth/logout", { method: "POST" }); } catch { /* revoke best-effort */ }
+  clearTokens();
+  location.reload();
+};
+
 async function afterLogin() {
   const me = await api("/v1/me");
   $("who").textContent = `${me.displayName} · ${me.email}`;
+  $("signout").classList.remove("hide");
   $("authCard").classList.add("hide");
   $("familyCard").classList.remove("hide");
   renderFamilyPick(me.families);

@@ -9,7 +9,7 @@ import type { Notifier } from "../push/notifier.js";
 import type { EventHub } from "../push/hub.js";
 import { signSnapshot } from "./signing.js";
 import type {
-  User, Family, FamilyMembership, Child, Device, EnrollmentToken,
+  User, Session, Family, FamilyMembership, Child, Device, EnrollmentToken,
   AccessRequest, ApprovalDecision, Role, Platform, ApprovalScope, ApprovalDuration,
   PolicyRule, TemporaryRule, DefaultPolicy, PolicyTargetType, RuleScope,
 } from "./model.js";
@@ -67,13 +67,20 @@ export class AuthService {
     if (!(await verifyPassword(currentPassword, user.passwordHash)))
       throw new DomainError("current password is incorrect", "UNAUTHORIZED");
     const passwordHash = await hashPassword(newPassword);
+    for (const s of await this.repo.listSessionsForUser(userId)) {
+      if (!s.revokedAt) await this.repo.updateSession({ ...s, revokedAt: now() });
+    }
     return this.repo.updateUser({ ...user, passwordHash, tokenVersion: user.tokenVersion + 1 });
   }
 
-  /** Revoke every outstanding token for the user (sign out everywhere). */
+  /** Sign out EVERYWHERE: bump tokenVersion (kills all tokens) and mark every
+   *  session record revoked so the session list reflects it. */
   async revokeAllSessions(userId: string): Promise<User> {
     const user = await this.repo.getUser(userId);
     if (!user) throw new DomainError("unknown user", "NOT_FOUND");
+    for (const s of await this.repo.listSessionsForUser(userId)) {
+      if (!s.revokedAt) await this.repo.updateSession({ ...s, revokedAt: now() });
+    }
     return this.repo.updateUser({ ...user, tokenVersion: user.tokenVersion + 1 });
   }
 
@@ -82,6 +89,48 @@ export class AuthService {
     const user = await this.repo.getUser(userId);
     if (!user || user.tokenVersion !== tv) throw new DomainError("session expired", "UNAUTHORIZED");
     return user;
+  }
+
+  // --- per-device sessions -------------------------------------------------
+
+  /** Create a session for a new sign-in; its id (sid) is embedded in the tokens. */
+  async startSession(userId: string, label: string, ttlSeconds: number): Promise<Session> {
+    const t = now();
+    return this.repo.createSession({
+      id: uid(), userId, label: (label || "Unknown device").slice(0, 120),
+      createdAt: t, lastUsedAt: t, expiresAt: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
+    });
+  }
+
+  /** True if a session is present, not revoked, and not expired. */
+  async sessionActive(sid: string): Promise<boolean> {
+    const s = await this.repo.getSession(sid);
+    return !!s && !s.revokedAt && Date.parse(s.expiresAt) > Date.now();
+  }
+
+  /** Validate a refresh: user's tv matches, session live & owned; touch lastUsedAt. */
+  async refreshSession(userId: string, tv: number, sid: string | undefined): Promise<{ user: User; sid: string }> {
+    const user = await this.userForToken(userId, tv);
+    if (!sid) throw new DomainError("session expired", "UNAUTHORIZED"); // pre-session token
+    const s = await this.repo.getSession(sid);
+    if (!s || s.userId !== userId || s.revokedAt || Date.parse(s.expiresAt) <= Date.now())
+      throw new DomainError("session expired", "UNAUTHORIZED");
+    await this.repo.updateSession({ ...s, lastUsedAt: now() });
+    return { user, sid };
+  }
+
+  /** Active (non-revoked, non-expired) sessions for the user. */
+  async listSessions(userId: string): Promise<Session[]> {
+    const nowMs = Date.now();
+    return (await this.repo.listSessionsForUser(userId))
+      .filter((s) => !s.revokedAt && Date.parse(s.expiresAt) > nowMs);
+  }
+
+  /** Revoke ONE session (this device only). Verifies ownership. */
+  async revokeSession(userId: string, sid: string): Promise<void> {
+    const s = await this.repo.getSession(sid);
+    if (!s || s.userId !== userId) throw new DomainError("unknown session", "NOT_FOUND");
+    if (!s.revokedAt) await this.repo.updateSession({ ...s, revokedAt: now() });
   }
 }
 

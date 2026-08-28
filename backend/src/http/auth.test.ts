@@ -45,16 +45,48 @@ test("password auth: register, login, refresh, revoke on logout", async () => {
   assert.equal((await call(r, "GET", "/v1/me")).status, 401);
   assert.equal((await call(r, "GET", "/v1/me", undefined, access)).status, 200);
 
-  // Refresh mints a new usable access token.
+  // Refresh mints a new usable access token (same session as `tokens`).
   const refresh = await call(r, "POST", "/v1/auth/refresh", { refreshToken: tokens.refreshToken });
   assert.equal(refresh.status, 200);
   const access2 = (refresh.body as { accessToken: string }).accessToken;
   assert.equal((await call(r, "GET", "/v1/me", undefined, access2)).status, 200);
 
-  // Logout revokes EVERY outstanding token (bumps tokenVersion).
+  // Per-device logout revokes ONLY the current session. `access` is the login
+  // session; logging it out must NOT kill the separate register session.
   assert.equal((await call(r, "POST", "/v1/auth/logout", undefined, access)).status, 200);
-  assert.equal((await call(r, "GET", "/v1/me", undefined, access)).status, 401, "access token revoked");
-  assert.equal((await call(r, "POST", "/v1/auth/refresh", { refreshToken: tokens.refreshToken })).status, 401, "refresh token revoked");
+  assert.equal((await call(r, "GET", "/v1/me", undefined, access)).status, 401, "this device's token revoked");
+  assert.equal((await call(r, "GET", "/v1/me", undefined, access2)).status, 200, "the other session survives");
+
+  // logout-all revokes everything (bumps tokenVersion + revokes all sessions).
+  assert.equal((await call(r, "POST", "/v1/auth/logout-all", undefined, access2)).status, 200);
+  assert.equal((await call(r, "GET", "/v1/me", undefined, access2)).status, 401, "all sessions revoked");
+  assert.equal((await call(r, "POST", "/v1/auth/refresh", { refreshToken: tokens.refreshToken })).status, 401, "refresh revoked too");
+});
+
+test("per-device sessions: list and remotely revoke one device", async () => {
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  await call(r, "POST", "/v1/auth/register", { email: "s@e.com", password: "correct-horse", displayName: "S" });
+
+  // Two logins = two sessions ("phone" and "laptop" via X-Device-Label).
+  const login = (label: string) => r.handle({
+    method: "POST", path: "/v1/auth/login", query: new URLSearchParams(),
+    headers: { "x-device-label": label }, params: {},
+    json: async () => ({ email: "s@e.com", password: "correct-horse" }) as never,
+  });
+  const phone = (await login("Phone")).body as { accessToken: string };
+  const laptop = (await login("Laptop")).body as { accessToken: string };
+
+  // The phone lists both sessions and sees which one is current.
+  const list = (await call(r, "GET", "/v1/me/sessions", undefined, phone.accessToken)).body as Array<{ id: string; label: string; current: boolean }>;
+  assert.ok(list.length >= 2, "phone + laptop sessions listed (plus the register session)");
+  assert.equal(list.filter((s) => s.current).length, 1, "exactly one session is current");
+  const laptopId = list.find((s) => s.label === "Laptop")!.id;
+
+  // Phone remotely signs out the laptop; laptop's token dies, phone survives.
+  assert.equal((await call(r, "DELETE", `/v1/me/sessions/${laptopId}`, undefined, phone.accessToken)).status, 200);
+  assert.equal((await call(r, "GET", "/v1/me", undefined, laptop.accessToken)).status, 401, "laptop revoked");
+  assert.equal((await call(r, "GET", "/v1/me", undefined, phone.accessToken)).status, 200, "phone still signed in");
 });
 
 test("password change verifies the current password and revokes old sessions", async () => {

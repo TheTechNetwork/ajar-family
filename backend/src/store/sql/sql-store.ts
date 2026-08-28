@@ -6,6 +6,7 @@ import type { Repository } from "../repository.js";
 import type { SqlDatabase, SqlRow } from "./database.js";
 import { SCHEMA_SQL } from "./schema.js";
 import type {
+  Session,
   User, Family, FamilyMembership, Child, Device, EnrollmentToken,
   AccessRequest, ApprovalDecision, AuditEvent, NotificationEndpoint,
   PolicyRule, TemporaryRule, DefaultPolicy, RuleScope, Role, Platform,
@@ -49,6 +50,29 @@ export class SqlStore implements Repository {
       id: r.id as string, email: r.email as string, displayName: r.display_name as string,
       passwordHash: (r.password_hash as string | null) ?? undefined,
       tokenVersion: Number(r.token_version ?? 0), createdAt: r.created_at as string,
+    } : null;
+  }
+
+  // sessions
+  async createSession(s: Session) {
+    await this.db.run("INSERT INTO sessions(id,user_id,label,created_at,last_used_at,expires_at,revoked_at) VALUES(?,?,?,?,?,?,?)",
+      [s.id, s.userId, s.label, s.createdAt, s.lastUsedAt, s.expiresAt, s.revokedAt ?? null]);
+    return s;
+  }
+  async updateSession(s: Session) {
+    await this.db.run("UPDATE sessions SET label=?, last_used_at=?, expires_at=?, revoked_at=? WHERE id=?",
+      [s.label, s.lastUsedAt, s.expiresAt, s.revokedAt ?? null, s.id]);
+    return s;
+  }
+  async getSession(id: string) { return this.mapSession(await this.db.get("SELECT * FROM sessions WHERE id=?", [id])); }
+  async listSessionsForUser(userId: string) {
+    return (await this.db.all("SELECT * FROM sessions WHERE user_id=?", [userId])).map((r) => this.mapSession(r)!);
+  }
+  private mapSession(r: SqlRow | null): Session | null {
+    return r ? {
+      id: r.id as string, userId: r.user_id as string, label: r.label as string,
+      createdAt: r.created_at as string, lastUsedAt: r.last_used_at as string,
+      expiresAt: r.expires_at as string, revokedAt: (r.revoked_at as string | null) ?? undefined,
     } : null;
   }
 

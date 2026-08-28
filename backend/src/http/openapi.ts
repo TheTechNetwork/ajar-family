@@ -173,12 +173,22 @@ const schemas = {
   },
   TokenResponse: {
     type: "object",
-    description: "Access + refresh token pair. Send accessToken as `Authorization: Bearer <accessToken>`; when it expires, POST refreshToken to /v1/auth/refresh.",
+    description: "Access + refresh token pair. Send accessToken as `Authorization: Bearer <accessToken>`; when it expires, POST refreshToken to /v1/auth/refresh. Both tokens are bound to one session (device) — see /v1/me/sessions.",
     properties: {
       userId: { type: "string" }, tokenType: { const: "Bearer" }, expiresIn: { type: "integer", description: "access-token lifetime (seconds)" },
       accessToken: { type: "string" }, refreshToken: { type: "string" },
     },
     required: ["userId", "tokenType", "expiresIn", "accessToken", "refreshToken"],
+  },
+  SessionSummary: {
+    type: "object",
+    description: "One signed-in device/session for the current user.",
+    properties: {
+      id: { type: "string" }, label: { type: "string" },
+      createdAt: { type: "string", format: "date-time" }, lastUsedAt: { type: "string", format: "date-time" },
+      current: { type: "boolean", description: "true if this is the calling token's session" },
+    },
+    required: ["id", "label", "createdAt", "lastUsedAt", "current"],
   },
 } as const;
 
@@ -247,8 +257,21 @@ export const openapiDocument = {
         responses: { "200": { description: "Token pair", content: json({ $ref: "#/components/schemas/TokenResponse" }) }, "401": errorResponses["401"] } },
     },
     "/v1/auth/logout": {
-      post: { tags: ["auth"], summary: "Sign out everywhere (revoke all tokens)", security: userAuth,
+      post: { tags: ["auth"], summary: "Sign out this device (revoke current session)", security: userAuth,
         responses: { "200": { description: "Signed out", content: json({ type: "object", properties: { ok: { const: true } } }) }, "401": errorResponses["401"] } },
+    },
+    "/v1/auth/logout-all": {
+      post: { tags: ["auth"], summary: "Sign out everywhere (revoke all sessions)", security: userAuth,
+        responses: { "200": { description: "Signed out everywhere", content: json({ type: "object", properties: { ok: { const: true } } }) }, "401": errorResponses["401"] } },
+    },
+    "/v1/me/sessions": {
+      get: { tags: ["auth"], summary: "List active sessions (signed-in devices)", security: userAuth,
+        responses: { "200": { description: "Sessions", content: json({ type: "array", items: { $ref: "#/components/schemas/SessionSummary" } }) }, "401": errorResponses["401"] } },
+    },
+    "/v1/me/sessions/{sessionId}": {
+      delete: { tags: ["auth"], summary: "Revoke one session (remote sign-out of a device)", security: userAuth,
+        parameters: [{ name: "sessionId", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Revoked", content: json({ type: "object", properties: { revoked: { const: true } } }) }, "401": errorResponses["401"], "404": errorResponses["404"] } },
     },
     "/v1/auth/password": {
       post: { tags: ["auth"], summary: "Change password (revokes other sessions)", security: userAuth,

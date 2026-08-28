@@ -37,9 +37,10 @@ truth the iOS / macOS / Windows clients integrate against.
 **Auth is self-contained — no external identity provider.** Parents register/log
 in with **email + password** (PBKDF2-HMAC-SHA256 via WebCrypto, in `auth/password.ts`);
 `/v1/auth/*` returns a short-lived **access token** + a **refresh token**
-(`/v1/auth/refresh`). Logout and password change bump a per-user token version,
-revoking every outstanding token. **Device tokens** are minted at enrollment
-(`/v1/enroll/redeem`). Long-poll endpoints (`/policy/wait`, `/requests/wait`)
+(`/v1/auth/refresh`), both bound to a **session** (one per signed-in device).
+Revoke **per device** (`/v1/auth/logout`, `GET`/`DELETE /v1/me/sessions[/:id]`)
+or **globally** (`/v1/auth/logout-all`, password change). **Device tokens** are
+minted at enrollment (`/v1/enroll/redeem`). Long-poll endpoints (`/policy/wait`, `/requests/wait`)
 deliver changes in seconds without streaming.
 
 ## Test

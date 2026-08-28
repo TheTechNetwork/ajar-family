@@ -5,6 +5,7 @@
  */
 import type { Repository } from "./repository.js";
 import type {
+  Session,
   User,
   Family,
   FamilyMembership,
@@ -25,6 +26,7 @@ const versionKey = (familyId: string, childId: string) => `${familyId}:${childId
 
 export class MemoryStore implements Repository {
   private users = new Map<string, User>();
+  private sessions = new Map<string, Session>();
   private families = new Map<string, Family>();
   private memberships = new Map<string, FamilyMembership>();
   private children = new Map<string, Child>();
@@ -45,6 +47,13 @@ export class MemoryStore implements Repository {
   async getUserByEmail(email: string) {
     for (const u of this.users.values()) if (u.email === email) return clone(u);
     return null;
+  }
+
+  async createSession(s: Session) { this.sessions.set(s.id, clone(s)); return clone(s); }
+  async getSession(id: string) { const v = this.sessions.get(id); return v ? clone(v) : null; }
+  async updateSession(s: Session) { this.sessions.set(s.id, clone(s)); return clone(s); }
+  async listSessionsForUser(userId: string) {
+    return [...this.sessions.values()].filter((s) => s.userId === userId).map(clone);
   }
 
   async createFamily(f: Family) { this.families.set(f.id, clone(f)); return clone(f); }

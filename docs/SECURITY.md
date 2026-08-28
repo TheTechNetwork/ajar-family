@@ -8,10 +8,14 @@ living document for an alpha, not a completed audit.
 - **Passwords, no external IdP.** PBKDF2-HMAC-SHA256 (210k iterations, per-user
   salt, constant-time verify) — `backend/src/auth/password.ts`. Self-describing
   stored form so iterations can be raised later.
-- **Tokens.** Short-lived access (1h) + refresh (14d) HMAC bearer tokens, each
-  carrying the user's `tokenVersion`. **Logout and password change bump it,
-  revoking every outstanding token** (`/v1/auth/logout`, `/v1/auth/password`).
-  `requireUser` rejects a token whose version is stale.
+- **Tokens + sessions.** Short-lived access (1h) + refresh (14d) HMAC bearer
+  tokens, each bound to a **session** (one per signed-in device) and carrying the
+  user's `tokenVersion`. Two revocation levers, both enforced on every request:
+  **per-device** (revoke one session — `/v1/auth/logout`, `DELETE /v1/me/sessions/:id`,
+  list via `GET /v1/me/sessions`) and **global** (`/v1/auth/logout-all` and
+  password change bump `tokenVersion`, killing all tokens). Revocation is
+  immediate: access tokens carry the `sid` and `requireUser` checks the session
+  is still live.
 - **Rate limiting (layered).** A generous **baseline limit on every route**
   (600/min per client) via a router pre-dispatch guard — it applies to authed
   routes and unmatched paths too, so it blunts general abuse and endpoint
@@ -40,10 +44,6 @@ living document for an alpha, not a completed audit.
 - **Account-enumeration on register.** Registering an existing email returns a
   generic 409, but the status still differs from success. Full non-enumeration
   needs an email-verification flow — deferred.
-- **Per-session refresh revocation.** Revocation today is all-or-nothing per user
-  (the `tokenVersion` bump). Revoking one device while keeping others would need
-  server-side refresh-token records; deferred to avoid a multi-device UX
-  regression. Refresh TTL kept short (14d) in the meantime.
 - **Input validation.** Request bodies are typed but not schema-validated
   (no Zod-style guards yet); malformed input is not uniformly rejected.
 - **Rate limiter is per-instance.** Fine for a single node/isolate; needs a
