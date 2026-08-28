@@ -1,7 +1,7 @@
 /**
  * In-memory Repository. Fully functional for the alpha and for tests; no
- * external services. A Postgres implementation replaces this behind the same
- * interface for durable deployments.
+ * external services. For durable deployments the SqlStore (node:sqlite or
+ * Cloudflare D1) replaces this behind the same interface.
  */
 import type { Repository } from "./repository.js";
 import type {

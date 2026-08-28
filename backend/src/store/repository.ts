@@ -1,7 +1,7 @@
 /**
- * Repository interface. The alpha ships an in-memory implementation; a Postgres
- * implementation drops in behind the same interface for persistence (Phase 1
- * hardening). Services depend only on this interface.
+ * Repository interface. Implementations: in-memory (dev) and a SQL store backed
+ * by node:sqlite (self-host) or Cloudflare D1 (Workers), all behind this same
+ * interface. Services depend only on this interface.
  */
 import type {
   User,

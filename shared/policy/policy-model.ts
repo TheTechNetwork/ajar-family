@@ -10,8 +10,9 @@
  * across devices.
  *
  * This is a Phase-0 specification artifact: types + the reference evaluator.
- * The production backend (Phase 1) persists these in PostgreSQL and serves
- * signed, versioned snapshots; the reference evaluator below is the semantics
+ * The backend persists these in SQLite (node:sqlite self-host / Cloudflare D1
+ * on Workers) and serves signed, versioned snapshots; the reference evaluator
+ * below is the semantics
  * every platform adapter must reproduce.
  */
 

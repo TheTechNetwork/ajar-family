@@ -45,7 +45,7 @@ core is the product; the per-platform enforcement engines are adapters.
 ```
                          ┌───────────────────────────────────────────┐
                          │                 CLOUD BACKEND               │
-                         │  TypeScript · PostgreSQL · REST + WS/SSE    │
+                         │  TypeScript · SQLite/D1 · REST + push       │
                          │                                             │
   Parent iOS app ◀──────▶│  Auth (SIWA/passkey/MFA) · Family graph     │
   (Requests/Approvals)   │  Policy + rules + temporary approvals       │
@@ -317,9 +317,13 @@ network) and redirect to a block page. All call the same `normalizeYouTube()`.
 
 ## 7. Backend
 
-- **Stack**: TypeScript (Node), **PostgreSQL**, **REST** for CRUD + **WebSocket/SSE**
-  for immediate policy-change push; **Redis only** where a concrete need appears
-  (rate-limit buckets, WS fan-out) — not by default. Containerized; Docker
+- **Stack**: TypeScript (Node + Cloudflare Workers). **Durable store: SQLite —
+  `node:sqlite` on a Node host, Cloudflare **D1** on Workers** — behind one
+  `Repository` interface (this supersedes the originally-sketched PostgreSQL:
+  D1 fits Workers with no separate DB server, and the self-host ships as one
+  binary with an embedded SQLite file). **REST** for CRUD + **long-poll** for
+  immediate policy-change push (cross-runtime, no streaming); **Redis only** where
+  a concrete need appears (rate-limit buckets, fan-out at scale) — not by default.
   Compose for local dev. No hard vendor lock-in; deployable to AWS/GCP/Azure/Fly/
   Cloudflare. The one exception is the Apple **PIR/OHTTP** infrastructure for
   `NEURLFilter`, which has Apple-specific hosting requirements (documented in

@@ -97,7 +97,7 @@ Merging PR #1 lands the **alpha backend**, not the finished product. Per the
 README phased roadmap and the repo's branch-per-change git convention, follow-up
 work continues on **new branches / new PRs after the merge** — including:
 
-- the **durable `Repository`** implementation (D1/KV or Postgres) — `docs/DEPLOYMENT.md §1`;
+- the **durable `Repository`** implementation (Cloudflare D1 or node:sqlite) — `docs/DEPLOYMENT.md §1`;
 - a real **APNs `Notifier`** behind the existing abstraction — `docs/APPLE_ACCOUNT_SETUP.md §7`;
 - **macOS** (PoC B) and **Windows** (PoC C) agents;
 - **`NEURLFilter` Identity & Trust** onboarding when the PoC-D blocklist layer ships — `docs/APPLE_ACCOUNT_SETUP.md §9`;

@@ -203,10 +203,10 @@ Nothing in the app hard-codes Cloudflare **except this deploy target.**
   host — **Fly, AWS, GCP, Azure**, or a container — per ARCHITECTURE §7 ("No hard
   vendor lock-in; deployable to AWS/GCP/Azure/Fly/Cloudflare"). Signing is
   WebCrypto, so it needs no Cloudflare-specific crypto.
-- The **only** deliberately Cloudflare-flavored follow-up is the durable store: D1
-  is one option; on a Node host you would instead point the same `Repository`
-  interface at Postgres (ARCHITECTURE §7 names PostgreSQL as the reference store).
-  Either way the swap is behind `backend/src/store/repository.ts`.
+- The durable store has two shipped adapters behind the same `Repository`
+  interface: **Cloudflare D1** (Workers) and **node:sqlite** (a Node host / the
+  single-binary self-host). Both are SQLite-compatible SQL — there is no
+  Postgres. The adapter is selected in `backend/src/store/sql/database.ts`.
 - The one genuinely Apple-specific piece (the `NEURLFilter` **PIR/OHTTP** service)
   is a **separate, optional** component, not part of this Worker — see
   `docs/APPLE_ACCOUNT_SETUP.md §9` and `docs/APPLE_URL_FILTER_POC.md`.
