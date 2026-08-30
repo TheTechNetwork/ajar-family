@@ -147,7 +147,7 @@ async function api(path, opts = {}) {
 $("authForm").addEventListener("submit", (e) => { e.preventDefault(); auth(state.registerMode); });
 $("btnMode").onclick = () => setRegisterMode(!state.registerMode);
 
-function setRegisterMode(on) {
+function setRegisterMode(on, quiet) {
   state.registerMode = on;
   $("nameField").classList.toggle("hide", !on);
   $("btnLogin").textContent = on ? "Create account" : "Log in";
@@ -155,7 +155,7 @@ function setRegisterMode(on) {
   $("authH").textContent = on ? "Set up your account" : "Welcome back";
   // A password manager should offer a NEW password when registering, not the old one.
   $("password").setAttribute("autocomplete", on ? "new-password" : "current-password");
-  announce(on ? "Creating a new account." : "Logging in.");
+  if (!quiet) announce(on ? "Creating a new account." : "Logging in.");
 }
 
 async function auth(register) {
@@ -609,7 +609,7 @@ async function decide(r, decision, scope, duration) {
     const ruleId = out?.decision?.producedRuleId;
     const undoable = producesStandingRule(decision, duration) && ruleId;
     const msg = decision === "ALLOW"
-      ? `Sent to ${who}'s device — ${scopeLabel(scope, r.childId).replace("{child}", who)}`
+      ? `Sent to ${who}'s device — ${scopeLabel(scope, r.childId)}`
       : `Left closed — ${who} sees the answer on their screen`;
 
     toast(msg, undoable ? {
@@ -698,7 +698,7 @@ function cssEscape(s) {
 // Auto-resume a session (api() refreshes a stale access token automatically).
 // Only an actual auth rejection clears the refresh token — a single offline
 // fetch used to sign the parent out permanently.
-setRegisterMode(false);
+setRegisterMode(false, true);
 if (state.token || state.refresh) {
   $("authCard").classList.add("hide");           // don't show a form about to vanish
   afterLogin().catch((e) => {

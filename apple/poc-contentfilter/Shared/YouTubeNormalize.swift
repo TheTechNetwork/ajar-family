@@ -51,11 +51,12 @@ public enum YouTube {
     static func isPlaylistId(_ s: String) -> Bool {
         s.range(of: "^(?:PL|UU|LL|FL|RD|OL|EL)[A-Za-z0-9_-]{10,}$", options: .regularExpression) != nil
     }
-    static func stripWww(_ host: String) -> String {
-        var h = host.lowercased()
-        if h.hasPrefix("www.") { h.removeFirst(4) }
-        return h
-    }
+    /// The TS `stripWww` is `host.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase()`
+    /// — it strips the trailing ROOT DOT as well. The previous Swift version did
+    /// not, so `https://youtube.com./watch?v=…` was not recognized as YouTube at
+    /// all and fell through to the web default. Delegates to `Host.normalize`,
+    /// which is that exact expression.
+    static func stripWww(_ host: String) -> String { Host.normalize(host) }
 
     public static func normalize(_ raw: String) -> YouTubeObject {
         guard let u = URLComponents(string: raw), let hostRaw = u.host else {

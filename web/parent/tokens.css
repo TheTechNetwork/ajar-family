@@ -191,8 +191,12 @@ button[data-busy]::after, .btn[data-busy]::after {
 }
 @keyframes ajar-spin { to { transform: rotate(360deg); } }
 
-/* The one "open it" action. Coral is the yes (BRAND §7). */
-.btn-yes { background: var(--yes); color: var(--yes-ink); border-color: transparent;
+/* The one "open it" action. Coral is the yes (BRAND §7).
+   The coral fill is only 2.32:1 against a white card, so a transparent border
+   would leave the most important control in the product without a perceivable
+   boundary (SC 1.4.11). The --yes-ink border reads 6.96:1 against the coral and
+   16.18:1 against the card, so the edge holds on both sides. */
+.btn-yes { background: var(--yes); color: var(--yes-ink); border-color: var(--yes-ink);
            min-height: var(--tap-lg); font-size: var(--t-lg); font-weight: var(--w-bold);
            padding-inline: var(--s-5); }
 .btn-yes:hover { background: var(--yes-strong); }

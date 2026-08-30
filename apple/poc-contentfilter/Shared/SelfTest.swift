@@ -41,6 +41,7 @@ public enum PolicySelfTest {
         f += safetyFloorVectors()
         f += canonicalJSONVectors()
         f += signatureVector()
+        f += evaluatorVectors()
         return f
     }
 
@@ -351,11 +352,72 @@ public enum PolicySelfTest {
             out += [Failure(name: "Ed25519 filter-asset verification", detail: "FAILED: \(error)")]
         }
 
-        // (f) the evaluator end to end: the signed snapshot above carries a
-        // CATEGORY BLOCK on "social" with an inline map, so a tiktok URL must
-        // block and an unrelated one must fall through to webDefault ALLOW.
-        // (Exercised through a throwaway store so the real App Group is
-        // untouched; see PolicyStoreHarness below.)
+        return out
+    }
+
+    // MARK: - 8. The evaluator, end to end
+
+    /// Installs the signed vector snapshot into a THROWAWAY UserDefaults suite
+    /// (never the real App Group) and checks the decisions the product depends
+    /// on. This is what proves CATEGORY rules actually enforce, which is the gap
+    /// this pass exists to close.
+    ///
+    /// The vector snapshot is: webDefault ALLOW, youTubeDefault BLOCK, one
+    /// CHILD-scoped `CATEGORY social BLOCK` rule, inline map social =
+    /// [tiktok.com, reddit.com].
+    public static func evaluatorVectors() -> [Failure] {
+        var out: [Failure] = []
+        let suite = "com.ajar.policy-selftest"
+        UserDefaults.standard.removePersistentDomain(forName: suite)
+
+        let store = PolicyStore(appGroup: suite)
+        store.categoryFilters = CategoryFilterStore(appGroup: suite)
+        guard store.enrollSigningKey(testSigningKeySPKIB64) else {
+            return [Failure(name: "self-test enrollment",
+                            detail: "could not enroll the test key; is pinnedSigningKeySPKIB64 set to something else?")]
+        }
+        do {
+            try store.install(rawSnapshot: Data(signedSnapshotJSON.utf8))
+        } catch {
+            return [Failure(name: "self-test install", detail: "install threw: \(error)")]
+        }
+
+        func expect(_ url: String, _ action: RuleAction, _ reasonPrefix: String,
+                    resolved: [String] = []) -> [Failure] {
+            let r = store.evaluate(url, resolvedHosts: resolved)
+            return check("evaluate(\(url))", r.action == action && r.reason.hasPrefix(reasonPrefix),
+                         "got \(r.action.rawValue) reason=\(r.reason) key=\(r.matchedKey ?? "-")")
+        }
+
+        // CATEGORY rules enforce, over the inline map, including subdomains.
+        out += expect("https://www.tiktok.com/@someone", .block, "rule:CATEGORY")
+        out += expect("https://m.old.reddit.com/r/x", .block, "rule:CATEGORY")
+        // ...and over a CNAME-resolved alias, which is the cloaking case.
+        out += expect("https://cdn.first-party.example/x", .block, "rule:CATEGORY",
+                      resolved: ["edge.tiktok.com"])
+        // Unrelated hosts fall through to the web default.
+        out += expect("https://khanacademy.org/math", .allow, "default:web")
+        // YouTube keeps its own default.
+        out += expect("https://www.youtube.com/watch?v=dQw4w9WgXcQ", .block, "default:youtube")
+        // The safety floor sits above the lot.
+        out += expect("https://chat.988lifeline.org/", .allow, "safety-floor")
+        out += check("safety-floor decisions are not reportable",
+                     !store.evaluate("https://chat.988lifeline.org/").isReportable,
+                     "a safety-floor hit was marked reportable")
+
+        // Fail closed: corrupt the stored bytes and everything but the floor blocks.
+        UserDefaults(suiteName: suite)?.set(Data("{\"not\":\"a snapshot\"}".utf8),
+                                            forKey: "device_policy_snapshot_raw_v2")
+        let corrupted = PolicyStore(appGroup: suite)
+        corrupted.categoryFilters = CategoryFilterStore(appGroup: suite)
+        out += check("tampered cache blocks the web",
+                     corrupted.evaluate("https://khanacademy.org/math").action == .block,
+                     "a tampered snapshot did not fail closed")
+        out += check("tampered cache still allows the safety floor",
+                     corrupted.evaluate("https://988lifeline.org/").action == .allow,
+                     "the safety floor did not survive a tampered snapshot")
+
+        UserDefaults.standard.removePersistentDomain(forName: suite)
         return out
     }
 }

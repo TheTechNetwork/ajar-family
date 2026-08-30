@@ -91,9 +91,13 @@
     }
     .toast.is-shown { opacity: .98; visibility: visible; pointer-events: auto; }
     .toast .msg { font-size: var(--t-sm); font-weight: var(--w-semi); }
+    /* The toast paints on --ink, so its controls invert: --bg text and border
+       read 14.71:1 (light) / 14.52:1 (dark) against that ground. The focus
+       tokens swap too, or the outer ring would be the same colour as the toast. */
     .toast button { background: transparent; color: var(--bg);
                     border-color: var(--bg); min-height: var(--tap); }
-    .toast button:hover { background: rgba(255,255,255,.14); }
+    .toast button:hover { background: var(--bg); color: var(--ink); }
+    .toast button:focus-visible { --focus: var(--bg); --focus-halo: var(--ink); }
 
     .hide { display: none !important; }
     .errline { color: var(--err); font-size: var(--t-sm); margin-top: var(--s-2);

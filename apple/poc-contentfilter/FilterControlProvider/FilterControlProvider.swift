@@ -2,14 +2,23 @@ import NetworkExtension
 import os.log
 
 /// PoC A control provider. Owns the remediation map (the Request-Access block
-/// page shown in Safari when the data provider returns `.remediateVerdict`) and
-/// the fast-update path (`notifyRulesChanged()`).
+/// page shown in Safari when the data provider returns `.remediateVerdict`), the
+/// fast-update path (`notifyRulesChanged()`), and — new in this pass — the CNAME
+/// resolution the data provider is not allowed to do.
 ///
 /// The remediation URL points at a page the app can intercept to reconstruct the
 /// blocked canonical id and open the Request-Access flow. Test A3/A4.
 final class FilterControlProvider: NEFilterControlProvider {
 
+    /// Total budget for resolving a chain while a flow waits. The system does not
+    /// wait forever for a control verdict, and a slow DNS server must not stall
+    /// browsing, so the walk is cut off and whatever was learned is used.
+    static let cnameBudget: TimeInterval = 0.4
+
     private let log = Logger(subsystem: "com.example.parentfilterpoc", category: "control")
+    private let store = PolicyStore.shared
+    private let cache = CnameChainCache.shared
+    private let queue = DispatchQueue(label: "com.ajar.control.cname", qos: .userInitiated)
 
     override func startFilter(completionHandler: @escaping (Error?) -> Void) {
         // Register the remediation entries referenced by the data provider's
@@ -35,6 +44,56 @@ final class FilterControlProvider: NEFilterControlProvider {
         completionHandler()
     }
 
+    /// Called when the data provider returns `NEFilterNewFlowVerdict.needRules()`.
+    ///
+    /// Unlike the data provider, the control provider IS permitted network
+    /// access, so this is where the CNAME chain gets resolved. The chain is
+    /// written to the App-Group cache (so every later flow to the same host is
+    /// decided in the data path with no round trip) and the flow is answered
+    /// with the full evaluation.
+    ///
+    /// LIMITATION: `NEFilterControlVerdict` has no "remediate" case, so a flow
+    /// blocked *here* is dropped rather than shown the Request-Access page. It
+    /// carries `withUpdateRules: true`, so the data provider re-evaluates the
+    /// next flow to that host from cache and can remediate it properly. Whether
+    /// that reads acceptably in Safari is test A3 and is UNVERIFIED.
+    override func handleNewFlow(_ flow: NEFilterFlow,
+                                completionHandler: @escaping (NEFilterControlVerdict) -> Void) {
+        let urlString: String
+        let host: String
+        if let browser = flow as? NEFilterBrowserFlow, let url = browser.url {
+            urlString = url.absoluteString
+            host = url.host ?? ""
+        } else if let socket = flow as? NEFilterSocketFlow, let h = socket.remoteHostname, !h.isEmpty {
+            urlString = "https://\(h)/"
+            host = h
+        } else {
+            completionHandler(.allow(withUpdateRules: false))
+            return
+        }
+
+        queue.async { [weak self] in
+            guard let self else { completionHandler(.allow(withUpdateRules: false)); return }
+            let chain = CnameResolver.shared.resolve(
+                host, deadline: Date().addingTimeInterval(Self.cnameBudget))
+            // Cache even an empty chain: a negative result stops us paying for a
+            // round trip on every flow to a host that has no CNAME.
+            self.cache.store(host: host, chain: chain)
+
+            let decision = self.store.evaluate(urlString, resolvedHosts: chain)
+            if decision.isReportable {
+                self.log.info("""
+                    control decided action=\(decision.action.rawValue, privacy: .public) \
+                    reason=\(decision.reason, privacy: .public) \
+                    chain=\(chain.count, privacy: .public)
+                    """)
+            }
+            completionHandler(decision.action == .block
+                              ? .drop(withUpdateRules: true)
+                              : .allow(withUpdateRules: true))
+        }
+    }
+
     /// The app calls into the extension (via a shared App-Group flag + a
     /// `NEFilterManager` reload) after writing a new policy snapshot; the control
     /// provider then tells the system rules changed so the new allow/deny applies
@@ -45,6 +104,9 @@ final class FilterControlProvider: NEFilterControlProvider {
     }
 
     override func handle(_ report: NEFilterReport) {
-        // Optional: observe verdicts for the PoC propagation measurement.
+        // Deliberately empty. Anything added here must respect the safety floor:
+        // a flow decided by `reason == "safety-floor"` is never reported, so any
+        // reporting added later must consult `EvalResult.isReportable` rather
+        // than reporting every verdict it sees.
     }
 }

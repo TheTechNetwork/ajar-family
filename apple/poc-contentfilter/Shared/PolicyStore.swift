@@ -94,6 +94,10 @@ public final class PolicyStore {
     private let devUnsignedKey = "policy_dev_unsigned"
     #endif
 
+    /// Where the category Bloom filters come from. Injectable so the self-test
+    /// can run against a throwaway store.
+    public lazy var categoryFilters: CategoryFilterStore = CategoryFilterStore.shared
+
     /// Only the containing app should write diagnostics back into the App Group:
     /// the NEFilterDataProvider sandbox forbids disk writes, so the extensions
     /// read-only. The app sets this to true at launch.
@@ -286,7 +290,7 @@ public final class PolicyStore {
 
         // Categories for the host chain: the snapshot's inline map UNION the
         // device's cached Bloom filters, exactly as the TS evaluator does.
-        let filters = CategoryFilterStore.shared.current(publicKeyB64: trustedSigningKeyB64)
+        let filters = categoryFilters.current(publicKeyB64: trustedSigningKeyB64)
         var hostCats = Set<String>()
         for h in hosts {
             hostCats.formUnion(Host.categories(in: snap.categories, for: h))

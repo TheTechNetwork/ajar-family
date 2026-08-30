@@ -284,13 +284,29 @@ A prioritized checklist, mapped to files. Ordered by impact‑per‑effort.
 1. **[Parent] Actionable push approvals** — Allow 30 min / Not now from the notification, no app open. Writes `ApprovalDecision` directly. *(APNs path, `ARCHITECTURE.md §7`; §1/§3/§6)* — **highest impact.**
 2. **[Parent] Replace 3 s polling with WS/SSE push** (`app.js` `setInterval(refreshRequests,3000)` → the backend's existing push channel). Cuts up to ~6 s of round‑trip latency. *(§1)*
 3. **[Parent] Collapse the decision to one primary button** — `renderRequest` in `app.js`: "Unlock this video · 30 min" (narrowest‑useful default) + "Not now" + a "Change…" disclosure hiding the 8‑scope × 6‑duration matrix. *(§2/§3)*
-4. **[Block] Optimistic "Asked ✓" on tap** — `blocked.js`: flip state instantly, reconcile in background; add the "unlocks by itself if yes" copy. *(§1/§9)*
+4. ~~**[Block] Optimistic "Asked ✓" on tap**~~ — **done, then corrected.** The
+   optimistic flip shipped, but it reported success even when the transport
+   dropped the message, and the "unlocks by itself if yes" copy described a code
+   path that does not exist. The screen now shows four honest states — asking /
+   asked (with how long ago) / approved / declined — and only claims "sent" once
+   the send was acknowledged. *(§1/§9, requirement 10)*
 5. **[Block] Demote the raw URL, add a human label** — make the resource title (via `youtube-normalize.js`) the hero; move the monospace URL behind a "details" disclosure. *(§4)*
-6. **[Both] Fix tap targets to ≥ 44 px** — parent `.actions button` (~26 px today) and block‑screen buttons. *(§8, WCAG 2.5.8 / HIG)*
-7. **[Both] Color‑independent status** — add icon + word to block‑screen `.ok`/`.err` and the red `.dot`; keep parent buttons text‑labeled. *(§8, WCAG 1.4.1)*
-8. **[Both] Unify the verb** — child "Ask to unlock" → parent "Unlock / Not now" → child "Unlocked ✓", identical every cycle. Update `blocked.html`, `blocked.js`, `app.js`. *(§7)*
+6. ~~**[Both] Fix tap targets to ≥ 44 px**~~ — **done**, via the `--tap` token. Note the miss the first pass made: the primary buttons were fixed and the `<summary>` disclosures (18–19.7 px, under the WCAG 24 px floor) and the options pages were not. *(§8, WCAG 2.5.8 / HIG)*
+7. ~~**[Both] Color‑independent status**~~ — **done on all five surfaces.** The first pass did the block screens and left the console's family picker (fill colour only) and both options pages (a pale wash at 1.14:1) untouched. *(§8, WCAG 1.4.1)*
+8. **[Both] Unify the verb** — child "Ask to unlock" → parent "Open this video · 30 min" / "Not now" → child "You're in" / "Not this one", identical every cycle. Done in the UI; the notification copy still needs it. *(§7)*
 9. **[Block] Non‑shaming copy + privacy line** — apply the §9 before/after table; add "Only pages you ask about are shared." *(§4/§5)*
 10. **[Parent] Batch bursts + "Always allow this channel"** — group same‑child/same‑channel PENDING requests with an "Allow all · 30 min" action, and expose a remember‑this escalation inside Change…. *(§3)*
+11. **[Parent] Reversibility, so a tired yes or no is safe** — **done.** A
+    5‑second Undo on any decision that produced a standing rule, plus a
+    "What you've already decided" list with Remove. Without it, "Not now" was a
+    permanent, invisible, irreversible block: the softest‑sounding control in the
+    product had the harshest effect, and a fatigued parent ratcheted the internet
+    shut one mis‑tap at a time with no counter‑force. *(§3, §4)*
+12. **[Parent] Put the job above the setup** — **done.** Pending asks are now the
+    first thing on the page; family/device setup is a collapsed `<details>` below
+    it, opened automatically only when there is no family yet. At 375 px the
+    "Asks" heading used to sit 420–600 px down the page, below the fold on every
+    phone, for the one thing the parent opened the console to do. *(§2)*
 
 ---
 
