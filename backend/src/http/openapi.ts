@@ -31,7 +31,12 @@ const schemas = {
     oneOf: [
       { type: "object", properties: { kind: { const: "MINUTES" }, minutes: { type: "integer" } }, required: ["kind", "minutes"] },
       { type: "object", properties: { kind: { const: "UNTIL_END_OF_DAY" } }, required: ["kind"] },
-      { type: "object", properties: { kind: { const: "ONCE" } }, required: ["kind"] },
+      {
+        type: "object",
+        description:
+          "Single use. Produces a grant the device must report as consumed via POST /v1/devices/{deviceId}/grants/{ruleId}/consume; it is dropped from every snapshot from that moment. A 5-minute TTL is the backstop if the device never reports.",
+        properties: { kind: { const: "ONCE" } }, required: ["kind"],
+      },
       { type: "object", properties: { kind: { const: "ALWAYS" } }, required: ["kind"] },
     ],
   },
@@ -72,9 +77,14 @@ const schemas = {
     type: "object",
     properties: {
       id: { type: "string" }, familyId: { type: "string" },
-      displayName: { type: "string" }, createdAt: { type: "string", format: "date-time" },
+      displayName: { type: "string" },
+      timezone: {
+        type: "string", default: "UTC",
+        description: "IANA time zone (e.g. America/Los_Angeles). Determines when an UNTIL_END_OF_DAY approval expires — the child's local midnight, not UTC.",
+      },
+      createdAt: { type: "string", format: "date-time" },
     },
-    required: ["id", "familyId", "displayName", "createdAt"],
+    required: ["id", "familyId", "displayName", "timezone", "createdAt"],
   },
   Device: {
     type: "object",
@@ -82,9 +92,26 @@ const schemas = {
       id: { type: "string" }, familyId: { type: "string" }, childId: { type: "string" },
       platform: { $ref: "#/components/schemas/Platform" }, displayName: { type: "string" },
       devicePublicKey: { type: "string", description: "base64 raw Ed25519 public key" },
-      enrolledAt: { type: "string", format: "date-time" }, lastSyncedVersion: { type: "integer" },
+      enrolledAt: { type: "string", format: "date-time" },
+      lastSyncedVersion: { type: "integer", description: "Policy version this device last actually pulled." },
+      lastSeenAt: { type: "string", format: "date-time", description: "Last contact with the backend. Absent = never since enrollment." },
     },
     required: ["id", "familyId", "childId", "platform", "displayName", "devicePublicKey", "enrolledAt", "lastSyncedVersion"],
+  },
+  DeviceStatus: {
+    allOf: [
+      { $ref: "#/components/schemas/Device" },
+      {
+        type: "object",
+        description: "A device plus whether protection is demonstrably still running on it.",
+        properties: {
+          currentVersion: { type: "integer", description: "Current policy version for this device's child." },
+          upToDate: { type: "boolean", description: "The device has pulled the current version." },
+          stale: { type: "boolean", description: "No contact for over 24 hours — treat protection as unverified." },
+        },
+        required: ["currentVersion", "upToDate", "stale"],
+      },
+    ],
   },
   PolicyRule: {
     type: "object",
@@ -204,8 +231,9 @@ const schemas = {
     type: "object",
     properties: {
       id: { type: "string" }, userId: { type: "string" },
-      kind: { type: "string", enum: ["APNS", "WEBSOCKET", "CONSOLE"] },
-      token: { type: "string" }, createdAt: { type: "string", format: "date-time" },
+      kind: { type: "string", enum: ["APNS", "WEBSOCKET", "CONSOLE", "EMAIL", "WEBPUSH"] },
+      token: { type: "string", description: "APNs device token, Web Push subscription JSON, ws connection id, or — for EMAIL — the destination address." },
+      createdAt: { type: "string", format: "date-time" },
     },
     required: ["id", "userId", "kind", "token", "createdAt"],
   },
@@ -320,6 +348,18 @@ export const openapiDocument = {
         requestBody: { required: true, content: json({ type: "object", properties: { refreshToken: { type: "string" } }, required: ["refreshToken"] }) },
         responses: { "200": { description: "Token pair", content: json({ $ref: "#/components/schemas/TokenResponse" }) }, "401": errorResponses["401"] } },
     },
+    "/v1/auth/forgot": {
+      post: { tags: ["auth"], summary: "Start a password reset (always 202)", security: [],
+        description: "Emails a single-use reset token, valid for 30 minutes, if the address belongs to an account. Responds 202 either way — a different status for an unknown address would make this an account-enumeration oracle. Rate-limited.",
+        requestBody: { required: true, content: json({ type: "object", properties: { email: { type: "string", format: "email" } }, required: ["email"] }) },
+        responses: { "202": { description: "Accepted (whether or not the address is known)", content: json({ type: "object", properties: { status: { const: "accepted" } } }) }, "429": { description: "Rate limited", content: json({ $ref: "#/components/schemas/Error" }) } } },
+    },
+    "/v1/auth/reset": {
+      post: { tags: ["auth"], summary: "Complete a password reset with an emailed token", security: [],
+        description: "Consumes the token (single use, 30-minute TTL, stored only as a SHA-256 hash), sets the new password, and revokes every existing session by bumping tokenVersion. Returns a fresh token pair on a new session.",
+        requestBody: { required: true, content: json({ type: "object", properties: { token: { type: "string" }, newPassword: { type: "string", minLength: 8 } }, required: ["token", "newPassword"] }) },
+        responses: { "200": { description: "New token pair", content: json({ $ref: "#/components/schemas/TokenResponse" }) }, "400": errorResponses["400"], "401": { description: "Invalid or expired reset token", content: json({ $ref: "#/components/schemas/Error" }) } } },
+    },
     "/v1/auth/logout": {
       post: { tags: ["auth"], summary: "Sign out this device (revoke current session)", security: userAuth,
         responses: { "200": { description: "Signed out", content: json({ type: "object", properties: { ok: { const: true } } }) }, "401": errorResponses["401"] } },
@@ -357,19 +397,38 @@ export const openapiDocument = {
     },
     "/v1/families/{familyId}/parents": {
       post: { tags: ["families"], summary: "Add a parent/guardian to the family", security: userAuth, parameters: [familyIdParam],
-        requestBody: { required: true, content: json({ type: "object", properties: { userId: { type: "string" }, role: { $ref: "#/components/schemas/Role" }, assignedChildIds: { type: "array", items: { type: "string" } } }, required: ["userId", "role"] }) },
-        responses: { "201": { description: "Membership", content: json({ $ref: "#/components/schemas/FamilyMembership" }) }, "401": errorResponses["401"], "403": errorResponses["403"] } },
+        description: "Identify the co-parent by `email` (preferred) or `userId`. The person must already have an Ajar account — an unknown address is a 404, never a membership pointing at nobody. `assignedChildIds` applies only to LIMITED_GUARDIAN and every id must belong to this family.",
+        requestBody: { required: true, content: json({ type: "object", properties: { email: { type: "string", format: "email" }, userId: { type: "string", description: "Legacy alternative to email." }, role: { $ref: "#/components/schemas/Role" }, assignedChildIds: { type: "array", items: { type: "string" } } }, required: ["role"] }) },
+        responses: { "201": { description: "Membership", content: json({ $ref: "#/components/schemas/FamilyMembership" }) }, "400": errorResponses["400"], "401": errorResponses["401"], "403": errorResponses["403"], "404": { description: "No account with that email/id", content: json({ $ref: "#/components/schemas/Error" }) }, "409": { description: "Already a member of this family", content: json({ $ref: "#/components/schemas/Error" }) } } },
     },
     "/v1/families/{familyId}/children": {
       post: { tags: ["families"], summary: "Add a child", security: userAuth, parameters: [familyIdParam],
-        requestBody: { required: true, content: json({ type: "object", properties: { displayName: { type: "string" } }, required: ["displayName"] }) },
-        responses: { "201": { description: "Child", content: json({ $ref: "#/components/schemas/Child" }) }, "401": errorResponses["401"], "403": errorResponses["403"] } },
+        requestBody: { required: true, content: json({ type: "object", properties: { displayName: { type: "string" }, timezone: { type: "string", default: "UTC", description: "IANA time zone; rejected with 400 if unknown." } }, required: ["displayName"] }) },
+        responses: { "201": { description: "Child", content: json({ $ref: "#/components/schemas/Child" }) }, "400": errorResponses["400"], "401": errorResponses["401"], "403": errorResponses["403"] } },
       get: { tags: ["families"], summary: "List children", security: userAuth, parameters: [familyIdParam],
         responses: { "200": { description: "Children", content: json({ type: "array", items: { $ref: "#/components/schemas/Child" } }) }, "403": errorResponses["403"] } },
     },
+    "/v1/families/{familyId}/children/{childId}": {
+      put: { tags: ["families"], summary: "Update a child's time zone", security: userAuth,
+        parameters: [familyIdParam, { name: "childId", in: "path", required: true, schema: { type: "string" } }],
+        description: "Sets the IANA zone that UNTIL_END_OF_DAY approvals are measured in.",
+        requestBody: { required: true, content: json({ type: "object", properties: { timezone: { type: "string" } }, required: ["timezone"] }) },
+        responses: { "200": { description: "Updated child", content: json({ $ref: "#/components/schemas/Child" }) }, "400": errorResponses["400"], "403": errorResponses["403"], "404": errorResponses["404"] } },
+      delete: { tags: ["families"], summary: "Erase a child and everything attached to them", security: userAuth,
+        parameters: [familyIdParam, { name: "childId", in: "path", required: true, schema: { type: "string" } }],
+        description: "Cascades: devices, standing rules, temporary grants, access requests, default policy, and any LIMITED_GUARDIAN assignment naming this child. Irreversible.",
+        responses: { "200": { description: "Deleted", content: json({ type: "object", properties: { deleted: { const: true } } }) }, "401": errorResponses["401"], "403": errorResponses["403"], "404": errorResponses["404"] } },
+    },
     "/v1/families/{familyId}/devices": {
-      get: { tags: ["families"], summary: "List enrolled devices", security: userAuth, parameters: [familyIdParam],
-        responses: { "200": { description: "Devices", content: json({ type: "array", items: { $ref: "#/components/schemas/Device" } }) }, "403": errorResponses["403"] } },
+      get: { tags: ["families"], summary: "List enrolled devices with last-seen status", security: userAuth, parameters: [familyIdParam],
+        description: "Each device reports `lastSeenAt`, the policy version it actually pulled, and a `stale` flag (no contact for 24h) — so a parent can tell whether protection is still running rather than assuming it is.",
+        responses: { "200": { description: "Devices", content: json({ type: "array", items: { $ref: "#/components/schemas/DeviceStatus" } }) }, "403": errorResponses["403"] } },
+    },
+    "/v1/families/{familyId}/devices/{deviceId}": {
+      delete: { tags: ["families"], summary: "Remove a device (and its device-scoped policy)", security: userAuth,
+        parameters: [familyIdParam, { name: "deviceId", in: "path", required: true, schema: { type: "string" } }],
+        description: "Cascades device-scoped rules, temporary grants and requests. The device's token stops working immediately.",
+        responses: { "200": { description: "Deleted", content: json({ type: "object", properties: { deleted: { const: true } } }) }, "401": errorResponses["401"], "403": errorResponses["403"], "404": errorResponses["404"] } },
     },
     "/v1/families/{familyId}/audit": {
       get: { tags: ["families"], summary: "List audit events", security: userAuth, parameters: [familyIdParam],
@@ -401,7 +460,7 @@ export const openapiDocument = {
     "/v1/enroll/redeem": {
       post: { tags: ["enrollment"], summary: "Redeem a code; register a device and get a device token", security: [],
         requestBody: { required: true, content: json({ type: "object", properties: { code: { type: "string" }, devicePublicKey: { type: "string", description: "base64 raw Ed25519" }, displayName: { type: "string" } }, required: ["code", "devicePublicKey", "displayName"] }) },
-        responses: { "201": { description: "Device + token", content: json({ type: "object", properties: { device: { $ref: "#/components/schemas/Device" }, deviceToken: { type: "string" }, signingPublicKeyB64: { type: "string" } } }) }, "400": errorResponses["400"], "410": { description: "Code expired or already used", content: json({ $ref: "#/components/schemas/Error" }) } } },
+        responses: { "201": { description: "Device + token", content: json({ type: "object", properties: { device: { $ref: "#/components/schemas/Device" }, deviceToken: { type: "string" }, expiresIn: { type: "integer", description: "device-token lifetime (seconds); refresh via /v1/devices/{deviceId}/token/refresh" }, signingPublicKeyB64: { type: "string" } } }) }, "400": errorResponses["400"], "410": { description: "Code expired or already used", content: json({ $ref: "#/components/schemas/Error" }) } } },
     },
     "/v1/requests": {
       post: { tags: ["requests"], summary: "File an access request (device token)", security: userAuth,
@@ -438,9 +497,21 @@ export const openapiDocument = {
         parameters: [{ name: "deviceId", in: "path", required: true, schema: { type: "string" } }, { name: "since", in: "query", required: false, schema: { type: "integer", default: 0 } }, { name: "timeout", in: "query", required: false, schema: { type: "integer", default: 25000, maximum: 60000 } }],
         responses: { "200": { description: "Snapshot or up-to-date", content: json({ oneOf: [{ $ref: "#/components/schemas/DevicePolicySnapshot" }, { type: "object", properties: { upToDate: { const: true } } }] }) }, "401": errorResponses["401"], "403": errorResponses["403"] } },
     },
+    "/v1/devices/{deviceId}/token/refresh": {
+      post: { tags: ["sync"], summary: "Refresh this device's token (device token)", security: userAuth,
+        description: "Requires a still-valid **device token** matching `deviceId`; returns its successor. Device tokens last 30 days and previously had no renewal path, so a device silently stopped syncing on day 31 and needed a full re-enrollment. Also counts as a heartbeat. Returns 401 once the device has been removed.",
+        parameters: [{ name: "deviceId", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "New device token", content: json({ type: "object", properties: { deviceToken: { type: "string" }, expiresIn: { type: "integer" }, signingPublicKeyB64: { type: "string" } }, required: ["deviceToken", "expiresIn"] }) }, "401": errorResponses["401"], "403": errorResponses["403"], "404": errorResponses["404"] } },
+    },
+    "/v1/devices/{deviceId}/grants/{ruleId}/consume": {
+      post: { tags: ["sync"], summary: "Report a single-use grant as used (device token)", security: userAuth,
+        description: "Requires a **device token**. Spends a `grantKind: ONCE` temporary rule: it is marked consumed, the policy version bumps, and it is absent from every later snapshot. Consumption is client-attested — the 5-minute TTL remains the backstop (see docs/SECURITY.md).",
+        parameters: [{ name: "deviceId", in: "path", required: true, schema: { type: "string" } }, { name: "ruleId", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Consumed", content: json({ type: "object", properties: { consumed: { const: true }, ruleId: { type: "string" }, consumedAt: { type: "string", format: "date-time" } } }) }, "400": errorResponses["400"], "401": errorResponses["401"], "403": errorResponses["403"], "404": errorResponses["404"], "410": { description: "Grant already used", content: json({ $ref: "#/components/schemas/Error" }) } } },
+    },
     "/v1/me/endpoints": {
       post: { tags: ["notifications"], summary: "Register a push notification endpoint", security: userAuth,
-        requestBody: { required: true, content: json({ type: "object", properties: { kind: { type: "string", enum: ["APNS", "WEBSOCKET", "CONSOLE"] }, token: { type: "string" } }, required: ["kind", "token"] }) },
+        requestBody: { required: true, content: json({ type: "object", properties: { kind: { type: "string", enum: ["APNS", "WEBSOCKET", "CONSOLE", "EMAIL", "WEBPUSH"] }, token: { type: "string" } }, required: ["kind", "token"] }) },
         responses: { "201": { description: "Endpoint", content: json({ $ref: "#/components/schemas/NotificationEndpoint" }) }, "401": errorResponses["401"] } },
     },
   },

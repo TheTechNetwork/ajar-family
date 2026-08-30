@@ -37,6 +37,12 @@ async function main(): Promise<void> {
       signingPublicKeyB64: process.env.SIGNING_PUBLIC_KEY_B64,
       signingPrivateKeyB64: process.env.SIGNING_PRIVATE_KEY_B64,
       categoryAdminToken: process.env.CATEGORY_ADMIN_TOKEN,
+      // Real notification delivery. Both must be set; otherwise outbound email
+      // is dropped with a warning (see push/mail.ts) rather than silently faked.
+      mailEndpoint: process.env.MAIL_ENDPOINT,
+      mailToken: process.env.MAIL_TOKEN,
+      mailFrom: process.env.MAIL_FROM,
+      resetUrlBase: process.env.PASSWORD_RESET_URL,
     },
     // Follow CNAME chains for category lookups via the host's system resolver.
     cnameResolver: new NodeCnameResolver(),
@@ -52,6 +58,10 @@ async function main(): Promise<void> {
     if (process.env.AUTH_SECRET === undefined) {
       // eslint-disable-next-line no-console
       console.log("WARNING: using the default AUTH_SECRET. Set AUTH_SECRET for anything real.");
+    }
+    if (!process.env.MAIL_ENDPOINT || !process.env.MAIL_TOKEN) {
+      // eslint-disable-next-line no-console
+      console.log("WARNING: MAIL_ENDPOINT/MAIL_TOKEN are unset — nobody will receive request or password-reset emails.");
     }
   });
 }

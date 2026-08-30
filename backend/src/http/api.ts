@@ -47,11 +47,23 @@ async function tokenPair(app: App, user: { id: string; tokenVersion: number }, s
     refreshToken: await issueToken(app.authSecret, { kind: "refresh", userId: user.id, tv: user.tokenVersion, sid }, REFRESH_TTL),
   };
 }
+/**
+ * Resolve a device token AND confirm the device still exists. Device tokens are
+ * self-contained and long-lived, so without this check a device that a parent
+ * deleted kept working until its token expired — erasure that erased nothing.
+ */
 async function requireDevice(app: App, req: HttpRequest) {
   const p = await principal(app, req);
   if (!p || p.kind !== "device") throw Object.assign(new Error("device token required"), { code: "UNAUTHORIZED" });
+  const device = await app.repo.getDevice(p.deviceId);
+  if (!device) throw Object.assign(new Error("this device has been removed"), { code: "UNAUTHORIZED" });
   return p;
 }
+
+/** Device tokens last 30 days and can be refreshed while still valid. */
+const DEVICE_TOKEN_TTL = 60 * 60 * 24 * 30;
+const issueDeviceToken = (app: App, d: { id: string; familyId: string; childId: string }) =>
+  issueToken(app.authSecret, { kind: "device", deviceId: d.id, familyId: d.familyId, childId: d.childId }, DEVICE_TOKEN_TTL);
 
 export function buildRouter(app: App): Router {
   const r = new Router();
@@ -149,6 +161,25 @@ export function buildRouter(app: App): Router {
     const { user, sid } = await app.auth.refreshSession(p.userId, p.tv, p.sid);
     return ok(await tokenPair(app, user, sid));
   });
+  // Start a password reset. ALWAYS 202, whether or not the address is known —
+  // a different status for "no such account" turns this into an account
+  // enumeration oracle. The email (if any) is sent out of band.
+  r.post("/v1/auth/forgot", async (req) => {
+    const capped = limited(authLimiter, req); if (capped) return capped;
+    const b = await req.json<{ email?: string }>();
+    await app.auth.requestPasswordReset(b?.email ?? "", { resetUrlBase: app.resetUrlBase });
+    return ok({ status: "accepted" }, 202);
+  });
+  // Complete a password reset with the emailed token. Single-use, 30-minute TTL,
+  // and it kills every existing session (bumped tokenVersion + revoked sessions)
+  // so a reset genuinely locks out whoever prompted it.
+  r.post("/v1/auth/reset", async (req) => {
+    const capped = limited(authLimiter, req); if (capped) return capped;
+    const b = await req.json<{ token: string; newPassword: string }>();
+    const user = await app.auth.resetPassword(b?.token ?? "", b?.newPassword ?? "");
+    const s = await app.auth.startSession(user.id, deviceLabel(req), REFRESH_TTL);
+    return ok(await tokenPair(app, user, s.id));
+  });
   // Sign out THIS device (revoke the current session only).
   r.post("/v1/auth/logout", async (req) => {
     const { userId, sid } = await userPrincipal(app, req);
@@ -207,25 +238,54 @@ export function buildRouter(app: App): Router {
     const fam = await app.repo.getFamily(req.params.familyId!);
     return fam ? ok(fam) : err(404, "not found", "NOT_FOUND");
   });
+  // Invite a co-parent/guardian. `email` is the identifier a parent actually
+  // knows; `userId` still works for existing integrations. Either way the person
+  // must already have an account — this used to accept any string and create a
+  // membership pointing at nobody, which showed up as a family member and an
+  // approver but could never sign in.
   r.post("/v1/families/:familyId/parents", async (req) => {
     const userId = await requireUser(app, req);
-    const b = await req.json<{ userId: string; role: Role; assignedChildIds?: string[] }>();
-    return ok(await app.family.addParent(req.params.familyId!, userId, b.userId, b.role, b.assignedChildIds ?? []), 201);
+    const b = await req.json<{ email?: string; userId?: string; role: Role; assignedChildIds?: string[] }>();
+    const assigned = b.assignedChildIds ?? [];
+    const membership = b.email
+      ? await app.family.inviteParentByEmail(req.params.familyId!, userId, b.email, b.role, assigned)
+      : await app.family.addParent(req.params.familyId!, userId, b.userId ?? "", b.role, assigned);
+    return ok(membership, 201);
   });
   r.post("/v1/families/:familyId/children", async (req) => {
     const userId = await requireUser(app, req);
-    const { displayName } = await req.json<{ displayName: string }>();
-    return ok(await app.family.addChild(req.params.familyId!, userId, displayName), 201);
+    const { displayName, timezone } = await req.json<{ displayName: string; timezone?: string }>();
+    return ok(await app.family.addChild(req.params.familyId!, userId, displayName, timezone ?? "UTC"), 201);
+  });
+  // Update a child's IANA time zone — what "until the end of the day" is measured in.
+  r.put("/v1/families/:familyId/children/:childId", async (req) => {
+    const userId = await requireUser(app, req);
+    const { timezone } = await req.json<{ timezone: string }>();
+    return ok(await app.family.setChildTimezone(req.params.familyId!, userId, req.params.childId!, timezone));
+  });
+  // Erase a child and everything attached to them (devices, rules, grants,
+  // requests, defaults). Irreversible by design — this is the erasure path.
+  r.del("/v1/families/:familyId/children/:childId", async (req) => {
+    const userId = await requireUser(app, req);
+    await app.family.removeChild(req.params.familyId!, userId, req.params.childId!);
+    return ok({ deleted: true });
   });
   r.get("/v1/families/:familyId/children", async (req) => {
     const userId = await requireUser(app, req);
     await app.family.membership(req.params.familyId!, userId);
     return ok(await app.repo.listChildren(req.params.familyId!));
   });
+  // Devices with liveness: `lastSeenAt`, the version each one actually pulled,
+  // and a `stale` flag. This is how a parent finds out that protection stopped
+  // running on a laptop three weeks ago instead of assuming it is fine.
   r.get("/v1/families/:familyId/devices", async (req) => {
     const userId = await requireUser(app, req);
-    await app.family.membership(req.params.familyId!, userId);
-    return ok(await app.repo.listDevices(req.params.familyId!));
+    return ok(await app.devices.listWithStatus(req.params.familyId!, userId));
+  });
+  r.del("/v1/families/:familyId/devices/:deviceId", async (req) => {
+    const userId = await requireUser(app, req);
+    await app.devices.remove(req.params.familyId!, userId, req.params.deviceId!);
+    return ok({ deleted: true });
   });
   r.get("/v1/families/:familyId/audit", async (req) => {
     const userId = await requireUser(app, req);
@@ -272,10 +332,8 @@ export function buildRouter(app: App): Router {
     const capped = limited(enrollLimiter, req); if (capped) return capped;
     const b = await req.json<{ code: string; devicePublicKey: string; displayName: string }>();
     const device = await app.enrollment.redeem(b.code, b.devicePublicKey, b.displayName);
-    const token = await issueToken(app.authSecret,
-      { kind: "device", deviceId: device.id, familyId: device.familyId, childId: device.childId },
-      60 * 60 * 24 * 30);
-    return ok({ device, deviceToken: token, signingPublicKeyB64: app.signingPublicKeyB64 }, 201);
+    const token = await issueDeviceToken(app, device);
+    return ok({ device, deviceToken: token, expiresIn: DEVICE_TOKEN_TTL, signingPublicKeyB64: app.signingPublicKeyB64 }, 201);
   });
 
   // --- access requests & approvals ---
@@ -334,9 +392,46 @@ export function buildRouter(app: App): Router {
     const since = Number(req.query.get("since") ?? "-1");
     if (Number.isFinite(since) && since >= 0) {
       const snap = await app.policy.syncSince(dev.familyId, dev.childId, dev.deviceId, since);
+      // Heartbeat on EVERY poll, including "you're already current" — a device
+      // that is up to date is still alive, and that is precisely what the parent
+      // needs to see. Record the version it actually holds.
+      await app.devices.heartbeat(dev.deviceId, snap ? snap.version : since);
       return snap ? ok(snap) : ok({ upToDate: true });
     }
-    return ok(await app.policy.buildSnapshot(dev.familyId, dev.childId, dev.deviceId));
+    const full = await app.policy.buildSnapshot(dev.familyId, dev.childId, dev.deviceId);
+    await app.devices.heartbeat(dev.deviceId, full.version);
+    return ok(full);
+  });
+
+  /**
+   * Refresh a device token before it expires. Device tokens last 30 days and had
+   * no renewal path at all: on day 31 a child's device stopped syncing policy,
+   * silently, and the only recovery was a full re-enrollment by a parent. A
+   * device that can still authenticate can mint its successor.
+   */
+  r.post("/v1/devices/:deviceId/token/refresh", async (req) => {
+    const dev = await requireDevice(app, req);
+    if (dev.deviceId !== req.params.deviceId) return err(403, "device mismatch", "FORBIDDEN");
+    const device = await app.repo.getDevice(dev.deviceId);
+    if (!device) return err(404, "unknown device", "NOT_FOUND");
+    await app.devices.heartbeat(device.id);
+    return ok({
+      deviceToken: await issueDeviceToken(app, device),
+      expiresIn: DEVICE_TOKEN_TTL,
+      signingPublicKeyB64: app.signingPublicKeyB64,
+    });
+  });
+
+  /**
+   * Spend a single-use ("just once") grant. The device calls this the moment it
+   * lets the grant through; the grant then disappears from every later snapshot.
+   * Without it, `grantKind: "ONCE"` was an unlimited-replay 5-minute window.
+   */
+  r.post("/v1/devices/:deviceId/grants/:ruleId/consume", async (req) => {
+    const dev = await requireDevice(app, req);
+    if (dev.deviceId !== req.params.deviceId) return err(403, "device mismatch", "FORBIDDEN");
+    const grant = await app.approvals.consumeGrant(dev.deviceId, req.params.ruleId!);
+    return ok({ consumed: true, ruleId: grant.id, consumedAt: grant.consumedAt });
   });
 
   // Long-poll: returns the new signed snapshot the moment an approval bumps the
@@ -350,9 +445,13 @@ export function buildRouter(app: App): Router {
     const timeout = Math.min(Math.max(Number(req.query.get("timeout") ?? "25000"), 0), 60000);
     const deadline = Date.now() + timeout;
     // Wake on this device's nudges; loop to absorb spurious wakes until deadline.
+    await app.devices.heartbeat(dev.deviceId, since);
     for (;;) {
       const snap = await app.policy.syncSince(dev.familyId, dev.childId, dev.deviceId, since);
-      if (snap) return ok(snap);
+      if (snap) {
+        await app.devices.heartbeat(dev.deviceId, snap.version);
+        return ok(snap);
+      }
       const remaining = deadline - Date.now();
       if (remaining <= 0) return ok({ upToDate: true });
       await app.hub.wait(`device:${dev.deviceId}`, remaining);
@@ -362,7 +461,7 @@ export function buildRouter(app: App): Router {
   // --- notification endpoints ---
   r.post("/v1/me/endpoints", async (req) => {
     const userId = await requireUser(app, req);
-    const b = await req.json<{ kind: "APNS" | "WEBSOCKET" | "CONSOLE"; token: string }>();
+    const b = await req.json<{ kind: "APNS" | "WEBSOCKET" | "CONSOLE" | "EMAIL" | "WEBPUSH"; token: string }>();
     const ep = await app.repo.addNotificationEndpoint({
       id: crypto.randomUUID(), userId, kind: b.kind, token: b.token, createdAt: new Date().toISOString(),
     });

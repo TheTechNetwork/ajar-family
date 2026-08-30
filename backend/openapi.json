@@ -148,6 +148,7 @@
           },
           {
             "type": "object",
+            "description": "Single use. Produces a grant the device must report as consumed via POST /v1/devices/{deviceId}/grants/{ruleId}/consume; it is dropped from every snapshot from that moment. A 5-minute TTL is the backstop if the device never reports.",
             "properties": {
               "kind": {
                 "const": "ONCE"
@@ -288,6 +289,11 @@
           "displayName": {
             "type": "string"
           },
+          "timezone": {
+            "type": "string",
+            "default": "UTC",
+            "description": "IANA time zone (e.g. America/Los_Angeles). Determines when an UNTIL_END_OF_DAY approval expires — the child's local midnight, not UTC."
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -297,6 +303,7 @@
           "id",
           "familyId",
           "displayName",
+          "timezone",
           "createdAt"
         ]
       },
@@ -327,7 +334,13 @@
             "format": "date-time"
           },
           "lastSyncedVersion": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Policy version this device last actually pulled."
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last contact with the backend. Absent = never since enrollment."
           }
         },
         "required": [
@@ -339,6 +352,36 @@
           "devicePublicKey",
           "enrolledAt",
           "lastSyncedVersion"
+        ]
+      },
+      "DeviceStatus": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Device"
+          },
+          {
+            "type": "object",
+            "description": "A device plus whether protection is demonstrably still running on it.",
+            "properties": {
+              "currentVersion": {
+                "type": "integer",
+                "description": "Current policy version for this device's child."
+              },
+              "upToDate": {
+                "type": "boolean",
+                "description": "The device has pulled the current version."
+              },
+              "stale": {
+                "type": "boolean",
+                "description": "No contact for over 24 hours — treat protection as unverified."
+              }
+            },
+            "required": [
+              "currentVersion",
+              "upToDate",
+              "stale"
+            ]
+          }
         ]
       },
       "PolicyRule": {
@@ -734,11 +777,14 @@
             "enum": [
               "APNS",
               "WEBSOCKET",
-              "CONSOLE"
+              "CONSOLE",
+              "EMAIL",
+              "WEBPUSH"
             ]
           },
           "token": {
-            "type": "string"
+            "type": "string",
+            "description": "APNs device token, Web Push subscription JSON, ws connection id, or — for EMAIL — the destination address."
           },
           "createdAt": {
             "type": "string",
@@ -1358,6 +1404,127 @@
         }
       }
     },
+    "/v1/auth/forgot": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Start a password reset (always 202)",
+        "security": [],
+        "description": "Emails a single-use reset token, valid for 30 minutes, if the address belongs to an account. Responds 202 either way — a different status for an unknown address would make this an account-enumeration oracle. Rate-limited.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted (whether or not the address is known)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "accepted"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/reset": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Complete a password reset with an emailed token",
+        "security": [],
+        "description": "Consumes the token (single use, 30-minute TTL, stored only as a SHA-256 hash), sets the new password, and revokes every existing session by bumping tokenVersion. Returns a fresh token pair on a new session.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  },
+                  "newPassword": {
+                    "type": "string",
+                    "minLength": 8
+                  }
+                },
+                "required": [
+                  "token",
+                  "newPassword"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New token pair",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or expired reset token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/auth/logout": {
       "post": {
         "tags": [
@@ -1796,6 +1963,7 @@
             }
           }
         ],
+        "description": "Identify the co-parent by `email` (preferred) or `userId`. The person must already have an Ajar account — an unknown address is a 404, never a membership pointing at nobody. `assignedChildIds` applies only to LIMITED_GUARDIAN and every id must belong to this family.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1803,8 +1971,13 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
                   "userId": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Legacy alternative to email."
                   },
                   "role": {
                     "$ref": "#/components/schemas/Role"
@@ -1817,7 +1990,6 @@
                   }
                 },
                 "required": [
-                  "userId",
                   "role"
                 ]
               }
@@ -1835,6 +2007,16 @@
               }
             }
           },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthenticated",
             "content": {
@@ -1847,6 +2029,26 @@
           },
           "403": {
             "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No account with that email/id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already a member of this family",
             "content": {
               "application/json": {
                 "schema": {
@@ -1888,6 +2090,11 @@
                 "properties": {
                   "displayName": {
                     "type": "string"
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "default": "UTC",
+                    "description": "IANA time zone; rejected with 400 if unknown."
                   }
                 },
                 "required": [
@@ -1904,6 +2111,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Child"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1977,12 +2194,181 @@
         }
       }
     },
+    "/v1/families/{familyId}/children/{childId}": {
+      "put": {
+        "tags": [
+          "families"
+        ],
+        "summary": "Update a child's time zone",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "familyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "childId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Sets the IANA zone that UNTIL_END_OF_DAY approvals are measured in.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "timezone": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "timezone"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated child",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Child"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "families"
+        ],
+        "summary": "Erase a child and everything attached to them",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "familyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "childId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Cascades: devices, standing rules, temporary grants, access requests, default policy, and any LIMITED_GUARDIAN assignment naming this child. Irreversible.",
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/families/{familyId}/devices": {
       "get": {
         "tags": [
           "families"
         ],
-        "summary": "List enrolled devices",
+        "summary": "List enrolled devices with last-seen status",
         "security": [
           {
             "bearerAuth": []
@@ -1998,6 +2384,7 @@
             }
           }
         ],
+        "description": "Each device reports `lastSeenAt`, the policy version it actually pulled, and a `stale` flag (no contact for 24h) — so a parent can tell whether protection is still running rather than assuming it is.",
         "responses": {
           "200": {
             "description": "Devices",
@@ -2006,7 +2393,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Device"
+                    "$ref": "#/components/schemas/DeviceStatus"
                   }
                 }
               }
@@ -2014,6 +2401,85 @@
           },
           "403": {
             "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/families/{familyId}/devices/{deviceId}": {
+      "delete": {
+        "tags": [
+          "families"
+        ],
+        "summary": "Remove a device (and its device-scoped policy)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "familyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Cascades device-scoped rules, temporary grants and requests. The device's token stops working immediately.",
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -2505,6 +2971,10 @@
                     },
                     "deviceToken": {
                       "type": "string"
+                    },
+                    "expiresIn": {
+                      "type": "integer",
+                      "description": "device-token lifetime (seconds); refresh via /v1/devices/{deviceId}/token/refresh"
                     },
                     "signingPublicKeyB64": {
                       "type": "string"
@@ -3035,6 +3505,193 @@
         }
       }
     },
+    "/v1/devices/{deviceId}/token/refresh": {
+      "post": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "Refresh this device's token (device token)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Requires a still-valid **device token** matching `deviceId`; returns its successor. Device tokens last 30 days and previously had no renewal path, so a device silently stopped syncing on day 31 and needed a full re-enrollment. Also counts as a heartbeat. Returns 401 once the device has been removed.",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "New device token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deviceToken": {
+                      "type": "string"
+                    },
+                    "expiresIn": {
+                      "type": "integer"
+                    },
+                    "signingPublicKeyB64": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "deviceToken",
+                    "expiresIn"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/devices/{deviceId}/grants/{ruleId}/consume": {
+      "post": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "Report a single-use grant as used (device token)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Requires a **device token**. Spends a `grantKind: ONCE` temporary rule: it is marked consumed, the policy version bumps, and it is absent from every later snapshot. Consumption is client-attested — the 5-minute TTL remains the backstop (see docs/SECURITY.md).",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ruleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Consumed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "consumed": {
+                      "const": true
+                    },
+                    "ruleId": {
+                      "type": "string"
+                    },
+                    "consumedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Grant already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/me/endpoints": {
       "post": {
         "tags": [
@@ -3058,7 +3715,9 @@
                     "enum": [
                       "APNS",
                       "WEBSOCKET",
-                      "CONSOLE"
+                      "CONSOLE",
+                      "EMAIL",
+                      "WEBPUSH"
                     ]
                   },
                   "token": {

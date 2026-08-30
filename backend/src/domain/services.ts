@@ -243,6 +243,7 @@ export function canManagePolicy(role: Role): boolean {
 export function canManageParents(role: Role): boolean {
   return role === "OWNER";
 }
+const ROLES: Role[] = ["OWNER", "PARENT", "LIMITED_GUARDIAN"];
 
 export class FamilyService {
   constructor(private repo: Repository) {}
@@ -263,26 +264,108 @@ export class FamilyService {
     return fam;
   }
 
+  /**
+   * Add a co-parent/guardian by USER ID.
+   *
+   * Everything here used to be taken on trust: an unknown id produced a
+   * membership row pointing at nobody, which still showed up in the family's
+   * member list and counted as an approver while being an account nobody can
+   * ever sign into. A typo'd child id likewise made a LIMITED_GUARDIAN scoped to
+   * a child that does not exist. All of it is validated now.
+   */
   async addParent(familyId: string, actingUserId: string, newUserId: string, role: Role,
                   assignedChildIds: string[] = []): Promise<FamilyMembership> {
     await this.requireRole(familyId, actingUserId, canManageParents, "manage parents");
+    if (!ROLES.includes(role)) throw new DomainError(`unknown role ${String(role)}`);
+    if (!newUserId || typeof newUserId !== "string") throw new DomainError("userId or email required");
+
+    const user = await this.repo.getUser(newUserId);
+    if (!user) throw new DomainError("no Ajar account with that id — invite them by email instead", "NOT_FOUND");
+    if (await this.repo.getMembership(familyId, user.id))
+      throw new DomainError("that person is already in this family", "CONFLICT");
+
+    const assigned = [...new Set(assignedChildIds ?? [])];
+    for (const childId of assigned) {
+      const child = await this.repo.getChild(childId);
+      if (!child || child.familyId !== familyId)
+        throw new DomainError(`child ${childId} is not in this family`, "NOT_FOUND");
+    }
+    // Only a LIMITED_GUARDIAN is narrowed to specific children; on OWNER/PARENT
+    // an assignment list reads as a restriction that nothing actually enforces.
+    if (role !== "LIMITED_GUARDIAN" && assigned.length > 0)
+      throw new DomainError("assignedChildIds only applies to LIMITED_GUARDIAN");
+
     const m = await this.repo.addMembership({
-      id: uid(), familyId, userId: newUserId, role, assignedChildIds, createdAt: now(),
+      id: uid(), familyId, userId: user.id, role, assignedChildIds: assigned, createdAt: now(),
     });
-    await this.audit(familyId, actingUserId, "family.parent_added", { newUserId, role });
+    await this.audit(familyId, actingUserId, "family.parent_added", { newUserId: user.id, role });
     return m;
+  }
+
+  /**
+   * Invite a co-parent by EMAIL — the identifier a parent actually knows.
+   *
+   * The account must already exist. We deliberately do NOT mint a shell user:
+   * a password-less placeholder is an account nobody can sign into that
+   * nonetheless holds approval rights over a child, which is exactly the
+   * dangling membership this replaces. Inviting a true outsider needs an emailed
+   * acceptance token (see docs/SECURITY.md); until that exists we fail with an
+   * actionable message rather than pretending the invite landed.
+   */
+  async inviteParentByEmail(familyId: string, actingUserId: string, email: string, role: Role,
+                            assignedChildIds: string[] = []): Promise<FamilyMembership> {
+    await this.requireRole(familyId, actingUserId, canManageParents, "manage parents");
+    if (!looksLikeEmail(email)) throw new DomainError("a valid email address is required");
+    const user = await this.repo.getUserByEmail(email.trim());
+    if (!user)
+      throw new DomainError("no Ajar account uses that email — ask them to sign up first, then add them", "NOT_FOUND");
+    return this.addParent(familyId, actingUserId, user.id, role, assignedChildIds);
   }
 
   async addChild(familyId: string, actingUserId: string, displayName: string, timezone = "UTC"): Promise<Child> {
     await this.requireRole(familyId, actingUserId, canManagePolicy, "add child");
+    if (!displayName) throw new DomainError("displayName required");
+    // Reject a bad zone loudly at write time. Storing "PST" and silently falling
+    // back to UTC is how "until the end of the day" quietly comes to mean
+    // something other than what the parent chose.
+    if (!isValidTimeZone(timezone)) throw new DomainError(`unknown IANA time zone: ${String(timezone)}`);
     const child = await this.repo.createChild({
-      id: uid(), familyId, displayName, timezone: safeTimeZone(timezone), createdAt: now(),
+      id: uid(), familyId, displayName, timezone, createdAt: now(),
     });
     // Default posture: default-deny YouTube, default-allow the rest of the web.
     await this.repo.setDefaultPolicy(familyId, child.id, { webDefault: "ALLOW", youTubeDefault: "BLOCK" });
     await this.repo.bumpPolicyVersion(familyId, child.id);
-    await this.audit(familyId, actingUserId, "child.added", { childId: child.id, displayName });
+    await this.audit(familyId, actingUserId, "child.added", { childId: child.id, displayName, timezone });
     return child;
+  }
+
+  /** Change a child's IANA time zone (moving house, or fixing a bad guess). */
+  async setChildTimezone(familyId: string, actingUserId: string, childId: string, timezone: string): Promise<Child> {
+    await this.requireRole(familyId, actingUserId, canManagePolicy, "update child");
+    const child = await this.repo.getChild(childId);
+    if (!child || child.familyId !== familyId) throw new DomainError("unknown child", "NOT_FOUND");
+    if (!isValidTimeZone(timezone)) throw new DomainError(`unknown IANA time zone: ${String(timezone)}`);
+    const updated: Child = { ...child, timezone };
+    await this.repo.createChild(updated); // id-keyed upsert in both stores
+    await this.audit(familyId, actingUserId, "child.updated", { childId, timezone });
+    return updated;
+  }
+
+  /**
+   * Erase a child and everything attached to them: devices, their rules,
+   * temporary grants, requests, default policy, and any guardian assignment
+   * naming them. Before this there was no way to remove a child at all — a
+   * product gap and a data-retention problem (a family could not exercise
+   * erasure without us running SQL by hand).
+   */
+  async removeChild(familyId: string, actingUserId: string, childId: string): Promise<void> {
+    await this.requireRole(familyId, actingUserId, canManagePolicy, "remove child");
+    const child = await this.repo.getChild(childId);
+    if (!child || child.familyId !== familyId) throw new DomainError("unknown child", "NOT_FOUND");
+    const devices = await this.repo.listDevicesForChild(childId);
+    await this.repo.deleteChildCascade(familyId, childId);
+    await this.audit(familyId, actingUserId, "child.removed",
+      { childId, displayName: child.displayName, devicesRemoved: devices.length });
   }
 
   async membership(familyId: string, userId: string): Promise<FamilyMembership> {
@@ -346,6 +429,91 @@ export class EnrollmentService {
 }
 
 // ---------------------------------------------------------------------------
+// Device lifecycle: heartbeat, visibility, erasure
+// ---------------------------------------------------------------------------
+
+/** A device silent for longer than this is reported as stale to the parent. */
+export const DEVICE_STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+
+export interface DeviceStatus extends Device {
+  /** Current policy version for this device's child. */
+  currentVersion: number;
+  /** True when the device has pulled the current version. */
+  upToDate: boolean;
+  /** True when we have not heard from the device within DEVICE_STALE_AFTER_MS.
+   *  This is the honest answer to "is protection actually running?" — the only
+   *  thing the backend can know is whether the device is still talking to it. */
+  stale: boolean;
+}
+
+export class DeviceService {
+  constructor(private repo: Repository) {}
+
+  /**
+   * Record that a device contacted us, and what version it took away.
+   *
+   * `lastSyncedVersion` used to be written once at enrollment and never again,
+   * so a device that was uninstalled, blocked by a firewall, or simply switched
+   * off looked exactly like a healthy one. Every policy fetch now updates both
+   * the version and `lastSeenAt`, which is what makes the parent-facing device
+   * list mean something.
+   */
+  async heartbeat(deviceId: string, syncedVersion?: number): Promise<Device | null> {
+    const device = await this.repo.getDevice(deviceId);
+    if (!device) return null;
+    const next: Device = {
+      ...device,
+      lastSeenAt: now(),
+      // Never move the recorded version backwards (a device may re-request an
+      // older `since` while retrying).
+      lastSyncedVersion: typeof syncedVersion === "number" && Number.isFinite(syncedVersion)
+        ? Math.max(device.lastSyncedVersion, syncedVersion)
+        : device.lastSyncedVersion,
+    };
+    return this.repo.updateDevice(next);
+  }
+
+  /** Devices in a family with sync/liveness status, for the parent console. */
+  async listWithStatus(familyId: string, actingUserId: string): Promise<DeviceStatus[]> {
+    const m = await this.repo.getMembership(familyId, actingUserId);
+    if (!m) throw new DomainError("not a member of this family", "FORBIDDEN");
+    const devices = await this.repo.listDevices(familyId);
+    const visible = m.role === "LIMITED_GUARDIAN"
+      ? devices.filter((d) => m.assignedChildIds.includes(d.childId))
+      : devices;
+    const nowMs = Date.now();
+    const versions = new Map<string, number>();
+    const out: DeviceStatus[] = [];
+    for (const d of visible) {
+      if (!versions.has(d.childId)) versions.set(d.childId, await this.repo.getPolicyVersion(familyId, d.childId));
+      const currentVersion = versions.get(d.childId)!;
+      const seen = d.lastSeenAt ? Date.parse(d.lastSeenAt) : Date.parse(d.enrolledAt);
+      out.push({
+        ...d, currentVersion,
+        upToDate: d.lastSyncedVersion >= currentVersion,
+        stale: !Number.isFinite(seen) || nowMs - seen > DEVICE_STALE_AFTER_MS,
+      });
+    }
+    return out;
+  }
+
+  /** Erase one device and its device-scoped rules, grants and requests. */
+  async remove(familyId: string, actingUserId: string, deviceId: string): Promise<void> {
+    const m = await this.repo.getMembership(familyId, actingUserId);
+    if (!m || !canManagePolicy(m.role)) throw new DomainError("cannot remove devices", "FORBIDDEN");
+    const device = await this.repo.getDevice(deviceId);
+    if (!device || device.familyId !== familyId) throw new DomainError("unknown device", "NOT_FOUND");
+    await this.repo.deleteDeviceCascade(familyId, deviceId);
+    // The child's remaining devices must notice the policy changed underneath.
+    await this.repo.bumpPolicyVersion(familyId, device.childId);
+    await this.repo.addAuditEvent({
+      id: uid(), familyId, actorId: actingUserId, kind: "device.removed",
+      detail: { deviceId, childId: device.childId, displayName: device.displayName }, createdAt: now(),
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Policy assembly + signed, versioned sync
 // ---------------------------------------------------------------------------
 
@@ -385,7 +553,14 @@ export class PolicyService {
       .filter((r) => this.appliesToChildDevice(r.scope, childId, deviceId));
     const temporaryRules = (await this.repo.listTemporaryRules(familyId))
       .filter((t) => this.appliesToChildDevice(t.scope, childId, deviceId))
-      .filter((t) => Date.parse(t.expiresAt) > nowMs); // drop already-expired
+      .filter((t) => Date.parse(t.expiresAt) > nowMs) // drop already-expired
+      // A "just once" grant the device reported as used is gone from every
+      // subsequent snapshot — that is what makes ONCE single-use rather than an
+      // unlimited-replay window (see ApprovalService.consumeGrant).
+      .filter((t) => !t.consumedAt)
+      // Ship the SHARED TemporaryRule shape: `consumedAt` is server-side state
+      // and must not appear in the signed payload devices verify.
+      .map(({ consumedAt: _consumed, ...rule }): TemporaryRule => rule);
     const version = await this.repo.getPolicyVersion(familyId, childId);
 
     // Inline ONLY the categories this policy actually enforces (referenced by a
@@ -455,15 +630,28 @@ export class PolicyService {
 // Access requests → approvals → temporary/standing rules
 // ---------------------------------------------------------------------------
 
-function durationToExpiry(d: ApprovalDuration, from = Date.now()): { expiresAt?: string; standing: boolean } {
+/** Outer bound on an unconsumed "just once" grant. See ApprovalService.consumeGrant. */
+export const ONCE_GRANT_TTL_MS = 5 * 60_000;
+
+/**
+ * Turn a duration into a concrete expiry, in the CHILD's time zone.
+ *
+ * `timeZone` matters for exactly one case and it is the case parents pick most:
+ * UNTIL_END_OF_DAY. This used to be `setUTCHours(23,59,59,999)`, i.e. UTC
+ * midnight — 5pm in California, 9am the next morning in Sydney. The parent chose
+ * "until bedtime" and the child was cut off after school, or handed most of a
+ * second day. Now it is the last millisecond of the child's own calendar day
+ * (DST-aware, via Intl — see domain/time.ts).
+ */
+export function durationToExpiry(
+  d: ApprovalDuration, timeZone = "UTC", from = Date.now(),
+): { expiresAt?: string; standing: boolean } {
   switch (d.kind) {
     case "ALWAYS": return { standing: true };
-    case "ONCE": return { expiresAt: new Date(from + 5 * 60_000).toISOString(), standing: false }; // short TTL; device marks consumed
+    // Backstop only: a ONCE grant normally ends when the device reports it used.
+    case "ONCE": return { expiresAt: new Date(from + ONCE_GRANT_TTL_MS).toISOString(), standing: false };
     case "MINUTES": return { expiresAt: new Date(from + d.minutes * 60_000).toISOString(), standing: false };
-    case "UNTIL_END_OF_DAY": {
-      const end = new Date(from); end.setUTCHours(23, 59, 59, 999);
-      return { expiresAt: end.toISOString(), standing: false };
-    }
+    case "UNTIL_END_OF_DAY": return { expiresAt: endOfLocalDayIso(from, timeZone), standing: false };
   }
 }
 
@@ -558,6 +746,32 @@ export class ApprovalService {
     if (!device || device.familyId !== input.familyId || device.childId !== input.childId)
       throw new DomainError("device/child mismatch", "FORBIDDEN");
 
+    // DEDUPE. A blocked page in a browser is not one request: the child reloads,
+    // the page retries its sub-resources, a tab restores on wake. Each of those
+    // used to mint a fresh AccessRequest AND a fresh notification to every
+    // parent, so a single blocked site could bury the console (and a parent's
+    // inbox) under dozens of identical rows — and the parent then had to decide
+    // each one. An identical still-PENDING ask is the SAME ask: return it.
+    const duplicate = (await this.repo.listAccessRequests(input.familyId, "PENDING")).find(
+      (r) => r.childId === input.childId && r.deviceId === input.deviceId
+        && r.targetType === input.targetType && r.targetValue === input.targetValue,
+    );
+    if (duplicate) {
+      // A later re-file often carries better context than the first bare one
+      // (the page title arrives after the block). Keep the richer version, but
+      // never notify again and never create a second row.
+      const enriched = {
+        ...duplicate,
+        title: duplicate.title ?? input.title,
+        url: duplicate.url ?? input.url,
+        reason: duplicate.reason ?? input.reason,
+      };
+      const changed = enriched.title !== duplicate.title || enriched.url !== duplicate.url
+        || enriched.reason !== duplicate.reason;
+      if (changed) await this.repo.updateAccessRequest(enriched);
+      return enriched;
+    }
+
     const req = await this.repo.createAccessRequest({
       id: uid(), familyId: input.familyId, childId: input.childId, deviceId: input.deviceId,
       targetType: input.targetType, targetValue: input.targetValue,
@@ -586,6 +800,57 @@ export class ApprovalService {
     return req;
   }
 
+  /**
+   * Spend a single-use ("just once") grant. Called by the child's device the
+   * moment it actually lets the grant through.
+   *
+   * WHY THIS EXISTS — and why the option kept its name. `grantKind: "ONCE"` was
+   * decorative: it produced an ordinary 5-minute temporary rule with unlimited
+   * replays inside the window, so "just once" meant "as many times as you like
+   * for five minutes". The two honest options were to rename the option or to
+   * make it real. Renaming was not available to this change: `grantKind` is part
+   * of the SHARED policy contract (`shared/policy/policy-model.ts`) that the
+   * Apple, Windows and extension adapters all compile against, and that file is
+   * owned elsewhere — a rename there would be a cross-platform breaking change
+   * landed unilaterally. So it is real instead: the device reports consumption,
+   * the grant is marked spent server-side, the policy version bumps, and it is
+   * dropped from every snapshot thereafter.
+   *
+   * RESIDUAL RISK, stated plainly: consumption is CLIENT-ATTESTED. A device that
+   * never reports keeps the grant until the 5-minute TTL expires, so the TTL
+   * remains the real backstop and "once" is best-effort against a cooperating
+   * device, not a hostile one. Enforcing it against a hostile client would need
+   * the device to hold no usable grant at all until it asks per-load, which
+   * breaks offline enforcement — the product's core requirement. Documented in
+   * docs/SECURITY.md.
+   */
+  async consumeGrant(deviceId: string, ruleId: string): Promise<TemporaryGrant> {
+    const device = await this.repo.getDevice(deviceId);
+    if (!device) throw new DomainError("unknown device", "NOT_FOUND");
+    const grant = await this.repo.getTemporaryRule(ruleId);
+    if (!grant || grant.scope.familyId !== device.familyId) throw new DomainError("unknown grant", "NOT_FOUND");
+    // Only the child/device the grant actually applies to may spend it.
+    if (grant.scope.childId && grant.scope.childId !== device.childId)
+      throw new DomainError("grant does not apply to this device", "FORBIDDEN");
+    if (grant.scope.deviceId && grant.scope.deviceId !== deviceId)
+      throw new DomainError("grant does not apply to this device", "FORBIDDEN");
+    if (grant.grantKind !== "ONCE")
+      throw new DomainError("only a single-use grant can be consumed", "BAD_REQUEST");
+    if (grant.consumedAt) throw new DomainError("grant already used", "GONE");
+
+    const at = now();
+    if (!(await this.repo.markTemporaryRuleConsumed(ruleId, at)))
+      throw new DomainError("grant already used", "GONE");
+    // Bump so every device for this child re-syncs and drops the spent grant.
+    await this.repo.bumpPolicyVersion(device.familyId, device.childId);
+    await this.repo.addAuditEvent({
+      id: uid(), familyId: device.familyId, actorId: deviceId, kind: "grant.consumed",
+      detail: { ruleId, requestId: grant.requestId, target: `${grant.target}:${grant.value}` }, createdAt: at,
+    });
+    this.hub?.notify(`device:${deviceId}`);
+    return { ...grant, consumedAt: at };
+  }
+
   /** Parent decides. Server-authoritative; records who decided; produces a rule. */
   async decide(input: {
     familyId: string; requestId: string; decidedBy: string;
@@ -605,14 +870,16 @@ export class ApprovalService {
     let producedRuleId: string | undefined;
 
     if (input.decision === "ALLOW") {
-      const { expiresAt, standing } = durationToExpiry(input.duration);
+      // "Until the end of the day" means the CHILD's day, wherever they are.
+      const child = await this.repo.getChild(req.childId);
+      const { expiresAt, standing } = durationToExpiry(input.duration, safeTimeZone(child?.timezone));
       if (standing) {
         const rule = await input.policy.addRule(input.familyId, input.decidedBy, {
           target: targetType, value: targetValue, action: "ALLOW", scope: ruleScope, priority: 10,
         });
         producedRuleId = rule.id;
       } else {
-        const t: TemporaryRule = {
+        const t: TemporaryGrant = {
           id: uid(), target: targetType, value: targetValue, action: "ALLOW", scope: ruleScope,
           priority: 100, createdAt: now(), createdBy: input.decidedBy,
           startsAt: now(), expiresAt: expiresAt!, requestId: req.id, approvedBy: input.decidedBy,

@@ -24,6 +24,14 @@ export interface Env {
   DB?: D1Like;
   /** Lock CORS to a specific origin in production (default `*`). */
   ALLOWED_ORIGIN?: string;
+  /** Outbound email (both required for delivery) — see backend/src/push/mail.ts. */
+  MAIL_ENDPOINT?: string;
+  MAIL_TOKEN?: string;
+  MAIL_FROM?: string;
+  /** Parent-console URL that completes a password reset (`?token=` appended). */
+  PASSWORD_RESET_URL?: string;
+  /** Ops secret gating the global category-dataset import. */
+  CATEGORY_ADMIN_TOKEN?: string;
 }
 
 let appPromise: Promise<App> | null = null;
@@ -40,6 +48,11 @@ async function getRouter(env: Env): Promise<Router> {
           authSecret: env.AUTH_SECRET!, // guaranteed present: fetch() rejects when unset
           signingPublicKeyB64: env.SIGNING_PUBLIC_KEY_B64,
           signingPrivateKeyB64: env.SIGNING_PRIVATE_KEY_B64,
+          categoryAdminToken: env.CATEGORY_ADMIN_TOKEN,
+          mailEndpoint: env.MAIL_ENDPOINT,
+          mailToken: env.MAIL_TOKEN,
+          mailFrom: env.MAIL_FROM,
+          resetUrlBase: env.PASSWORD_RESET_URL,
         },
         // Workers has no raw DNS — follow CNAME chains over DNS-over-HTTPS.
         cnameResolver: new DohCnameResolver(),
