@@ -164,7 +164,7 @@ export function buildRouter(app: App): Router {
   // Start a password reset. ALWAYS 202, whether or not the address is known —
   // a different status for "no such account" turns this into an account
   // enumeration oracle. The email (if any) is sent out of band.
-  r.post("/v1/auth/DISABLED-forgot", async (req) => {
+  r.post("/v1/auth/forgot", async (req) => {
     const capped = limited(authLimiter, req); if (capped) return capped;
     const b = await req.json<{ email?: string }>();
     await app.auth.requestPasswordReset(b?.email ?? "", { resetUrlBase: app.resetUrlBase });
@@ -173,7 +173,7 @@ export function buildRouter(app: App): Router {
   // Complete a password reset with the emailed token. Single-use, 30-minute TTL,
   // and it kills every existing session (bumped tokenVersion + revoked sessions)
   // so a reset genuinely locks out whoever prompted it.
-  r.post("/v1/auth/DISABLED-reset", async (req) => {
+  r.post("/v1/auth/reset", async (req) => {
     const capped = limited(authLimiter, req); if (capped) return capped;
     const b = await req.json<{ token: string; newPassword: string }>();
     const user = await app.auth.resetPassword(b?.token ?? "", b?.newPassword ?? "");
@@ -395,9 +395,11 @@ export function buildRouter(app: App): Router {
       // Heartbeat on EVERY poll, including "you're already current" — a device
       // that is up to date is still alive, and that is precisely what the parent
       // needs to see. Record the version it actually holds.
+      await app.devices.heartbeat(dev.deviceId, snap ? snap.version : since);
       return snap ? ok(snap) : ok({ upToDate: true });
     }
     const full = await app.policy.buildSnapshot(dev.familyId, dev.childId, dev.deviceId);
+    await app.devices.heartbeat(dev.deviceId, full.version);
     return ok(full);
   });
 

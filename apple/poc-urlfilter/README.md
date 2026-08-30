@@ -107,6 +107,14 @@ The Bloom builder and the on-device matcher must agree on `bitCount`,
 `hashCount`, `murmurSeed`, bit packing, **and URL canonicalization** — the last is
 an unresolved item flagged in the doc and in `build_bloom.py`.
 
+> **Not the same Bloom filter as PoC A.** This one is Apple's `NEURLFilter`
+> prefilter format (FNV-1a + Murmur3, `bloom.bin` + `bloom.meta.json`, bundled as
+> a resource). The *category* filters in `apple/poc-contentfilter/` are the
+> cross-platform format defined by `shared/categories/bloom.ts` (FNV-1a with two
+> seeds, enhanced double hashing, base64 bit array inside a signed JSON asset).
+> Different hashes, different layout, different purpose — do not reuse either
+> builder for the other consumer.
+
 ## What to measure
 
 Follow `docs/APPLE_URL_FILTER_POC.md` and fill its **Observed Results** table and

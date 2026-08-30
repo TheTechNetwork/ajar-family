@@ -22,7 +22,6 @@ public final class CategoryFilterStore {
     private let sigKey = "category_filter_signature_v1"
 
     private let lock = NSLock()
-    private var cachedVersion: Int?
     private var cachedFilters: CategoryFilters?
     private var cachedDigest: Data?
 
@@ -55,13 +54,13 @@ public final class CategoryFilterStore {
         lock.lock()
         defaults?.set(canonical, forKey: setKey)
         defaults?.set(signature, forKey: sigKey)
-        cachedDigest = nil; cachedFilters = nil; cachedVersion = nil
+        cachedDigest = nil; cachedFilters = nil
         lock.unlock()
         return true
     }
 
     /// The version to send as `?since=` on the next fetch. -1 when nothing cached.
-    public func cachedVersion(publicKeyB64: String?) -> Int {
+    public func installedVersion(publicKeyB64: String?) -> Int {
         current(publicKeyB64: publicKeyB64)?.version ?? -1
     }
 
@@ -85,7 +84,7 @@ public final class CategoryFilterStore {
               let filters = CategoryFilters(set: decoded) else { return nil }
 
         lock.lock()
-        cachedDigest = digest; cachedFilters = filters; cachedVersion = filters.version
+        cachedDigest = digest; cachedFilters = filters
         lock.unlock()
         return filters
     }
@@ -94,7 +93,7 @@ public final class CategoryFilterStore {
         lock.lock()
         defaults?.removeObject(forKey: setKey)
         defaults?.removeObject(forKey: sigKey)
-        cachedDigest = nil; cachedFilters = nil; cachedVersion = nil
+        cachedDigest = nil; cachedFilters = nil
         lock.unlock()
     }
 }
