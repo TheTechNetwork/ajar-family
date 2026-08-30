@@ -111,6 +111,17 @@ jobs:
           mkdir -p release
           find artifacts -type f \( -name '*.zip' -o -name '*.exe' \) -exec cp {} release/ \;
           ls -la release
+
+      # docs/INSTALL.md tells a parent to download an .exe and run it ELEVATED as
+      # a LocalSystem service. Publishing that with no way to check what they got
+      # is asking them to trust the network. Until the binaries are code-signed
+      # (which needs a certificate we do not have yet), a checksum file is the
+      # minimum honest thing to ship — and the install docs can point at it.
+      - name: Checksums
+        working-directory: release
+        run: |
+          sha256sum * > SHA256SUMS
+          echo "--- SHA256SUMS ---"; cat SHA256SUMS
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -118,6 +129,12 @@ jobs:
           generate_release_notes: true
           body: |
             Ajar — prebuilt binaries. No Node or Go toolchain needed on the box.
+
+            **Verify what you downloaded** against `SHA256SUMS` before running it
+            elevated: `sha256sum -c SHA256SUMS` (Linux/macOS) or
+            `Get-FileHash .\ajar-agent-windows-amd64.exe -Algorithm SHA256` (Windows).
+            These binaries are NOT code-signed yet, so Windows SmartScreen will
+            warn — the checksum is how you tell a real build from a substituted one.
 
             - `ajar-agent-windows-{amd64,arm64}.exe` — Windows service. Install
               elevated: `ajar-agent-windows-amd64.exe install`.

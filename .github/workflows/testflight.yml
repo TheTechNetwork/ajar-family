@@ -1,0 +1,160 @@
+name: iOS — TestFlight (internal)
+
+# Archives the iOS child app and uploads it to TestFlight for INTERNAL testing.
+#
+# READ THIS BEFORE EXPECTING IT TO WORK. This workflow is correct, but it cannot
+# succeed until three things outside CI are true, and two of them take real
+# calendar time:
+#
+#  1. FAMILY CONTROLS IS A RESTRICTED ENTITLEMENT. `com.apple.developer.family-controls`
+#     must be granted to the team by Apple before a distribution build can sign.
+#     Development signing works without it; TestFlight does not. Request it and
+#     wait — this is the long pole, not the pipeline.
+#  2. A REAL BUNDLE ID. The PoC ships com.example.parentfilterpoc. Register the
+#     real ids (app + both extensions) in the developer account and set them as
+#     repository variables; the placeholders will not sign.
+#  3. AN APP STORE CONNECT RECORD for that bundle id, or the upload has nowhere
+#     to land.
+#
+# It also builds an app whose enforcement has NEVER been verified on hardware
+# (ADR-012). Shipping it to internal testers is exactly how that gets verified —
+# just do not read a green run here as "the filter works".
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "testflight" to upload a build'
+        required: true
+        default: ''
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: inputs.confirm == 'testflight'
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      SCHEME: ParentFilterPoC
+      PROJECT_DIR: apple/poc-contentfilter
+      # Repository VARIABLES (not secrets — none of these are sensitive).
+      BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+      TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail with a readable list rather than a signing error 20 minutes in.
+      - name: Preflight — the account settings this cannot run without
+        run: |
+          missing=""
+          [ -n "${BUNDLE_ID:-}" ] || missing="$missing IOS_BUNDLE_ID(var)"
+          [ -n "${TEAM_ID:-}" ]   || missing="$missing APPLE_TEAM_ID(var)"
+          [ -n "${{ secrets.ASC_KEY_ID }}" ]     || missing="$missing ASC_KEY_ID(secret)"
+          [ -n "${{ secrets.ASC_ISSUER_ID }}" ]  || missing="$missing ASC_ISSUER_ID(secret)"
+          [ -n "${{ secrets.ASC_KEY_P8 }}" ]     || missing="$missing ASC_KEY_P8(secret)"
+          if [ -n "$missing" ]; then
+            echo "::error::Not configured:$missing"
+            echo "See docs/APPLE_ACCOUNT_SETUP.md. The App Store Connect API key needs the"
+            echo "App Manager role so xcodebuild -allowProvisioningUpdates can mint profiles."
+            exit 1
+          fi
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # The .xcodeproj is generated, not committed — project.yml is the source of
+      # truth, so there is no stale project file to drift from the sources.
+      - name: Generate the Xcode project
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: xcodegen generate
+
+      # Point the PoC at the real identifiers. The placeholders exist so the
+      # project builds for anyone without an account; they cannot be distributed.
+      - name: Apply the real bundle identifiers
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          for f in $(grep -rl "com.example.parentfilterpoc" . --include="*.pbxproj" --include="*.plist" --include="*.entitlements"); do
+            sed -i '' "s/com\.example\.parentfilterpoc/${BUNDLE_ID}/g" "$f"
+            echo "rewrote $f"
+          done
+
+      # The API key authenticates BOTH the signing-profile creation below and the
+      # upload at the end, so it is written once here.
+      - name: Install the App Store Connect API key
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p ~/private_keys
+          printf '%s' "$ASC_KEY_P8" > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          chmod 600 ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+
+      - name: Archive
+        working-directory: ${{ env.PROJECT_DIR }}
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project ParentFilterPoC.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Ajar.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            | xcbeautify || xcodebuild -version
+
+      - name: Export the .ipa
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>uploadSymbols</key><true/>
+            <key>destination</key><string>export</string>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Ajar.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
+            -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
+            -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}"
+
+      - name: Upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          IPA="$(ls "$RUNNER_TEMP"/export/*.ipa | head -1)"
+          echo "uploading $(basename "$IPA")"
+          xcrun altool --upload-app -f "$IPA" -t ios \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+          echo "::notice::Uploaded. Processing in App Store Connect takes a few minutes before it appears for internal testers."
+
+      # Keep the archive: without dSYMs a TestFlight crash report is unreadable,
+      # and this is a build whose on-device behaviour is the entire point.
+      - name: Keep the archive and dSYMs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-archive-${{ github.run_number }}
+          path: ${{ runner.temp }}/Ajar.xcarchive
+          retention-days: 14
