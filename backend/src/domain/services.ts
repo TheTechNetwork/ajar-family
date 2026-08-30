@@ -8,7 +8,7 @@ import type { Repository } from "../store/repository.js";
 import type { Notifier } from "../push/notifier.js";
 import type { EventHub } from "../push/hub.js";
 import { signSnapshot, signCanonical } from "./signing.js";
-import type { CategoryFilterSet } from "@ajar/shared/categories";
+import { CATEGORY_DATA_ATTRIBUTION, type CategoryFilterSet } from "@ajar/shared/categories";
 import type {
   User, Session, Family, FamilyMembership, Child, Device, EnrollmentToken,
   AccessRequest, ApprovalDecision, Role, Platform, ApprovalScope, ApprovalDuration,
@@ -612,7 +612,8 @@ export class PolicyService {
     // ask their way out of. A family enforcing one category should carry one.
     const enforced = scope ? await this.enforcedCategories(scope) : undefined;
     if (enforced && enforced.length === 0) {
-      return { set: { version, filters: {} }, signature: await signCanonical({ version, filters: {} }, this.signingPrivateKeyB64) };
+      const empty = { version, filters: {}, attribution: CATEGORY_DATA_ATTRIBUTION };
+      return { set: empty, signature: await signCanonical(empty, this.signingPrivateKeyB64) };
     }
     const set = await this.categories.compileFilters(enforced);
     const signature = await signCanonical(set, this.signingPrivateKeyB64);

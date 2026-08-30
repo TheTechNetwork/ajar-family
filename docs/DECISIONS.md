@@ -253,3 +253,37 @@ and which we must assert.
 content-filter or URL-filter toggle in Settings. That question is still open and
 still cannot be answered from the SDK — only on hardware (A6 / D5).
 
+## ADR-015 — Use UT1's live licence (CC BY-SA 4.0) for category data
+
+**Status:** Accepted, with a required pre-launch confirmation.
+
+**Context.** Domain categorization needs a corpus. The research established that
+most commercial feeds' terms forbid our delivery model outright (we compile a
+Bloom filter and serve it to devices, which is redistribution of adapted
+material). UT1 is the viable backbone, but its page carries a live CC BY-SA 4.0
+link **and** a commented-out legacy RDF block naming CC BY-NC-SA 4.0. NC would
+disqualify it for a commercial product.
+
+**Decision.** Proceed on the **live** licence — CC BY-SA 4.0 — treating the
+commented-out block as superseded. Confirm with the maintainer before building
+ingestion at scale, and until then avoid anything the NC variant would forbid
+(we consume the data in a product; we do not sell or sub-licence it).
+
+**Consequences.**
+- ShareAlike is viral on the artifact: our compiled filter set is adapted
+  material and is offered under CC BY-SA 4.0. The shipped set is not proprietary,
+  and recipients may redistribute it alike. Accepted — the product is the
+  enforcement engine and the family experience, not the list.
+- Attribution must travel WITH the asset, so it lives inside the signed
+  `CategoryFilterSet.attribution` rather than only in documentation. Stripping it
+  invalidates the signature (tested).
+- Keeping `CategoryProvider` source-agnostic is now load-bearing insurance, not
+  just tidiness: if the licence resolves to NC, the corpus is swapped without
+  touching the engine.
+
+**Alternative rejected.** Licensing a commercial feed — verified terms from
+multiple vendors bar redistribution, derivative works, or both, which is exactly
+what shipping a compiled filter to a device is.
+
+See `docs/DATA_LICENSES.md` for the full table and the standing rules.
+\n

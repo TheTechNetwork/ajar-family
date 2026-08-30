@@ -14,6 +14,7 @@ import {
   DEFAULT_CATEGORY_DOMAINS, normalizeHost, buildBloom, type CategoryFilterSet,
 } from "@ajar/shared/categories";
 import { isSafetyFloorHost } from "@ajar/shared/safety";
+import { CATEGORY_DATA_ATTRIBUTION } from "@ajar/shared/categories";
 
 /**
  * Categories we refuse to classify automatically, ever.
@@ -99,7 +100,9 @@ export class RepositoryCategoryProvider implements CategoryProvider {
       }
       filters[category] = buildBloom(hosts, perFilterFp);
     }
-    return { version: await this.version(), filters };
+    // Attribution rides inside the signed set: under CC BY-SA it must accompany
+    // the adapted material, not just our docs. See shared/categories/attribution.ts.
+    return { version: await this.version(), filters, attribution: CATEGORY_DATA_ATTRIBUTION };
   }
 
   async replace(map: Record<string, string[]>) {

@@ -610,11 +610,54 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/SerializedBloom"
             }
+          },
+          "attribution": {
+            "$ref": "#/components/schemas/DatasetAttribution"
           }
         },
         "required": [
           "version",
           "filters"
+        ]
+      },
+      "DatasetAttribution": {
+        "type": "object",
+        "description": "Licence + credits for the source data these filters were compiled from. Inside the signed set on purpose: under CC BY-SA the attribution must accompany the adapted material, and signing makes stripping it tamper-evident. Recipients may redistribute the set under the same licence.",
+        "properties": {
+          "license": {
+            "type": "string",
+            "description": "SPDX id of the licence the SET is offered under"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "license": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "url",
+                "license"
+              ]
+            }
+          },
+          "notice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "license",
+          "sources",
+          "notice"
         ]
       },
       "CategoryFilterAsset": {

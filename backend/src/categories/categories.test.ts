@@ -137,3 +137,21 @@ test("the shipped filter set covers only the categories the device enforces", as
   assert.deepEqual(Object.keys(("set" in asset) ? asset.set.filters : {}), ["social"],
     "one enforced category means one shipped filter, not the whole seed");
 });
+
+test("the shipped filter set carries its licence and attribution", async () => {
+  // CC BY-SA obliges the credit to accompany the adapted material. A notice that
+  // lived only in docs/ would be lost the moment the asset is cached or mirrored,
+  // so it rides inside the SIGNED set — and must survive round-tripping.
+  const app = await App.create(cfg);
+  const asset = await app.policy.categoryFilterAsset();
+  assert.ok("set" in asset);
+  const attr = asset.set.attribution;
+  assert.equal(attr?.license, "CC-BY-SA-4.0");
+  assert.ok(attr?.sources.some((s) => /Toulouse/i.test(s.name)), "credits UT1");
+  assert.ok((attr?.notice ?? "").length > 0);
+  // Signed, so stripping the credit is tamper-evident rather than free.
+  assert.equal(await verifyCanonical(asset.set, asset.signature, app.signingPublicKeyB64), true);
+  const stripped = { ...asset.set, attribution: undefined };
+  assert.equal(await verifyCanonical(stripped, asset.signature, app.signingPublicKeyB64), false,
+    "removing the attribution must invalidate the signature");
+});

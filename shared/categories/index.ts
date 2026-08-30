@@ -2,3 +2,4 @@
  *  Bloom-filter delivery used for large, on-device datasets. */
 export * from "./category-data.js";
 export * from "./bloom.js";
+export * from "./attribution.js";

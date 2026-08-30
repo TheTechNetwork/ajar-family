@@ -37,6 +37,25 @@ export interface SerializedBloom {
 export interface CategoryFilterSet {
   version: number;
   filters: Record<string, SerializedBloom>; // category slug → filter
+  /**
+   * Licence + attribution for the source data these filters were compiled from.
+   *
+   * This travels INSIDE the signed set on purpose. Under CC BY-SA the attribution
+   * has to accompany the adapted material, and a notice that lived only in our
+   * documentation would be silently lost the moment the asset is cached, mirrored
+   * or inspected on its own. Being inside the signature also makes stripping it
+   * tamper-evident rather than free.
+   */
+  attribution?: DatasetAttribution;
+}
+
+export interface DatasetAttribution {
+  /** SPDX identifier of the licence the SET is offered under. */
+  license: string;
+  /** Human-readable credit line(s) for the upstream source(s). */
+  sources: { name: string; url: string; license: string }[];
+  /** Plain-language statement of what a recipient may do with this asset. */
+  notice: string;
 }
 
 // FNV-1a (32-bit) with two offset bases → two independent hashes; the k probe
