@@ -318,6 +318,25 @@ Injecting it meant CI rewrote generated project files with `sed`, which is fragi
 let a local build and a CI build sign as *different apps*. One value in one file
 that everyone reads is strictly better.
 
+**Identifiers that do NOT exist yet** (do not register them until there is a
+target to sign — an App ID nothing signs is clutter, and an App Store Connect
+record is permanent):
+
+| Future identifier | Blocked on | Note |
+|---|---|---|
+| `family.ajar.parent` | no parent iOS app — `apple/parent-app/` is a README stub and the parent console is `web/parent/` | correct name when it exists |
+| macOS container app + `…​.Extension` | `macos/safari-extension/` is loose JS with no Xcode project, container app or `Info.plist` | a Safari Web Extension cannot ship standalone; it needs a container app plus the native messaging host |
+
+**Decide before the first macOS upload:** one bundle id can span iOS **and**
+macOS under a *single* App Store Connect record. The macOS child app can
+therefore reuse **`family.ajar.child`** rather than minting `family.ajar.mac` —
+one record, one TestFlight history, one Family Controls entitlement request,
+instead of two apps that drift apart. Cheap to choose now, impossible to merge
+later.
+
+The Windows extension is not an Apple identifier at all — it ships through the
+Chrome Web Store, Edge Add-ons and AMO (ARCHITECTURE, Windows tiering).
+
 **Changing them is cheap NOW and expensive later.** Once an App Store Connect
 record exists for a bundle id, that id is permanent — you cannot rename it, you
 can only create a new app and lose the TestFlight history. If `family.ajar.*` is
