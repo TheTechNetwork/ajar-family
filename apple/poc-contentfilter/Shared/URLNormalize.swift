@@ -47,7 +47,7 @@ public enum URLNormalize {
                     if a.element.name == b.element.name { return a.offset < b.offset }
                     return CanonicalJSON.lessThanByUTF16(a.element.name, b.element.name)
                 }
-                .map(\.element)
+                .map { $0.element }
             c.queryItems = sorted
         } else {
             c.queryItems = nil

@@ -37,7 +37,9 @@
    `:root` / dark-mode / primitives blocks below: MV3 and Safari Web Extension
    pages can only load assets from inside their own bundle, and this repo has
    no build step to copy one in. If you change a token here, change it in all
-   four. Each inline copy carries a pointer back to this file.
+   four — or just run `node web/parent/sync-tokens.mjs`, which re-pastes them,
+   and `--check` in CI, which fails if any copy has drifted. Each inline copy
+   carries a pointer back to this file.
 
    CONTRAST. Every colour pair a surface actually renders was computed with the
    WCAG relative-luminance formula, not eyeballed. Text pairs clear 4.5:1

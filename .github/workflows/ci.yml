@@ -35,6 +35,13 @@ jobs:
       - name: Conformance (shared spec vs. platform mirrors)
         run: npm run conformance
 
+      # MV3/Safari pages cannot load CSS from outside their bundle and there is no
+      # build step, so the design tokens are genuinely duplicated into four inline
+      # copies. Duplication nothing checks is how a palette drifts back into a
+      # contrast failure.
+      - name: Design tokens are in sync across surfaces
+        run: node web/parent/sync-tokens.mjs --check
+
       # The OpenAPI document is the client contract; fail if the committed file
       # drifts from the one the code generates.
       - name: OpenAPI is in sync

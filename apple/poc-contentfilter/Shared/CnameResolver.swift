@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(dnssd)
 import dnssd
+#endif
 
 /// On-device CNAME chain resolution.
 ///
@@ -94,6 +96,12 @@ public final class CnameResolver {
     /// error/timeout — which the chain walker treats as "the chain ends here",
     /// matching the TS `catch { break }`.
     static func queryCname(_ name: String, timeoutMs: Int32) -> String? {
+        #if !canImport(dnssd)
+        // No DNS-SD on this platform/SDK: the chain walk degrades to the
+        // getaddrinfo fallback in `resolve(_:)`, which sees only the terminal
+        // canonical name. Documented in the type header, limitation (2).
+        return nil
+        #else
         var sdRef: DNSServiceRef?
         let box = QueryBox()
         let ctx = Unmanaged.passUnretained(box).toOpaque()
@@ -129,7 +137,7 @@ public final class CnameResolver {
         guard fd >= 0 else { return nil }
         let start = DispatchTime.now()
         while !box.finished {
-            let elapsedMs = Int32((DispatchTime.now().uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000)
+            let elapsedMs = Int32(clamping: (DispatchTime.now().uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000)
             let remaining = timeoutMs - elapsedMs
             if remaining <= 0 { break }
             var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
@@ -138,6 +146,7 @@ public final class CnameResolver {
             if DNSServiceProcessResult(ref) != kDNSServiceErr_NoError { break }
         }
         return box.target
+        #endif
     }
 
     /// Decode a DNS wire-format domain name: a run of length-prefixed labels
@@ -230,7 +239,7 @@ public final class CnameChainCache {
             map = map.filter { $0.value.expires > now }
             if map.count > maxEntries {
                 for k in map.sorted(by: { $0.value.expires < $1.value.expires })
-                            .prefix(map.count - maxEntries).map(\.key) {
+                            .prefix(map.count - maxEntries).map({ $0.key }) {
                     map.removeValue(forKey: k)
                 }
             }

@@ -178,8 +178,8 @@ public final class PolicyStore {
         lock.unlock()
     }
 
-    /// DEBUG-only: seed an unsigned snapshot for the on-device PoC harness.
     #if DEBUG
+    /// DEBUG-only: seed an unsigned snapshot for the on-device PoC harness.
     public func installUnsignedForDevelopment(_ snapshot: DevicePolicySnapshot) {
         guard let data = try? Self.encoder().encode(snapshot) else { return }
         lock.lock()
@@ -340,7 +340,7 @@ public final class PolicyStore {
                 let sa = specificity(scope(a.element)), sb = specificity(scope(b.element))
                 if sa != sb { return sa > sb }
                 return a.offset < b.offset   // stable, like Array.prototype.sort
-            }.map(\.element)
+            }.map { $0.element }
         }
 
         // ── Tier 3: active temporary approvals, before standing rules.
