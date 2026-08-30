@@ -209,6 +209,76 @@ and does not expire like per-app certificates.
       no-third-party-PII rules conflict with the server-side family model. Pick a
       Utilities/Productivity-style category, not Kids.
 
+### 8.1 Wiring App Store Connect to CI — exactly what to do
+
+`.github/workflows/testflight.yml` archives, signs and uploads the iOS child app
+with **no Mac involved**. It needs five values, and it preflights for all of them
+so a missing one fails in seconds with a readable list instead of a signing error
+twenty minutes in.
+
+**Step 1 — create an App Store Connect API key** (this replaces app-specific
+passwords and Fastlane Match; it both mints signing profiles and uploads).
+
+- App Store Connect → **Users and Access → Integrations → App Store Connect API**
+  → **Team Keys** → **+**.
+- Role: **App Manager**. Developer is NOT enough — `xcodebuild
+  -allowProvisioningUpdates` has to be able to create/modify provisioning
+  profiles, and Developer cannot.
+- Download the **`.p8` exactly once** — Apple will not show it again. Note the
+  **Key ID** and, at the top of that page, the **Issuer ID** (a UUID, shared by
+  the whole team).
+
+**Step 2 — set them in GitHub** (repo → Settings → Secrets and variables → Actions):
+
+| Name | Kind | Value |
+|---|---|---|
+| `ASC_KEY_ID` | secret | the 10-char Key ID |
+| `ASC_ISSUER_ID` | secret | the Issuer UUID |
+| `ASC_KEY_P8` | secret | **the whole `.p8` file contents**, including the `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` lines |
+| `APPLE_TEAM_ID` | **variable** | the 10-char Team ID (§2) |
+| `IOS_BUNDLE_ID` | **variable** | the real child-app bundle id, e.g. `com.<org>.childfilter` (§4) |
+
+The last two are variables, not secrets — a Team ID and a bundle id are public,
+and putting them in secrets only makes CI logs harder to read.
+
+**Step 3 — register the bundle id and create the app record.** §4 registers the
+App ID with its entitlements; then create the App Store Connect app record for
+that same id (§8 above). The upload has nowhere to land without it.
+
+**Step 4 — run it.** Actions → *iOS — TestFlight (internal)* → Run workflow, type
+`testflight` to confirm. The workflow generates the Xcode project from
+`project.yml`, rewrites the `com.example.parentfilterpoc` placeholders to your
+`IOS_BUNDLE_ID`, signs, exports and uploads. Processing in App Store Connect takes
+a few minutes before the build appears to internal testers.
+
+### 8.2 What will actually stop you (in the order you will hit it)
+
+1. **The Family Controls distribution entitlement (§6).** This is the real gate,
+   and it is a human review with calendar time attached — not something CI can
+   route around. Development signing works without it; **App Store / TestFlight
+   signing does not.** Request it the day you decide TestFlight is the goal, not
+   the day you want to upload. Everything else here is minutes of work.
+2. **App Manager role.** A key created with the Developer role archives fine and
+   then fails to create a provisioning profile.
+3. **Placeholder bundle ids.** `com.example.parentfilterpoc` cannot be signed for
+   distribution. The workflow rewrites them from `IOS_BUNDLE_ID`, but the id has
+   to be registered first (§4) with Family Controls, Network Extensions and App
+   Groups enabled — and the two extensions need their own ids.
+4. **Export compliance.** First upload prompts for encryption questions. Ajar uses
+   only standard TLS + platform crypto, so the usual answer is the exemption — but
+   it blocks the build from reaching testers until answered, and it is easy to
+   miss sitting in App Store Connect.
+
+### 8.3 What a green TestFlight run does and does not prove
+
+It proves the app **builds, signs and uploads**. It does **not** prove the filter
+works: PoC A's enforcement has never run on hardware (ADR-012), and the two
+questions that decide the architecture — whether `.child` actually locks the
+filter toggle, and whether `NEFilterFlow.url` really carries full YouTube watch
+URLs at runtime — are answered by *installing that build and running the A1–A6
+protocol* in `docs/APPLE_CONTENT_FILTER_POC.md`. Getting to TestFlight is how you
+start that, not how you finish it.
+
 ---
 
 ## 9. `NEURLFilter` OHTTP relay / PIR server — Identity & Trust onboarding (DEFERRED)
@@ -279,6 +349,16 @@ Cloudflare/signing secrets live in `docs/DEPLOYMENT.md`.
 | `APPLE_TEAM_ID` | 10-char Team ID (§2) | backend APNs `Notifier` (also = APNs Team ID) |
 | `APNS_TOPIC_PARENT` | bundle id `com.<org>.parentfilter` (§4) | APNs topic for parent pushes |
 | `APNS_TOPIC_CHILD` | bundle id `com.<org>.childfilter` (§4) | APNs topic for child "sync now" pushes |
+| `ASC_KEY_ID` | App Store Connect API **Key ID** (§8.1) | `testflight.yml` — signing + upload |
+| `ASC_ISSUER_ID` | App Store Connect API **Issuer UUID** (§8.1) | `testflight.yml` — signing + upload |
+| `ASC_KEY_P8` | the App Store Connect **`.p8`** contents (§8.1) | `testflight.yml` — signing + upload |
+
+GitHub **variables** (not secrets — both are public values):
+
+| Variable | What | Consumed by |
+|---|---|---|
+| `APPLE_TEAM_ID` | 10-char Team ID (§2) | `testflight.yml` |
+| `IOS_BUNDLE_ID` | real child-app bundle id (§4) | `testflight.yml` — rewrites the PoC placeholders |
 
 ---
 
