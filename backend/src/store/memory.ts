@@ -18,9 +18,10 @@ import type {
   AuditEvent,
   NotificationEndpoint,
   PolicyRule,
-  TemporaryRule,
   DefaultPolicy,
   CategoryDomain,
+  PasswordResetToken,
+  TemporaryGrant,
 } from "../domain/model.js";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -36,7 +37,8 @@ export class MemoryStore implements Repository {
   private enrollments = new Map<string, EnrollmentToken>();
   private defaults = new Map<string, DefaultPolicy>();
   private rules = new Map<string, PolicyRule>();
-  private tempRules = new Map<string, TemporaryRule>();
+  private tempRules = new Map<string, TemporaryGrant>();
+  private resetTokens = new Map<string, PasswordResetToken>();
   private versions = new Map<string, number>();
   private requests = new Map<string, AccessRequest>();
   private decisions = new Map<string, ApprovalDecision>();
@@ -59,6 +61,17 @@ export class MemoryStore implements Repository {
   async updateSession(s: Session) { this.sessions.set(s.id, clone(s)); return clone(s); }
   async listSessionsForUser(userId: string) {
     return [...this.sessions.values()].filter((s) => s.userId === userId).map(clone);
+  }
+
+  async createPasswordResetToken(t: PasswordResetToken) { this.resetTokens.set(t.id, clone(t)); return clone(t); }
+  async getPasswordResetTokenByHash(tokenHash: string) {
+    for (const t of this.resetTokens.values()) if (t.tokenHash === tokenHash) return clone(t);
+    return null;
+  }
+  async updatePasswordResetToken(t: PasswordResetToken) { this.resetTokens.set(t.id, clone(t)); return clone(t); }
+  async invalidatePasswordResetTokensForUser(userId: string, at: string) {
+    for (const t of this.resetTokens.values())
+      if (t.userId === userId && !t.usedAt) this.resetTokens.set(t.id, { ...clone(t), usedAt: at });
   }
 
   async createFamily(f: Family) { this.families.set(f.id, clone(f)); return clone(f); }
@@ -87,6 +100,40 @@ export class MemoryStore implements Repository {
   async listDevices(familyId: string) {
     return [...this.devices.values()].filter((d) => d.familyId === familyId).map(clone);
   }
+  async listDevicesForChild(childId: string) {
+    return [...this.devices.values()].filter((d) => d.childId === childId).map(clone);
+  }
+
+  async deleteChildCascade(familyId: string, childId: string) {
+    for (const d of [...this.devices.values()])
+      if (d.familyId === familyId && d.childId === childId) await this.deleteDeviceCascade(familyId, d.id);
+    for (const [id, r] of [...this.rules])
+      if (r.scope.familyId === familyId && r.scope.childId === childId) this.rules.delete(id);
+    for (const [id, t] of [...this.tempRules])
+      if (t.scope.familyId === familyId && t.scope.childId === childId) this.tempRules.delete(id);
+    for (const [id, r] of [...this.requests])
+      if (r.familyId === familyId && r.childId === childId) this.requests.delete(id);
+    this.defaults.delete(versionKey(familyId, childId));
+    this.versions.delete(versionKey(familyId, childId));
+    for (const [id, c] of [...this.children])
+      if (c.id === childId && c.familyId === familyId) this.children.delete(id);
+    // A guardian assigned only to this child must not keep a dangling assignment.
+    for (const [id, m] of [...this.memberships]) {
+      if (m.familyId !== familyId || !m.assignedChildIds.includes(childId)) continue;
+      this.memberships.set(id, { ...clone(m), assignedChildIds: m.assignedChildIds.filter((c) => c !== childId) });
+    }
+  }
+
+  async deleteDeviceCascade(familyId: string, deviceId: string) {
+    for (const [id, r] of [...this.rules])
+      if (r.scope.familyId === familyId && r.scope.deviceId === deviceId) this.rules.delete(id);
+    for (const [id, t] of [...this.tempRules])
+      if (t.scope.familyId === familyId && t.scope.deviceId === deviceId) this.tempRules.delete(id);
+    for (const [id, r] of [...this.requests])
+      if (r.familyId === familyId && r.deviceId === deviceId) this.requests.delete(id);
+    const d = this.devices.get(deviceId);
+    if (d && d.familyId === familyId) this.devices.delete(deviceId);
+  }
 
   async createEnrollmentToken(t: EnrollmentToken) { this.enrollments.set(t.id, clone(t)); return clone(t); }
   async getEnrollmentTokenByCode(code: string) {
@@ -108,9 +155,16 @@ export class MemoryStore implements Repository {
     return [...this.rules.values()].filter((r) => r.scope.familyId === familyId).map(clone);
   }
 
-  async createTemporaryRule(t: TemporaryRule) { this.tempRules.set(t.id, clone(t)); return clone(t); }
+  async createTemporaryRule(t: TemporaryGrant) { this.tempRules.set(t.id, clone(t)); return clone(t); }
+  async getTemporaryRule(id: string) { const v = this.tempRules.get(id); return v ? clone(v) : null; }
   async listTemporaryRules(familyId: string) {
     return [...this.tempRules.values()].filter((t) => t.scope.familyId === familyId).map(clone);
+  }
+  async markTemporaryRuleConsumed(id: string, at: string) {
+    const t = this.tempRules.get(id);
+    if (!t || t.consumedAt) return false;
+    this.tempRules.set(id, { ...clone(t), consumedAt: at });
+    return true;
   }
 
   async bumpPolicyVersion(familyId: string, childId: string) {

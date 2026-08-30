@@ -4,7 +4,7 @@
  */
 import type { Repository } from "../repository.js";
 import type { SqlDatabase, SqlRow } from "./database.js";
-import { SCHEMA_SQL } from "./schema.js";
+import { SCHEMA_SQL, MIGRATIONS_SQL } from "./schema.js";
 import { hostCandidates, normalizeHost } from "@ajar/shared/categories";
 import type {
   Session,
@@ -12,7 +12,7 @@ import type {
   AccessRequest, ApprovalDecision, AuditEvent, NotificationEndpoint,
   PolicyRule, TemporaryRule, DefaultPolicy, RuleScope, Role, Platform,
   RuleAction, PolicyTargetType, ApprovalScope, ApprovalDuration,
-  CategoryDomain,
+  CategoryDomain, PasswordResetToken, TemporaryGrant,
 } from "../../domain/model.js";
 
 const s = (v: unknown) => (v == null ? null : String(v));
@@ -31,6 +31,11 @@ export class SqlStore implements Repository {
 
   static async create(db: SqlDatabase): Promise<SqlStore> {
     await db.exec(SCHEMA_SQL);
+    // Bring a database created by an older build up to date. Each ALTER is
+    // independent; "duplicate column" just means this one already ran.
+    for (const stmt of MIGRATIONS_SQL) {
+      try { await db.run(stmt, []); } catch { /* column already present */ }
+    }
     return new SqlStore(db);
   }
 
@@ -78,6 +83,31 @@ export class SqlStore implements Repository {
     } : null;
   }
 
+  // password reset tokens
+  async createPasswordResetToken(t: PasswordResetToken) {
+    await this.db.run(
+      "INSERT INTO password_reset_tokens(id,user_id,token_hash,expires_at,created_at,used_at) VALUES(?,?,?,?,?,?)",
+      [t.id, t.userId, t.tokenHash, t.expiresAt, t.createdAt, s(t.usedAt)]);
+    return t;
+  }
+  async getPasswordResetTokenByHash(tokenHash: string) {
+    return this.mapReset(await this.db.get("SELECT * FROM password_reset_tokens WHERE token_hash=?", [tokenHash]));
+  }
+  async updatePasswordResetToken(t: PasswordResetToken) {
+    await this.db.run("UPDATE password_reset_tokens SET used_at=? WHERE id=?", [s(t.usedAt), t.id]);
+    return t;
+  }
+  async invalidatePasswordResetTokensForUser(userId: string, at: string) {
+    await this.db.run("UPDATE password_reset_tokens SET used_at=? WHERE user_id=? AND used_at IS NULL", [at, userId]);
+  }
+  private mapReset(r: SqlRow | null): PasswordResetToken | null {
+    return r ? {
+      id: r.id as string, userId: r.user_id as string, tokenHash: r.token_hash as string,
+      expiresAt: r.expires_at as string, createdAt: r.created_at as string,
+      usedAt: (r.used_at as string | null) ?? undefined,
+    } : null;
+  }
+
   // families & membership
   async createFamily(f: Family) {
     await this.db.run("INSERT INTO families(id,name,created_at) VALUES(?,?,?)", [f.id, f.name, f.createdAt]);
@@ -110,8 +140,8 @@ export class SqlStore implements Repository {
 
   // children & devices
   async createChild(c: Child) {
-    await this.db.run("INSERT INTO children(id,family_id,display_name,created_at) VALUES(?,?,?,?)",
-      [c.id, c.familyId, c.displayName, c.createdAt]);
+    await this.db.run("INSERT INTO children(id,family_id,display_name,timezone,created_at) VALUES(?,?,?,?,?)",
+      [c.id, c.familyId, c.displayName, c.timezone ?? "UTC", c.createdAt]);
     return c;
   }
   async getChild(id: string) { return this.mapChild(await this.db.get("SELECT * FROM children WHERE id=?", [id])); }
@@ -119,27 +149,61 @@ export class SqlStore implements Repository {
     return (await this.db.all("SELECT * FROM children WHERE family_id=?", [familyId])).map((r) => this.mapChild(r)!);
   }
   private mapChild(r: SqlRow | null): Child | null {
-    return r ? { id: r.id as string, familyId: r.family_id as string, displayName: r.display_name as string, createdAt: r.created_at as string } : null;
+    return r ? {
+      id: r.id as string, familyId: r.family_id as string, displayName: r.display_name as string,
+      timezone: (r.timezone as string) || "UTC", createdAt: r.created_at as string,
+    } : null;
   }
 
   async createDevice(d: Device) { await this.upsertDevice(d); return d; }
   async updateDevice(d: Device) { await this.upsertDevice(d); return d; }
   private async upsertDevice(d: Device) {
     await this.db.run(
-      `INSERT INTO devices(id,family_id,child_id,platform,display_name,device_public_key,enrolled_at,last_synced_version)
-       VALUES(?,?,?,?,?,?,?,?)
-       ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name, last_synced_version=excluded.last_synced_version`,
-      [d.id, d.familyId, d.childId, d.platform, d.displayName, d.devicePublicKey, d.enrolledAt, d.lastSyncedVersion]);
+      `INSERT INTO devices(id,family_id,child_id,platform,display_name,device_public_key,enrolled_at,last_synced_version,last_seen_at)
+       VALUES(?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,
+         last_synced_version=excluded.last_synced_version, last_seen_at=excluded.last_seen_at`,
+      [d.id, d.familyId, d.childId, d.platform, d.displayName, d.devicePublicKey, d.enrolledAt,
+       d.lastSyncedVersion, s(d.lastSeenAt)]);
   }
   async getDevice(id: string) { return this.mapDevice(await this.db.get("SELECT * FROM devices WHERE id=?", [id])); }
   async listDevices(familyId: string) {
     return (await this.db.all("SELECT * FROM devices WHERE family_id=?", [familyId])).map((r) => this.mapDevice(r)!);
+  }
+  async listDevicesForChild(childId: string) {
+    return (await this.db.all("SELECT * FROM devices WHERE child_id=?", [childId])).map((r) => this.mapDevice(r)!);
+  }
+
+  async deleteChildCascade(familyId: string, childId: string) {
+    for (const d of await this.listDevicesForChild(childId)) {
+      if (d.familyId === familyId) await this.deleteDeviceCascade(familyId, d.id);
+    }
+    await this.db.run("DELETE FROM rules WHERE family_id=? AND scope_child_id=?", [familyId, childId]);
+    await this.db.run("DELETE FROM temp_rules WHERE family_id=? AND scope_child_id=?", [familyId, childId]);
+    await this.db.run("DELETE FROM access_requests WHERE family_id=? AND child_id=?", [familyId, childId]);
+    await this.db.run("DELETE FROM default_policy WHERE family_id=? AND child_id=?", [familyId, childId]);
+    await this.db.run("DELETE FROM policy_versions WHERE family_id=? AND child_id=?", [familyId, childId]);
+    await this.db.run("DELETE FROM children WHERE id=? AND family_id=?", [childId, familyId]);
+    // Drop the child from any LIMITED_GUARDIAN assignment (no dangling ids).
+    for (const m of await this.listMemberships(familyId)) {
+      if (!m.assignedChildIds.includes(childId)) continue;
+      await this.db.run("UPDATE memberships SET assigned_child_ids=? WHERE id=?",
+        [JSON.stringify(m.assignedChildIds.filter((c) => c !== childId)), m.id]);
+    }
+  }
+
+  async deleteDeviceCascade(familyId: string, deviceId: string) {
+    await this.db.run("DELETE FROM rules WHERE family_id=? AND scope_device_id=?", [familyId, deviceId]);
+    await this.db.run("DELETE FROM temp_rules WHERE family_id=? AND scope_device_id=?", [familyId, deviceId]);
+    await this.db.run("DELETE FROM access_requests WHERE family_id=? AND device_id=?", [familyId, deviceId]);
+    await this.db.run("DELETE FROM devices WHERE id=? AND family_id=?", [deviceId, familyId]);
   }
   private mapDevice(r: SqlRow | null): Device | null {
     return r ? {
       id: r.id as string, familyId: r.family_id as string, childId: r.child_id as string, platform: r.platform as Platform,
       displayName: r.display_name as string, devicePublicKey: r.device_public_key as string,
       enrolledAt: r.enrolled_at as string, lastSyncedVersion: Number(r.last_synced_version),
+      lastSeenAt: (r.last_seen_at as string | null) ?? undefined,
     } : null;
   }
 
@@ -195,22 +259,40 @@ export class SqlStore implements Repository {
   }
 
   // temporary rules
-  async createTemporaryRule(t: TemporaryRule) {
+  async createTemporaryRule(t: TemporaryGrant) {
     await this.db.run(
-      `INSERT INTO temp_rules(id,family_id,target,value,action,scope_type,scope_child_id,scope_device_id,priority,created_at,created_by,starts_at,expires_at,request_id,approved_by,grant_kind)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO temp_rules(id,family_id,target,value,action,scope_type,scope_child_id,scope_device_id,priority,created_at,created_by,starts_at,expires_at,request_id,approved_by,grant_kind,consumed_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [t.id, t.scope.familyId, t.target, t.value, t.action, t.scope.type, s(t.scope.childId), s(t.scope.deviceId),
-       t.priority ?? null, t.createdAt, t.createdBy, t.startsAt, t.expiresAt, t.requestId, t.approvedBy, t.grantKind]);
+       t.priority ?? null, t.createdAt, t.createdBy, t.startsAt, t.expiresAt, t.requestId, t.approvedBy,
+       t.grantKind, s(t.consumedAt)]);
     return t;
   }
+  async getTemporaryRule(id: string) {
+    const r = await this.db.get("SELECT * FROM temp_rules WHERE id=?", [id]);
+    return r ? this.mapTemp(r) : null;
+  }
   async listTemporaryRules(familyId: string) {
-    return (await this.db.all("SELECT * FROM temp_rules WHERE family_id=?", [familyId])).map((r): TemporaryRule => ({
+    return (await this.db.all("SELECT * FROM temp_rules WHERE family_id=?", [familyId])).map((r) => this.mapTemp(r));
+  }
+  /** Single-use consumption: the UPDATE itself is the guard, so two devices
+   *  racing on the same grant cannot both spend it. */
+  async markTemporaryRuleConsumed(id: string, at: string) {
+    const before = await this.getTemporaryRule(id);
+    if (!before || before.consumedAt) return false;
+    await this.db.run("UPDATE temp_rules SET consumed_at=? WHERE id=? AND consumed_at IS NULL", [at, id]);
+    const after = await this.getTemporaryRule(id);
+    return after?.consumedAt === at;
+  }
+  private mapTemp(r: SqlRow): TemporaryGrant {
+    return {
       id: r.id as string, target: r.target as PolicyTargetType, value: r.value as string, action: r.action as RuleAction,
       scope: scopeOf(r), priority: r.priority == null ? undefined : Number(r.priority),
       createdAt: r.created_at as string, createdBy: r.created_by as string,
       startsAt: r.starts_at as string, expiresAt: r.expires_at as string, requestId: r.request_id as string,
       approvedBy: r.approved_by as string, grantKind: r.grant_kind as TemporaryRule["grantKind"],
-    }));
+      consumedAt: (r.consumed_at as string | null) ?? undefined,
+    };
   }
 
   // policy versions
@@ -236,7 +318,10 @@ export class SqlStore implements Repository {
   }
   async getAccessRequest(id: string) { return this.mapRequest(await this.db.get("SELECT * FROM access_requests WHERE id=?", [id])); }
   async updateAccessRequest(r: AccessRequest) {
-    await this.db.run("UPDATE access_requests SET status=? WHERE id=?", [r.status, r.id]);
+    // title/url/reason are updatable too: a deduped re-file can carry richer
+    // context than the first bare request did (see ApprovalService.createRequest).
+    await this.db.run("UPDATE access_requests SET status=?, title=?, url=?, reason=? WHERE id=?",
+      [r.status, s(r.title), s(r.url), s(r.reason), r.id]);
     return r;
   }
   async listAccessRequests(familyId: string, status?: string) {

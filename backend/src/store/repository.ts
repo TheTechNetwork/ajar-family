@@ -15,10 +15,11 @@ import type {
   AuditEvent,
   NotificationEndpoint,
   PolicyRule,
-  TemporaryRule,
   DefaultPolicy,
   Session,
   CategoryDomain,
+  PasswordResetToken,
+  TemporaryGrant,
 } from "../domain/model.js";
 
 export interface Repository {
@@ -33,6 +34,13 @@ export interface Repository {
   getSession(id: string): Promise<Session | null>;
   updateSession(s: Session): Promise<Session>;
   listSessionsForUser(userId: string): Promise<Session[]>;
+
+  // password reset (single-use, 30-min, hashed at rest — see AuthService)
+  createPasswordResetToken(t: PasswordResetToken): Promise<PasswordResetToken>;
+  getPasswordResetTokenByHash(tokenHash: string): Promise<PasswordResetToken | null>;
+  updatePasswordResetToken(t: PasswordResetToken): Promise<PasswordResetToken>;
+  /** Burn every outstanding token for a user (new request supersedes; reset used). */
+  invalidatePasswordResetTokensForUser(userId: string, at: string): Promise<void>;
 
   // families & membership
   createFamily(f: Family): Promise<Family>;
@@ -50,6 +58,13 @@ export interface Repository {
   getDevice(id: string): Promise<Device | null>;
   updateDevice(d: Device): Promise<Device>;
   listDevices(familyId: string): Promise<Device[]>;
+  listDevicesForChild(childId: string): Promise<Device[]>;
+
+  /** Erasure. Both cascade: a deleted child takes its devices, rules, temporary
+   *  grants, requests and default policy with it; a deleted device takes its
+   *  device-scoped rules, grants and requests. Nothing is left dangling. */
+  deleteChildCascade(familyId: string, childId: string): Promise<void>;
+  deleteDeviceCascade(familyId: string, deviceId: string): Promise<void>;
 
   // enrollment
   createEnrollmentToken(t: EnrollmentToken): Promise<EnrollmentToken>;
@@ -63,9 +78,14 @@ export interface Repository {
   deleteRule(familyId: string, ruleId: string): Promise<void>;
   listRules(familyId: string): Promise<PolicyRule[]>;
 
-  // temporary rules (approvals)
-  createTemporaryRule(t: TemporaryRule): Promise<TemporaryRule>;
-  listTemporaryRules(familyId: string): Promise<TemporaryRule[]>;
+  // temporary rules (approvals). Stored as TemporaryGrant so the backend can
+  // track single-use consumption without changing the shared wire contract.
+  createTemporaryRule(t: TemporaryGrant): Promise<TemporaryGrant>;
+  getTemporaryRule(id: string): Promise<TemporaryGrant | null>;
+  listTemporaryRules(familyId: string): Promise<TemporaryGrant[]>;
+  /** Mark a grant spent. Returns false if it was already consumed (idempotent
+   *  callers get a definitive "someone beat you to it"). */
+  markTemporaryRuleConsumed(id: string, at: string): Promise<boolean>;
 
   // policy version per (child, device)
   bumpPolicyVersion(familyId: string, childId: string): Promise<number>;

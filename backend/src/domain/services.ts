@@ -12,11 +12,13 @@ import type { CategoryFilterSet } from "@ajar/shared/categories";
 import type {
   User, Session, Family, FamilyMembership, Child, Device, EnrollmentToken,
   AccessRequest, ApprovalDecision, Role, Platform, ApprovalScope, ApprovalDuration,
-  PolicyRule, TemporaryRule, DefaultPolicy, PolicyTargetType, RuleScope,
+  PolicyRule, TemporaryRule, TemporaryGrant, DefaultPolicy, PolicyTargetType, RuleScope,
+  NotificationEndpoint, PasswordResetToken,
 } from "./model.js";
 import type { DevicePolicySnapshot } from "@ajar/shared/policy";
 import type { CategoryProvider } from "../categories/provider.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
+import { endOfLocalDayIso, isValidTimeZone, safeTimeZone } from "./time.js";
 
 const now = () => new Date().toISOString();
 const uid = () => randomUUID();
@@ -32,6 +34,24 @@ function enrollmentCode(len = 8): string {
   return out;
 }
 
+/** base64url(SHA-256(x)) — used to store password-reset tokens hashed at rest. */
+async function sha256b64url(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Buffer.from(new Uint8Array(digest)).toString("base64")
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** 32 CSPRNG bytes, base64url — ~256 bits, not guessable, safe in a URL. */
+function secretToken(bytes = 32): string {
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(bytes))).toString("base64")
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** Cheap structural check — we never claim to validate deliverability. */
+export function looksLikeEmail(email: unknown): email is string {
+  return typeof email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
+}
+
 export class DomainError extends Error {
   constructor(message: string, public code = "BAD_REQUEST") { super(message); }
 }
@@ -40,17 +60,91 @@ export class DomainError extends Error {
 // Auth — self-contained password credentials, no external identity provider.
 // ---------------------------------------------------------------------------
 
+/** How long a password-reset token is usable. Short: it is emailed in clear. */
+export const RESET_TTL_MINUTES = 30;
+
 export class AuthService {
-  constructor(private repo: Repository) {}
+  constructor(private repo: Repository, private notifier?: Notifier) {}
 
   /** Register a parent with a password. Fails if the email is already taken. */
   async register(email: string, password: string, displayName: string): Promise<User> {
     if (!email || !displayName) throw new DomainError("email and displayName required");
+    if (!looksLikeEmail(email)) throw new DomainError("a valid email address is required");
     // Generic message (don't confirm which specific field is taken). Full
     // non-enumeration would require an email-verification flow — see SECURITY.md.
     if (await this.repo.getUserByEmail(email)) throw new DomainError("could not create an account with those details", "CONFLICT");
     const passwordHash = await hashPassword(password); // throws on too-short
-    return this.repo.createUser({ id: uid(), email, displayName, passwordHash, tokenVersion: 0, createdAt: now() });
+    const user = await this.repo.createUser({ id: uid(), email, displayName, passwordHash, tokenVersion: 0, createdAt: now() });
+    // Register the parent's email as a notification endpoint IMMEDIATELY. Before
+    // this, a family could run for weeks with zero endpoints, so every "your
+    // child asked for something" notification was fanned out to nobody at all.
+    await this.registerEmailEndpoint(user);
+    return user;
+  }
+
+  /** Idempotently ensure this user has an EMAIL endpoint for their address. */
+  async registerEmailEndpoint(user: User): Promise<NotificationEndpoint | null> {
+    if (!looksLikeEmail(user.email)) return null;
+    const existing = await this.repo.listNotificationEndpoints(user.id);
+    const already = existing.find((e) => e.kind === "EMAIL" && e.token === user.email);
+    if (already) return already;
+    return this.repo.addNotificationEndpoint({
+      id: uid(), userId: user.id, kind: "EMAIL", token: user.email, createdAt: now(),
+    });
+  }
+
+  // --- password reset ------------------------------------------------------
+
+  /**
+   * Start a reset. ALWAYS resolves — the caller returns 202 whether or not the
+   * address is known, so this endpoint cannot be used to enumerate accounts.
+   * The raw token is generated here, emailed, and never stored: only its SHA-256
+   * goes to the database, so a dump of `password_reset_tokens` is not a set of
+   * account takeovers. Any previously issued token is burned first, so a stolen
+   * old email cannot be replayed after the user asks again.
+   */
+  async requestPasswordReset(email: string, opts: { resetUrlBase?: string } = {}): Promise<void> {
+    const user = looksLikeEmail(email) ? await this.repo.getUserByEmail(email) : null;
+    if (!user) return; // silent by design
+    await this.repo.invalidatePasswordResetTokensForUser(user.id, now());
+    const raw = secretToken();
+    const token: PasswordResetToken = {
+      id: uid(), userId: user.id, tokenHash: await sha256b64url(raw),
+      expiresAt: new Date(Date.now() + RESET_TTL_MINUTES * 60_000).toISOString(),
+      createdAt: now(),
+    };
+    await this.repo.createPasswordResetToken(token);
+    const link = opts.resetUrlBase ? `${opts.resetUrlBase}${opts.resetUrlBase.includes("?") ? "&" : "?"}token=${raw}` : undefined;
+    for (const ep of await this.repo.listNotificationEndpoints(user.id)) {
+      if (ep.kind !== "EMAIL") continue; // a reset link belongs in an inbox, not a push banner
+      await this.notifier?.send(ep, {
+        title: "Reset your Ajar password",
+        body: `Use this code within ${RESET_TTL_MINUTES} minutes to set a new password. `
+          + `If you did not ask for this, ignore this message — nothing has changed.\n\n${raw}`,
+        data: { kind: "password_reset", ...(link ? { actionUrl: link } : {}) },
+      });
+    }
+  }
+
+  /**
+   * Finish a reset. Single-use, TTL-bounded, and it bumps `tokenVersion` and
+   * revokes every session — so if the reset was triggered because the account
+   * was compromised, the attacker's tokens die at the same instant.
+   */
+  async resetPassword(rawToken: string, newPassword: string): Promise<User> {
+    const invalid = () => new DomainError("this reset link is invalid or has expired", "UNAUTHORIZED");
+    if (typeof rawToken !== "string" || rawToken.length < 16) throw invalid();
+    const rec = await this.repo.getPasswordResetTokenByHash(await sha256b64url(rawToken));
+    if (!rec || rec.usedAt || Date.parse(rec.expiresAt) <= Date.now()) throw invalid();
+    const user = await this.repo.getUser(rec.userId);
+    if (!user) throw invalid();
+    const passwordHash = await hashPassword(newPassword); // throws on too-short, BEFORE burning the token
+    await this.repo.updatePasswordResetToken({ ...rec, usedAt: now() });
+    await this.repo.invalidatePasswordResetTokensForUser(user.id, now());
+    for (const sess of await this.repo.listSessionsForUser(user.id)) {
+      if (!sess.revokedAt) await this.repo.updateSession({ ...sess, revokedAt: now() });
+    }
+    return this.repo.updateUser({ ...user, passwordHash, tokenVersion: user.tokenVersion + 1 });
   }
 
   /** Verify email + password. One generic error either way (no user enumeration). */
@@ -179,9 +273,11 @@ export class FamilyService {
     return m;
   }
 
-  async addChild(familyId: string, actingUserId: string, displayName: string): Promise<Child> {
+  async addChild(familyId: string, actingUserId: string, displayName: string, timezone = "UTC"): Promise<Child> {
     await this.requireRole(familyId, actingUserId, canManagePolicy, "add child");
-    const child = await this.repo.createChild({ id: uid(), familyId, displayName, createdAt: now() });
+    const child = await this.repo.createChild({
+      id: uid(), familyId, displayName, timezone: safeTimeZone(timezone), createdAt: now(),
+    });
     // Default posture: default-deny YouTube, default-allow the rest of the web.
     await this.repo.setDefaultPolicy(familyId, child.id, { webDefault: "ALLOW", youTubeDefault: "BLOCK" });
     await this.repo.bumpPolicyVersion(familyId, child.id);

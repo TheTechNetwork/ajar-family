@@ -57,6 +57,13 @@ export interface Child {
   id: string;
   familyId: string;
   displayName: string;
+  /**
+   * IANA time zone (e.g. "America/Los_Angeles"). Authoritative for anything a
+   * parent thinks of in LOCAL time — above all "until the end of the day", which
+   * before this field expired at UTC midnight (5pm in California, i.e. the grant
+   * died mid-afternoon). Defaults to "UTC"; validated against Intl on write.
+   */
+  timezone: string;
   createdAt: string;
 }
 
@@ -69,7 +76,11 @@ export interface Device {
   /** Public key (base64, raw Ed25519) the device generated at enrollment. */
   devicePublicKey: string;
   enrolledAt: string;
+  /** Policy version this device last actually pulled (heartbeat, not enrollment). */
   lastSyncedVersion: number;
+  /** Last time the device contacted the backend at all. Absent = never since
+   *  enrollment. This is how a parent can tell whether protection is running. */
+  lastSeenAt?: string;
 }
 
 /** Short-lived, single-use enrollment token binding a device to a family+child. */
@@ -154,14 +165,32 @@ export interface AuditEvent {
   createdAt: string;
 }
 
-export type PushKind = "APNS" | "WEBSOCKET" | "CONSOLE";
+export type PushKind = "APNS" | "WEBSOCKET" | "CONSOLE" | "EMAIL" | "WEBPUSH";
 
 export interface NotificationEndpoint {
   id: string;
   userId: string;
   kind: PushKind;
-  token: string; // APNs device token, ws connection id, etc.
+  /** APNs device token, Web Push subscription JSON, ws connection id, or — for
+   *  EMAIL — the destination address. */
+  token: string;
   createdAt: string;
+}
+
+/**
+ * A single-use password-reset grant. Only the SHA-256 of the token is stored, so
+ * a database leak does not hand out account takeovers; the raw token exists only
+ * in the email we send. 30-minute TTL, consumed on first use, and redeeming it
+ * bumps the user's tokenVersion so every outstanding session dies.
+ */
+export interface PasswordResetToken {
+  id: string;
+  userId: string;
+  /** base64url(SHA-256(rawToken)) — never the raw token. */
+  tokenHash: string;
+  expiresAt: string;
+  createdAt: string;
+  usedAt?: string;
 }
 
 /**
@@ -181,4 +210,18 @@ export interface DevicePolicyVersion {
   deviceId: string;
   version: number;
   updatedAt: string;
+}
+
+/**
+ * A TemporaryRule as the BACKEND stores it. `consumedAt` is server-side state
+ * that never travels to the device: it is how a "just once" grant is actually
+ * spent (see ApprovalService/`POST /v1/devices/{id}/grants/{ruleId}/consume`).
+ * The shared `TemporaryRule` — the wire/enforcement contract every platform
+ * adapter implements — deliberately stays unchanged, and snapshots ship the
+ * shared shape with consumed grants dropped rather than flagged.
+ */
+export interface TemporaryGrant extends TemporaryRule {
+  /** ISO-8601 when the device reported the grant used. Consumed grants are
+   *  excluded from every snapshot from that moment on. */
+  consumedAt?: string;
 }
