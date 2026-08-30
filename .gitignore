@@ -29,3 +29,6 @@ xcuserdata/
 # Go build artifacts
 *.exe
 windows/agent/ajar-agent.exe
+
+# workerd/miniflare local state written by the workerd live test
+.wrangler/

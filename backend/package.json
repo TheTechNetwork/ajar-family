@@ -12,7 +12,8 @@
     "bundle": "esbuild src/index.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/backend.cjs",
     "sea:blob": "node --experimental-sea-config sea-config.json",
     "sea": "npm run bundle && node scripts/build-sea.mjs",
-    "openapi": "npm run build && node scripts/gen-openapi.mjs"
+    "openapi": "npm run build && node scripts/gen-openapi.mjs",
+    "test:workerd": "npm run build && node --test 'test/**/*.test.mjs'"
   },
   "dependencies": {
     "@ajar/shared": "*"
@@ -20,6 +21,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "esbuild": "^0.24.2",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "wrangler": "4.127.1"
   }
 }

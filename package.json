@@ -10,7 +10,8 @@
   "scripts": {
     "build": "npm run build --workspace shared && npm run build --workspace backend",
     "test": "npm run test --workspace shared && npm run test --workspace backend",
-    "conformance": "npm run build --workspace shared && node tools/conformance/run-mirrors.mjs"
+    "conformance": "npm run build --workspace shared && node tools/conformance/run-mirrors.mjs",
+    "test:workerd": "npm run test:workerd --workspace @ajar/backend"
   },
   "engines": {
     "node": ">=22"

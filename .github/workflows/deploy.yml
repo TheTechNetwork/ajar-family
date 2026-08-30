@@ -61,6 +61,16 @@ jobs:
         working-directory: backend
         run: npx wrangler deploy --dry-run --outdir /tmp/worker-build
 
+      # The Worker RUNNING in workerd, with a real local D1 — not just parsing.
+      # Everything else runs in Node, where the store is node:sqlite, the crypto
+      # is Node's and there is no CPU budget; the deployment shares none of that.
+      # This drives the real product flow (register, enrol, ask, approve, re-sync)
+      # against the runtime it ships to, which is the only place the D1 adapter,
+      # 210k-iteration PBKDF2 and workerd's Ed25519 are exercised at all.
+      - name: Run the Worker in workerd and drive it
+        working-directory: backend
+        run: npm run test:workerd
+
   deploy:
     needs: check
     if: >-
