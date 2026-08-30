@@ -141,6 +141,29 @@ const DURATIONS = [
 ];
 const DEFAULT_DURATION_I = 1; // 30 min — the narrowest-useful default (§3)
 const SCOPES = ["THIS_VIDEO", "THIS_CHANNEL", "THIS_URL", "THIS_DOMAIN", "THIS_DEVICE", "THIS_CHILD", "WHOLE_FAMILY", "THIS_REQUEST"];
+
+/**
+ * The narrowest-useful grant for what the child actually asked for (§3).
+ *
+ * This MUST be derived from the request, not hardcoded: a THIS_VIDEO grant
+ * becomes a YOUTUBE_VIDEO rule whose value is matched against a canonical video
+ * id, so applying it to a DOMAIN/CATEGORY/URL request produces a rule that can
+ * never match — the parent is told "unlocked" and the child stays blocked.
+ *
+ * Note CATEGORY: a child blocked by "all social media" is granted THIS site,
+ * never the whole category. Say yes to the thing asked for, nothing wider.
+ */
+function defaultScopeFor(targetType) {
+  switch (targetType) {
+    case "YOUTUBE_VIDEO": return "THIS_VIDEO";
+    case "YOUTUBE_CHANNEL": return "THIS_CHANNEL";
+    case "URL":
+    case "URL_PATTERN": return "THIS_URL";
+    case "DOMAIN":
+    case "CATEGORY": return "THIS_DOMAIN";
+    default: return "THIS_CHILD"; // YOUTUBE_PLAYLIST, APPLICATION: grant exactly the target
+  }
+}
 // Human noun for the primary button, per request target type.
 const TARGET_NOUN = {
   YOUTUBE_VIDEO: "this video", YOUTUBE_CHANNEL: "this channel", YOUTUBE_PLAYLIST: "this playlist",
@@ -193,7 +216,7 @@ function renderRequest(r) {
     </div>
     <div class="change hide" id="change-${r.id}">
       <label>Open</label>
-      <select id="scope-${r.id}">${SCOPES.map((s) => `<option${s === "THIS_VIDEO" ? " selected" : ""}>${s}</option>`).join("")}</select>
+      <select id="scope-${r.id}">${SCOPES.map((s) => `<option${s === defaultScopeFor(r.targetType) ? " selected" : ""}>${s}</option>`).join("")}</select>
       <label>For how long</label>
       <div class="grid">
         ${DURATIONS.map((x, i) => `<button class="secondary" data-approve="${r.id}" data-di="${i}">${escapeHtml(x.label)}</button>`).join("")}
@@ -208,7 +231,7 @@ function renderRequest(r) {
 function wireRequest(r) {
   // Primary: narrowest-useful default (THIS_VIDEO / 30 min), one tap (§3).
   const yes = document.querySelector(`[data-yes="${r.id}"]`);
-  if (yes) yes.onclick = () => decide(r.id, "ALLOW", "THIS_VIDEO", DURATIONS[DEFAULT_DURATION_I].d);
+  if (yes) yes.onclick = () => decide(r.id, "ALLOW", defaultScopeFor(r.targetType), DURATIONS[DEFAULT_DURATION_I].d);
   const notnow = document.querySelector(`[data-notnow="${r.id}"]`);
   if (notnow) notnow.onclick = () => decide(r.id, "BLOCK", "THIS_REQUEST", { kind: "ONCE" });
   const change = document.querySelector(`[data-change="${r.id}"]`);

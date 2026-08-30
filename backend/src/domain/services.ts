@@ -371,13 +371,63 @@ function durationToExpiry(d: ApprovalDuration, from = Date.now()): { expiresAt?:
   }
 }
 
+/**
+ * The narrowest-useful approval scope for what the child actually asked for.
+ *
+ * This MUST be derived from the request. A THIS_VIDEO grant becomes a
+ * YOUTUBE_VIDEO rule whose value is matched against a canonical video id, so
+ * applying it to a DOMAIN/CATEGORY/URL request mints a rule that can never
+ * match: the parent is told "unlocked" and the child stays blocked.
+ *
+ * Note CATEGORY: a child blocked by "all social media" is granted THIS site,
+ * never the whole category — say yes to the thing asked for, nothing wider.
+ */
+export function defaultScopeFor(targetType: PolicyTargetType): ApprovalScope {
+  switch (targetType) {
+    case "YOUTUBE_VIDEO": return "THIS_VIDEO";
+    case "YOUTUBE_CHANNEL": return "THIS_CHANNEL";
+    case "URL":
+    case "URL_PATTERN": return "THIS_URL";
+    case "DOMAIN":
+    case "CATEGORY": return "THIS_DOMAIN";
+    default: return "THIS_CHILD"; // YOUTUBE_PLAYLIST, APPLICATION: grant exactly the target
+  }
+}
+
+/**
+ * Scopes that can produce a rule that ACTUALLY MATCHES this request. Offering a
+ * scope outside this set is how "approved" silently fails to unblock: e.g.
+ * THIS_CHANNEL on a video request would build YOUTUBE_CHANNEL:<video id>, and a
+ * channel rule is never compared against a video id.
+ */
+export function applicableScopes(req: AccessRequest): ApprovalScope[] {
+  const out: ApprovalScope[] = [];
+  if (req.targetType === "YOUTUBE_VIDEO") out.push("THIS_VIDEO");
+  if (req.targetType === "YOUTUBE_CHANNEL") out.push("THIS_CHANNEL");
+  if (req.url) out.push("THIS_URL");
+  if (hostOf(req)) out.push("THIS_DOMAIN");
+  // These re-use the request's own target verbatim, so they always match.
+  out.push("THIS_REQUEST", "THIS_DEVICE", "THIS_CHILD", "WHOLE_FAMILY");
+  return out;
+}
+
+function hostOf(req: AccessRequest): string {
+  if (req.targetType === "DOMAIN") return req.targetValue;
+  try { return req.url ? new URL(req.url).hostname.replace(/^www\./, "") : ""; } catch { return ""; }
+}
+
 /** Map an approval scope + the request onto a concrete (target, rule scope). */
 export function mapScope(req: AccessRequest, scope: ApprovalScope):
   { targetType: PolicyTargetType; targetValue: string; ruleScope: Omit<RuleScope, "type"> & { type: RuleScope["type"] } } {
+  if (!applicableScopes(req).includes(scope)) {
+    // Fail loudly instead of creating a rule the evaluator can never match.
+    throw new DomainError(
+      `approval scope ${scope} does not apply to a ${req.targetType} request`, "BAD_REQUEST");
+  }
   const familyScope = { type: "FAMILY" as const, familyId: req.familyId };
   const childScope = { type: "CHILD" as const, familyId: req.familyId, childId: req.childId };
   const deviceScope = { type: "DEVICE" as const, familyId: req.familyId, childId: req.childId, deviceId: req.deviceId };
-  const host = (() => { try { return req.url ? new URL(req.url).hostname.replace(/^www\./, "") : ""; } catch { return ""; } })();
+  const host = hostOf(req);
 
   switch (scope) {
     case "THIS_URL":

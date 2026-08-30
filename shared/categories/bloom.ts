@@ -2,7 +2,7 @@
  * Compact on-device category membership — the answer to "we can't ship millions
  * of domains and we can't call the backend per URL."
  *
- * A Bloom filter stores a set of domains in a few bits each (≈1.2 MB per million
+ * A Bloom filter stores a set of domains in a few bits each (≈1.7 MB per million
  * at a 0.1% false-positive rate) and answers "is this domain in category X?" in
  * O(k) with NO network. The backend compiles one filter per category from the
  * datastore; the device downloads the versioned filter SET once, caches it, and

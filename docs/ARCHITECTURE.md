@@ -122,7 +122,7 @@ probabilistic filter**:
 
 - The backend **compiles one Bloom filter per category** from the datastore
   (`CategoryProvider.compileFilters`, `shared/categories/bloom.ts`): a few bits
-  per domain — ~1.2 MB per million at a 0.1% false-positive rate.
+  per domain — ~1.7 MB per million at a 0.1% false-positive rate (~1.1 MB at 1%).
 - It serves them as a **signed, versioned asset**, `GET /v1/categories/filters`
   (Ed25519 over the canonical set, same key as snapshots; `?since=N` no-ops when
   unchanged). The device **downloads it once, verifies it, caches it**, and
@@ -179,10 +179,27 @@ is resolved depends on the enforcement point:**
   window. DoH exposes the hostname to the DoH provider (the browser is about to
   resolve it anyway) — the endpoint is configurable and can be disabled.
 
-All of the above is wired: the shared engine, both extension mirrors, and the
-Swift evaluator fold `resolvedHosts`, and the backend/console, the Apple network
-filter, and the Chromium extension each resolve the chain with the facility their
-platform provides.
+**Honest status — what each platform actually enforces today.** The shared engine
+is general, but the adapters are not uniformly wired to it. Verified by reading
+the code, not the commit messages:
+
+| Capability | Backend/console | Windows ext | macOS Safari ext | Apple network filter |
+|---|---|---|---|---|
+| URL / YOUTUBE_* rules | ✅ | ✅ | ✅ | ✅ |
+| DOMAIN rules | ✅ | ✅ | ⚠️ **unreachable** | ✅ |
+| CATEGORY rules | ✅ | ✅ | ⚠️ **unreachable** | ❌ `PolicyStore.swift` returns `nil` |
+| Bloom filter querying | ✅ (builds) | ✅ | ⚠️ **unreachable** | ❌ no Swift querier |
+| CNAME chain folding | ✅ | ✅ | ⚠️ **unreachable**, no resolver | ⚠️ one canonical name, not the chain |
+
+⚠️ **macOS Safari extension**: `decide()` returns `{blocked:false}` for every
+non-YouTube URL *before* `evaluate()` runs (ADR-004 scoped the PoC to YouTube), so
+its CATEGORY / Bloom / DOMAIN / CNAME code cannot fire. That code is **currently
+dead** — either the ADR's scope widens (redirecting a specifically-blocked
+navigation is not "blocking Safari") or the code should be removed. Tracked as an
+open decision; until it is resolved, macOS enforces YouTube only.
+
+The Chromium extension, the backend, and the Apple network filter each resolve the
+CNAME chain with the facility their platform provides.
 
 ---
 

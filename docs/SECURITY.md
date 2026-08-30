@@ -31,12 +31,20 @@ living document for an alpha, not a completed audit.
   `AUTH_SECRET` when a durable store is configured (`DATABASE_FILE`) or on
   Workers (`AUTH_SECRET` is a required `wrangler secret`). Dev in-memory still
   allows the default (with a warning); override with `ALLOW_INSECURE_AUTH=1`.
-- **Signed policy.** Device policy snapshots are Ed25519-signed by the backend;
-  every client verifies the signature **fail-closed** before enforcing — on both
-  the backend-fetch path and the native-host message path (Windows + macOS). The
-  **category Bloom-filter asset** (`GET /v1/categories/filters`) is signed the
-  same way (canonical JSON, same key) and verified before use, so a tampered
-  membership set can't widen or narrow enforcement.
+- **Signed policy.** Device policy snapshots are Ed25519-signed by the backend.
+  The **category Bloom-filter asset** (`GET /v1/categories/filters`) is signed the
+  same way (canonical JSON, same key). Verification status is **not uniform** —
+  see the table below; do not assume it.
+
+  | Path | Verifies before enforcing? |
+  |---|---|
+  | Windows extension, backend-fetch (`backend-client.js`) | **Yes**, fail-closed |
+  | macOS Safari extension, backend-fetch + native message | **Yes**, fail-closed |
+  | Windows native-messaging host | **N/A — the host does not exist.** `windows/agent/` only writes registry policy; there is no snapshot/signature code. The extension's native branch is dead in v1 and the shipping path is the dev HTTP mode. |
+  | Apple `PolicyStore.swift` | **No — verify-later TODO.** Any process with App-Group access could plant an allow-all snapshot. Must be closed before any device trial. |
+
+  Cached snapshots restored from `chrome.storage.local` / `browser.storage.local`
+  are **not** re-verified on load — only on fetch. Treated as a known gap.
 - **Authorization.** Every family-scoped mutation checks membership + role
   (`requireRole`/`requireManage`); no IDOR. All SQL is parameterized.
 - **CORS.** Permissive `*` by default (bearer tokens, no cookies — safe); set
