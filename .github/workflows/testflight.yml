@@ -10,9 +10,10 @@ name: iOS — TestFlight (internal)
 #     must be granted to the team by Apple before a distribution build can sign.
 #     Development signing works without it; TestFlight does not. Request it and
 #     wait — this is the long pole, not the pipeline.
-#  2. A REAL BUNDLE ID. The PoC ships com.example.parentfilterpoc. Register the
-#     real ids (app + both extensions) in the developer account and set them as
-#     repository variables; the placeholders will not sign.
+#  2. THE BUNDLE IDS MUST BE REGISTERED. They are hardcoded in project.yml
+#     (family.ajar.child and its two extensions, App Group group.family.ajar.child).
+#     Register all three App IDs plus the App Group in the developer account,
+#     with Family Controls, Network Extensions and App Groups enabled.
 #  3. AN APP STORE CONNECT RECORD for that bundle id, or the upload has nowhere
 #     to land.
 #
@@ -43,8 +44,11 @@ jobs:
     env:
       SCHEME: ParentFilterPoC
       PROJECT_DIR: apple/poc-contentfilter
-      # Repository VARIABLES (not secrets — none of these are sensitive).
-      BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+      # The bundle ids are HARDCODED in project.yml, not injected here: they are
+      # permanent, public, and identical for every build, so rewriting generated
+      # files in CI only created a way for a local build and a CI build to sign
+      # as different apps. The team id stays a variable — it is the one value
+      # that legitimately differs between whoever is building.
       TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +57,6 @@ jobs:
       - name: Preflight — the account settings this cannot run without
         run: |
           missing=""
-          [ -n "${BUNDLE_ID:-}" ] || missing="$missing IOS_BUNDLE_ID(var)"
           [ -n "${TEAM_ID:-}" ]   || missing="$missing APPLE_TEAM_ID(var)"
           [ -n "${{ secrets.ASC_KEY_ID }}" ]     || missing="$missing ASC_KEY_ID(secret)"
           [ -n "${{ secrets.ASC_ISSUER_ID }}" ]  || missing="$missing ASC_ISSUER_ID(secret)"
@@ -73,16 +76,6 @@ jobs:
       - name: Generate the Xcode project
         working-directory: ${{ env.PROJECT_DIR }}
         run: xcodegen generate
-
-      # Point the PoC at the real identifiers. The placeholders exist so the
-      # project builds for anyone without an account; they cannot be distributed.
-      - name: Apply the real bundle identifiers
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          for f in $(grep -rl "com.example.parentfilterpoc" . --include="*.pbxproj" --include="*.plist" --include="*.entitlements"); do
-            sed -i '' "s/com\.example\.parentfilterpoc/${BUNDLE_ID}/g" "$f"
-            echo "rewrote $f"
-          done
 
       # The API key authenticates BOTH the signing-profile creation below and the
       # upload at the end, so it is written once here.

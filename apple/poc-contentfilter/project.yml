@@ -10,7 +10,7 @@
 
 name: ParentFilterPoC
 options:
-  bundleIdPrefix: com.example
+  bundleIdPrefix: family.ajar
   deploymentTarget:
     iOS: "26.0"
   createIntermediateGroups: true
@@ -37,7 +37,7 @@ targets:
       - target: FilterControlProvider
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.parentfilterpoc
+        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.child
         CODE_SIGN_ENTITLEMENTS: App/ParentFilterPoC.entitlements
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
     info:
@@ -61,7 +61,7 @@ targets:
       - path: Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.parentfilterpoc.FilterDataProvider
+        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.child.FilterDataProvider
         CODE_SIGN_ENTITLEMENTS: FilterDataProvider/FilterDataProvider.entitlements
     info:
       path: FilterDataProvider/Info.plist
@@ -80,7 +80,7 @@ targets:
       - path: Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.parentfilterpoc.FilterControlProvider
+        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.child.FilterControlProvider
         CODE_SIGN_ENTITLEMENTS: FilterControlProvider/FilterControlProvider.entitlements
     info:
       path: FilterControlProvider/Info.plist

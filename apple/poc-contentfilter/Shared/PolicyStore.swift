@@ -44,7 +44,7 @@ import Foundation
 /// NOT COMPILED OR RUN.
 public final class PolicyStore {
 
-    public static let defaultAppGroup = "group.com.example.parentfilterpoc"
+    public static let defaultAppGroup = "group.family.ajar.child"
     public static let shared = PolicyStore(appGroup: defaultAppGroup)
 
     /// Pin the backend's Ed25519 signing key (base64 SPKI DER from

@@ -31,7 +31,7 @@ final class FilterDataProvider: NEFilterDataProvider {
     /// Kill switch for the `needRules()` path described above.
     static let askControlProviderForUnknownHosts = true
 
-    private let log = Logger(subsystem: "com.example.parentfilterpoc", category: "data")
+    private let log = Logger(subsystem: "family.ajar.child", category: "data")
     private let store = PolicyStore.shared
     private let cnameCache = CnameChainCache.shared
 

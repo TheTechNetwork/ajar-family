@@ -236,10 +236,13 @@ passwords and Fastlane Match; it both mints signing profiles and uploads).
 | `ASC_ISSUER_ID` | secret | the Issuer UUID |
 | `ASC_KEY_P8` | secret | **the whole `.p8` file contents**, including the `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` lines |
 | `APPLE_TEAM_ID` | **variable** | the 10-char Team ID (§2) |
-| `IOS_BUNDLE_ID` | **variable** | the real child-app bundle id, e.g. `com.<org>.childfilter` (§4) |
 
-The last two are variables, not secrets — a Team ID and a bundle id are public,
-and putting them in secrets only makes CI logs harder to read.
+`APPLE_TEAM_ID` is a variable, not a secret — a Team ID is public, and hiding it
+only makes CI logs harder to read. It is the ONE value that legitimately differs
+between whoever is building, which is why it is the only one injected.
+
+**The bundle ids are not configuration.** They are hardcoded in
+`apple/poc-contentfilter/project.yml` — see §8.4.
 
 **Step 3 — register the bundle id and create the app record.** §4 registers the
 App ID with its entitlements; then create the App Store Connect app record for
@@ -260,10 +263,9 @@ a few minutes before the build appears to internal testers.
    the day you want to upload. Everything else here is minutes of work.
 2. **App Manager role.** A key created with the Developer role archives fine and
    then fails to create a provisioning profile.
-3. **Placeholder bundle ids.** `com.example.parentfilterpoc` cannot be signed for
-   distribution. The workflow rewrites them from `IOS_BUNDLE_ID`, but the id has
-   to be registered first (§4) with Family Controls, Network Extensions and App
-   Groups enabled — and the two extensions need their own ids.
+3. **Unregistered bundle ids.** The ids in §8.4 must exist in the developer
+   account before anything can sign — all three App IDs plus the App Group, with
+   Family Controls, Network Extensions and App Groups enabled.
 4. **Export compliance.** First upload prompts for encryption questions. Ajar uses
    only standard TLS + platform crypto, so the usual answer is the exemption — but
    it blocks the build from reaching testers until answered, and it is easy to
@@ -278,6 +280,33 @@ filter toggle, and whether `NEFilterFlow.url` really carries full YouTube watch
 URLs at runtime — are answered by *installing that build and running the A1–A6
 protocol* in `docs/APPLE_CONTENT_FILTER_POC.md`. Getting to TestFlight is how you
 start that, not how you finish it.
+
+### 8.4 The bundle identifiers (hardcoded, and why)
+
+These live in `apple/poc-contentfilter/project.yml` and the `.entitlements` files,
+not in CI variables:
+
+| Identifier | What |
+|---|---|
+| `family.ajar.child` | the child app (container) |
+| `family.ajar.child.FilterDataProvider` | content-filter data provider extension |
+| `family.ajar.child.FilterControlProvider` | content-filter control provider extension |
+| `group.family.ajar.child` | App Group shared by all three |
+
+Reverse-DNS of `ajar.family`, the domain we own. Register **all four** (the three
+App IDs and the App Group) before the first signed build.
+
+**Why hardcoded rather than a CI variable.** A bundle id is permanent, public, and
+identical for every build — it is not configuration that varies by environment.
+Injecting it meant CI rewrote generated project files with `sed`, which is fragile
+(miss a file type and you get a mismatched id and an opaque signing failure) and
+let a local build and a CI build sign as *different apps*. One value in one file
+that everyone reads is strictly better.
+
+**Changing them is cheap NOW and expensive later.** Once an App Store Connect
+record exists for a bundle id, that id is permanent — you cannot rename it, you
+can only create a new app and lose the TestFlight history. If `family.ajar.*` is
+not what you want, say so before the first upload.
 
 ---
 

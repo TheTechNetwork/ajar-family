@@ -15,7 +15,7 @@
     </array>
     <key>com.apple.security.application-groups</key>
     <array>
-        <string>group.com.example.parentfilterpoc</string>
+        <string>group.family.ajar.child</string>
     </array>
 </dict>
 </plist>

@@ -15,7 +15,7 @@ final class FilterControlProvider: NEFilterControlProvider {
     /// browsing, so the walk is cut off and whatever was learned is used.
     static let cnameBudget: TimeInterval = 0.4
 
-    private let log = Logger(subsystem: "com.example.parentfilterpoc", category: "control")
+    private let log = Logger(subsystem: "family.ajar.child", category: "control")
     private let store = PolicyStore.shared
     private let cache = CnameChainCache.shared
     private let queue = DispatchQueue(label: "com.ajar.control.cname", qos: .userInitiated)
