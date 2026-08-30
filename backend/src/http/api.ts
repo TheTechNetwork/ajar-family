@@ -130,9 +130,10 @@ export function buildRouter(app: App): Router {
   // call, no domain list in the app. `?since=N` returns { upToDate: true } when
   // the device already has the current version.
   r.get("/v1/categories/filters", async (req) => {
-    await requireDevice(app, req);
+    const dev = await requireDevice(app, req);
     const since = Number(req.query.get("since") ?? "-1");
-    const asset = await app.policy.categoryFilterAsset(Number.isFinite(since) ? since : -1);
+    const asset = await app.policy.categoryFilterAsset(Number.isFinite(since) ? since : -1,
+      { familyId: dev.familyId, childId: dev.childId, deviceId: dev.deviceId });
     return ok(asset);
   });
 

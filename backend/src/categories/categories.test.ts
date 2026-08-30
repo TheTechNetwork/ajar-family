@@ -26,15 +26,15 @@ test("importing a feed replaces the dataset and bumps the version (no code chang
   // A parent/ops swaps in a maintained feed — here a tiny one that reclassifies.
   const v = await app.categories.replace({
     social: ["example-social.test"],
-    news: ["example-news.test"],
+    gaming: ["example-gaming.test"],
   });
   assert.equal(v, before + 1);
   assert.deepEqual(await app.categories.lookup("example-social.test"), ["social"]);
-  assert.deepEqual(await app.categories.lookup("news.example-news.test"), ["news"]);
+  assert.deepEqual(await app.categories.lookup("news.example-gaming.test"), ["gaming"]);
   // The old seed entries are gone — this was a full replacement.
   assert.deepEqual(await app.categories.lookup("tiktok.com"), []);
   const cats = await app.categories.listCategories();
-  assert.deepEqual(cats.map((c) => c.category).sort(), ["news", "social"]);
+  assert.deepEqual(cats.map((c) => c.category).sort(), ["gaming", "social"]);
 });
 
 test("buildSnapshot inlines ONLY the enforced category, from the store, and enforces it", async () => {
@@ -96,4 +96,44 @@ test("CNAME resolver classifies the resolved target, not just the literal host",
   for (const h of ["videos.kidsite.example", ...chain]) for (const c of await app.categories.lookup(h)) cats.add(c);
   assert.deepEqual([...cats], ["social"]);
   assert.ok(chain.includes("tiktok.com"));
+});
+
+test("identity, health, news and religion categories are refused outright", async () => {
+  const app = await App.create(cfg);
+  // Not "off by default" — they cannot be created. Vendors have a measured
+  // history of blocking the Trevor Project and half of sexual-health sites.
+  for (const slug of ["lgbtq", "sexual-health", "abortion", "news", "religion"]) {
+    await assert.rejects(() => app.categories.replace({ [slug]: ["example.test"] }),
+      /refusing category/, `${slug} must be refused`);
+  }
+  // Ordinary categories still work.
+  await app.categories.replace({ social: ["example.test"] });
+});
+
+test("a safety-floor host can never be compiled into a category filter", async () => {
+  const app = await App.create(cfg);
+  await app.categories.replace({ social: ["988lifeline.org", "tiktok.com"] });
+  await assert.rejects(() => app.categories.compileFilters(), /safety-floor/,
+    "a crisis line inside a filter would let a false positive block it");
+});
+
+test("the shipped filter set covers only the categories the device enforces", async () => {
+  const app = await App.create(cfg);
+  const owner = await app.family.createUser("o2@example.com", "O");
+  const fam = await app.family.createFamily("F2", owner.id);
+  const child = await app.family.addChild(fam.id, owner.id, "Kid");
+  const tok = await app.enrollment.createToken(fam.id, owner.id, child.id, "WINDOWS");
+  const device = await app.enrollment.redeem(tok.code, "pk", "Laptop");
+
+  // No CATEGORY rule yet -> nothing to ship.
+  let asset = await app.policy.categoryFilterAsset(-1, { familyId: fam.id, childId: child.id, deviceId: device.id });
+  assert.deepEqual(Object.keys(("set" in asset) ? asset.set.filters : {}), []);
+
+  await app.policy.addRule(fam.id, owner.id, {
+    target: "CATEGORY", value: "social", action: "BLOCK",
+    scope: { type: "CHILD", familyId: fam.id, childId: child.id },
+  });
+  asset = await app.policy.categoryFilterAsset(-1, { familyId: fam.id, childId: child.id, deviceId: device.id });
+  assert.deepEqual(Object.keys(("set" in asset) ? asset.set.filters : {}), ["social"],
+    "one enforced category means one shipped filter, not the whole seed");
 });

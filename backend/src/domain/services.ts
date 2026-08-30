@@ -599,13 +599,32 @@ export class PolicyService {
    * is what lets a client enforce "block all social" over a huge domain set with
    * no per-URL backend call and no multi-megabyte domain list in the app.
    */
-  async categoryFilterAsset(since?: number):
+  async categoryFilterAsset(since?: number, scope?: { familyId: string; childId: string; deviceId: string }):
     Promise<{ upToDate: true } | { set: CategoryFilterSet; signature: string }> {
     const version = await this.categories.version();
     if (since !== undefined && since >= 0 && version <= since) return { upToDate: true };
-    const set = await this.categories.compileFilters();
+
+    // Ship ONLY the categories this device's policy actually enforces. Sending
+    // every category is worse twice over: the download and the resident memory
+    // grow with categories the family never selected (an iOS Network Extension
+    // is jetsam-killed around 50MB), and every extra filter compounds the
+    // false-positive rate — each spurious hit is a real block the child has to
+    // ask their way out of. A family enforcing one category should carry one.
+    const enforced = scope ? await this.enforcedCategories(scope) : undefined;
+    if (enforced && enforced.length === 0) {
+      return { set: { version, filters: {} }, signature: await signCanonical({ version, filters: {} }, this.signingPrivateKeyB64) };
+    }
+    const set = await this.categories.compileFilters(enforced);
     const signature = await signCanonical(set, this.signingPrivateKeyB64);
     return { set, signature };
+  }
+
+  /** Category slugs named by any rule that applies to this child+device. */
+  private async enforcedCategories(scope: { familyId: string; childId: string; deviceId: string }): Promise<string[]> {
+    const applies = (s: RuleScope) => this.appliesToChildDevice(s, scope.childId, scope.deviceId);
+    const rules = (await this.repo.listRules(scope.familyId)).filter((r) => applies(r.scope));
+    const temps = (await this.repo.listTemporaryRules(scope.familyId)).filter((t) => applies(t.scope));
+    return [...new Set([...rules, ...temps].filter((r) => r.target === "CATEGORY").map((r) => r.value))];
   }
 
   private appliesToChildDevice(scope: RuleScope, childId: string, deviceId: string): boolean {

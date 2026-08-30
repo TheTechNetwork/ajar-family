@@ -13,6 +13,32 @@ import type { Repository } from "../store/repository.js";
 import {
   DEFAULT_CATEGORY_DOMAINS, normalizeHost, buildBloom, type CategoryFilterSet,
 } from "@ajar/shared/categories";
+import { isSafetyFloorHost } from "@ajar/shared/safety";
+
+/**
+ * Categories we refuse to classify automatically, ever.
+ *
+ * Filter vendors have a measured, documented history here: at maximum
+ * restrictiveness they block ~50% of sexual-health sites to gain 4 points of
+ * adult coverage (KFF / University of Michigan), and the ACLU documented vendors
+ * shipping a dedicated LGBT category that blocked the Trevor Project while
+ * leaving anti-LGBT sites reachable. For a product used by children, that is not
+ * a tuning error — it is the mechanism by which a kid stops looking for help.
+ *
+ * So these are not "off by default": they cannot exist. Rejected at the dataset
+ * API, absent from the taxonomy, and never offered to a classifier as an output
+ * label. A parent who wants a specific site blocked can still block that site.
+ */
+export const FORBIDDEN_CATEGORY_SLUGS = new Set([
+  "lgbt", "lgbtq", "lgbtqia", "gay", "trans", "transgender", "sexuality",
+  "sexual-health", "sexualhealth", "reproductive-health", "abortion",
+  "news", "politics", "political", "religion", "religious",
+]);
+
+/** Per-navigation spurious-block budget across ALL shipped filters. */
+export const TARGET_AGGREGATE_FP = 0.001;
+/** Host probes per navigation (registrable candidates) — see hostCandidates. */
+const PROBES_PER_HOST = 3;
 
 export interface CategoryProvider {
   /** Categories a single host belongs to (indexed lookup; hot path + console). */
@@ -48,14 +74,45 @@ export class RepositoryCategoryProvider implements CategoryProvider {
 
   async compileFilters(categories?: string[]): Promise<CategoryFilterSet> {
     const map = await this.categoryMap(categories);
+    const names = Object.keys(map);
+
+    // A Bloom false positive is a spurious BLOCK the child has to ask their way
+    // out of, and the risk COMPOUNDS: every shipped category is tested against
+    // every host candidate. At a naive p=0.001 with 12 categories that is ~3.5%
+    // of navigations — one in 28 — which would read to a family as "this thing
+    // blocks random websites". Budget the per-filter rate so the AGGREGATE
+    // per-navigation rate stays at target instead. Costs ~34% more bytes for a
+    // 10x better experience, and shipping fewer categories makes each tighter.
+    const trials = Math.max(1, names.length * PROBES_PER_HOST);
+    const perFilterFp = 1 - Math.pow(1 - TARGET_AGGREGATE_FP, 1 / trials);
+
     const filters: CategoryFilterSet["filters"] = {};
     for (const [category, domains] of Object.entries(map)) {
-      filters[category] = buildBloom(domains.map(normalizeHost));
+      const hosts = domains.map(normalizeHost);
+      // A safety-floor host inside a category filter would let a false positive
+      // block a crisis line — the exact ACLU failure. Refuse to build it.
+      const leaked = hosts.filter(isSafetyFloorHost);
+      if (leaked.length > 0) {
+        throw new Error(
+          `category "${category}" contains safety-floor hosts (${leaked.join(", ")}); ` +
+          "a crisis resource must never be classifiable");
+      }
+      filters[category] = buildBloom(hosts, perFilterFp);
     }
     return { version: await this.version(), filters };
   }
 
-  replace(map: Record<string, string[]>) {
+  async replace(map: Record<string, string[]>) {
+    // async so a refusal surfaces as a rejected promise, matching the
+    // CategoryProvider contract, rather than throwing synchronously past callers
+    // that only await.
+    for (const category of Object.keys(map)) {
+      if (FORBIDDEN_CATEGORY_SLUGS.has(category.toLowerCase().trim())) {
+        throw new Error(
+          `refusing category "${category}": identity, sexual-health, news, politics and ` +
+          "religion are never auto-classified (see FORBIDDEN_CATEGORY_SLUGS)");
+      }
+    }
     const entries = Object.entries(map).flatMap(([category, domains]) =>
       domains.map((domain) => ({ category, domain })));
     return this.repo.replaceCategoryDomains(entries);
