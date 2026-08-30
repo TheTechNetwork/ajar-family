@@ -57,3 +57,9 @@ test("the floor covers CNAME-resolved names too", () => {
   });
   assert.equal(res.action, "ALLOW");
 });
+
+test("a trailing root dot cannot slip past the floor", () => {
+  // A caller that forgets to normalize must not be able to defeat the floor.
+  assert.equal(isSafetyFloorHost("988lifeline.org."), true);
+  assert.equal(isSafetyFloorHost("WWW.ThetrevorProject.ORG."), true);
+});

@@ -101,3 +101,41 @@ test("a scope that could never match is refused, not silently granted", async ()
   assert.ok(!applicableScopes(req).includes("THIS_CHANNEL"));
   assert.throws(() => mapScope(req, "THIS_CHANNEL"), DomainError);
 });
+
+test('"Not now" is a time-boxed no, not a permanent block', async () => {
+  const { app, owner, fam, child, device } = await familyFixture();
+  const url = "https://example.com/a";
+  const req = await app.approvals.createRequest({
+    familyId: fam.id, childId: child.id, deviceId: device.id,
+    targetType: "URL", targetValue: url, url,
+  });
+  // The console's "Not now" button sends exactly this.
+  await app.approvals.decide({
+    familyId: fam.id, requestId: req.id, decidedBy: owner.id, decision: "BLOCK",
+    scope: "THIS_REQUEST", duration: { kind: "ONCE" }, policy: app.policy,
+  });
+  // It must NOT have created a standing rule that outlives the moment.
+  const standing = (await app.repo.listRules(fam.id)).filter((r) => r.action === "BLOCK");
+  assert.equal(standing.length, 0, '"Not now" must not mint a permanent block');
+
+  const snap = await app.policy.buildSnapshot(fam.id, child.id, device.id);
+  const at = (nowMs: number) =>
+    evaluate(snap, { url, childId: child.id, deviceId: device.id, nowMs }).action;
+  assert.equal(at(Date.now()), "BLOCK", "blocked right now");
+  assert.equal(at(Date.now() + 6 * 60_000), "ALLOW", "and it lapses, rather than lasting forever");
+});
+
+test('"for good" is still permanent when the parent actually chooses it', async () => {
+  const { app, owner, fam, child, device } = await familyFixture();
+  const url = "https://example.com/b";
+  const req = await app.approvals.createRequest({
+    familyId: fam.id, childId: child.id, deviceId: device.id,
+    targetType: "URL", targetValue: url, url,
+  });
+  await app.approvals.decide({
+    familyId: fam.id, requestId: req.id, decidedBy: owner.id, decision: "BLOCK",
+    scope: "THIS_REQUEST", duration: { kind: "ALWAYS" }, policy: app.policy,
+  });
+  const standing = (await app.repo.listRules(fam.id)).filter((r) => r.action === "BLOCK");
+  assert.equal(standing.length, 1);
+});

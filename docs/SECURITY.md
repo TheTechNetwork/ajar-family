@@ -56,6 +56,63 @@ living document for an alpha, not a completed audit.
   is now **disabled unless `CATEGORY_ADMIN_TOKEN` is set**, then requires that
   token in `x-admin-token`. Previously any registered user could wipe or poison
   category enforcement for every family on the instance.
+- **Password reset (self-service, no enumeration).** `POST /v1/auth/forgot`
+  always answers **202** with an identical body whether or not the address is
+  known, so it cannot be used to test which emails have accounts.
+  `POST /v1/auth/reset` consumes a **256-bit CSPRNG token**, stored only as
+  `base64url(SHA-256(token))` — a dump of `password_reset_tokens` is not a set of
+  account takeovers — with a **30-minute TTL**, **single use**, superseded by any
+  newer request, and redemption **bumps `tokenVersion` and revokes every
+  session**, so a reset prompted by a compromise locks the attacker out at the
+  same instant. Both routes sit behind the existing `authLimiter` (10/min per
+  client), so the flow cannot be used to flood an inbox. The new password is
+  validated *before* the token is burned, so a rejected password does not cost
+  the parent their reset link.
+- **Notifications actually reach a person.** The alpha's only wired Notifier
+  wrote to the server's stdout. `EmailNotifier` + a `MailSender` now deliver
+  parent notifications and reset codes by POSTing a small JSON envelope to a
+  configurable provider endpoint (`MAIL_ENDPOINT` + `MAIL_TOKEN`, bearer auth) —
+  no SMTP client, no dependency, works on Node and Workers. Registration
+  automatically creates the parent's `EMAIL` notification endpoint, so a family
+  is never silently running with zero endpoints. Message bodies are deliberately
+  terse (a notification about a blocked page discloses what a child tried to
+  reach, and inboxes are often read on shared screens).
+- **"Just once" is single use.** A `grantKind: "ONCE"` approval was an ordinary
+  5-minute temporary rule with unlimited replays inside the window — the
+  narrowest option a parent could pick was materially wider than advertised. The
+  device now reports consumption
+  (`POST /v1/devices/{deviceId}/grants/{ruleId}/consume`); the grant is marked
+  spent server-side, the policy version bumps, and it is absent from every later
+  snapshot. Consumption state never travels to devices, so the signed wire shape
+  is unchanged.
+- **Local-time approvals.** `UNTIL_END_OF_DAY` expired at **UTC** midnight, i.e.
+  5pm in California (the child was cut off after school on a grant the parent
+  thought lasted until bedtime) and 9am the following morning in UTC+10 (most of
+  an extra day). `Child.timezone` (IANA, validated against `Intl` on write,
+  default `UTC`) now drives a DST-aware local end-of-day.
+- **Device heartbeat + token refresh.** Every policy fetch records `lastSeenAt`
+  and the version the device actually pulled;
+  `GET /v1/families/{id}/devices` reports both plus a `stale` flag, so a parent
+  can see that protection stopped running rather than assume it is fine. Device
+  tokens (30 days) can be renewed at
+  `POST /v1/devices/{deviceId}/token/refresh` — previously they simply expired
+  and the device went silent with no recovery short of re-enrollment.
+- **Erasure.** `DELETE` a child or a device cascades their rules, temporary
+  grants, access requests, default policy, and any `LIMITED_GUARDIAN`
+  assignment naming them. A device token is now checked against a live device
+  row on every request, so a removed device's long-lived token stops working
+  immediately instead of surviving until expiry.
+- **Request dedupe.** An identical still-`PENDING` request from the same
+  (child, device, target) is returned rather than re-created, so a reloading
+  blocked page can no longer mint dozens of rows and dozens of notifications for
+  one ask.
+- **Co-parent invites are validated.** `POST /v1/families/{id}/parents` took a
+  raw `userId` on trust and happily created a membership pointing at nobody —
+  which appeared in the family and counted as an approver while belonging to an
+  account nobody could sign into. It now accepts `email` (preferred) or `userId`,
+  requires a real account, rejects duplicates, validates every
+  `assignedChildIds` entry against the family, and refuses assignment lists on
+  roles that do not honour them.
 - **Authorization.** Every family-scoped mutation checks membership + role
   (`requireRole`/`requireManage`); no IDOR. All SQL is parameterized.
 - **CORS.** Permissive `*` by default (bearer tokens, no cookies — safe); set
@@ -64,8 +121,15 @@ living document for an alpha, not a completed audit.
 ## Deferred / known limitations
 
 - **Account-enumeration on register.** Registering an existing email returns a
-  generic 409, but the status still differs from success. Full non-enumeration
-  needs an email-verification flow — deferred.
+  generic 409, but the status still differs from success. `/v1/auth/forgot` is
+  now fully non-enumerating; **register is not**, and closing it needs the
+  email-verification flow below.
+- **No email verification.** An address is never proved to belong to the person
+  who typed it. Consequences: a typo'd address silently receives nothing (the
+  parent is notified of nothing and cannot reset); someone can register with an
+  address they do not control; and registration remains an enumeration oracle.
+  The delivery mechanism this needs now exists — a verify-token flow on top of
+  `MailSender` is the remaining work, and it should land before public launch.
 - **Input validation.** Request bodies are typed but not schema-validated
   (no Zod-style guards yet); malformed input is not uniformly rejected.
 - **Category dataset import is not yet role-restricted.** `PUT /v1/categories/dataset`
@@ -87,8 +151,36 @@ living document for an alpha, not a completed audit.
   and a blocked one are indistinguishable on `*.googlevideo.com`.
 - **MV3 cold start is fail-open.** The request that wakes the service worker is
   decided with no snapshot in memory; only YouTube fails closed.
-- **No device heartbeat.** `lastSyncedVersion` is written once at enrollment, so
-  a device that stops syncing (or is unenrolled) is silent to the parent.
+- **Single-use grants are client-attested.** A device that never reports a
+  `ONCE` grant as consumed keeps it until the 5-minute TTL, so "once" is
+  best-effort against a cooperating client, not a hostile one. Enforcing it
+  against a hostile client would mean holding no usable grant on the device and
+  asking per load, which breaks offline enforcement — the product's core
+  requirement. The TTL is the real bound; treat `ONCE` as "one short window",
+  not as a cryptographic guarantee.
+- **Email delivery is best-effort.** A provider outage is logged and swallowed
+  rather than failing the request that triggered it (a child's access request
+  must not 500 because the mail provider is down), so a notification can be lost
+  silently. There is no delivery receipt, retry queue or bounce handling, and
+  `MAIL_TOKEN` is a long-lived bearer credential for a third party that can see
+  the subject lines. Reset codes travel in plain-text email and are therefore
+  only as strong as the parent's inbox — hence the 30-minute, single-use bound.
+- **Device staleness is a signal, not proof.** `lastSeenAt` tells a parent the
+  device is still talking to the backend. It does not prove the OS-level filter
+  is installed and enforcing — a tampered client can keep polling while
+  enforcing nothing. Client attestation is out of scope for the alpha.
+- **Push transports are documented, not implemented.** APNs and Web Push exist
+  as specified adapters in `backend/src/push/notifier.ts` (auth, endpoints,
+  payloads, error handling) and deliberately throw if wired, rather than
+  reporting success while sending nothing. Email is the only real transport
+  today, so a time-critical approval depends on how fast a parent reads mail.
+- **No outsider invites.** Adding a co-parent requires them to already have an
+  account; there is no emailed acceptance token. This is a deliberate trade —
+  the alternative was minting password-less shell accounts that hold approval
+  rights over a child.
+- **Password-reset tokens are not bound to a device or IP**, and the reset
+  endpoint reveals validity by status code (401 vs 200). That is inherent to a
+  code-in-email flow at this token strength (256 bits, 30 minutes, single use).
 - **Before public launch:** a formal third-party penetration test, secret
   rotation policy, and the input-validation layer.
 

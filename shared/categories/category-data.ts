@@ -51,7 +51,10 @@ export function hostCandidates(host: string): string[] {
   const parts = h.split(".");
   const out: string[] = [];
   for (let i = 0; i < parts.length - 1; i++) out.push(parts.slice(i).join("."));
-  return out; // "m.old.reddit.com" → [m.old.reddit.com, old.reddit.com, reddit.com, com]
+  // NB: the loop stops before the last label, so a bare TLD is never a
+  // candidate ("com" is absent) — a category entry of "com" can therefore never
+  // match, which is the desired safety property. A single-label host yields [].
+  return out; // "m.old.reddit.com" → [m.old.reddit.com, old.reddit.com, reddit.com]
 }
 
 /** Categories whose domain set contains `host` (host already lowercased, no

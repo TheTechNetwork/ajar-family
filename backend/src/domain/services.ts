@@ -891,11 +891,31 @@ export class ApprovalService {
         producedRuleId = t.id;
       }
     } else {
-      // Explicit deny → standing block rule.
-      const rule = await input.policy.addRule(input.familyId, input.decidedBy, {
-        target: targetType, value: targetValue, action: "BLOCK", scope: ruleScope, priority: 10,
-      });
-      producedRuleId = rule.id;
+      // Explicit deny. This USED to always mint a standing rule, so the softest,
+      // easiest-to-mis-tap control in the product ("Not now") silently blocked a
+      // target FOREVER — the restriction ratchet the UX review warned about,
+      // where a tired parent quietly rebuilds the punitive wall this product
+      // exists to replace. Honour the duration: only an explicit "for good"
+      // (ALWAYS) is permanent; everything else is a time-boxed no.
+      const child = await this.repo.getChild(req.childId);
+      const { expiresAt, standing } = durationToExpiry(input.duration, safeTimeZone(child?.timezone));
+      if (standing) {
+        const rule = await input.policy.addRule(input.familyId, input.decidedBy, {
+          target: targetType, value: targetValue, action: "BLOCK", scope: ruleScope, priority: 10,
+        });
+        producedRuleId = rule.id;
+      } else {
+        const t: TemporaryGrant = {
+          id: uid(), target: targetType, value: targetValue, action: "BLOCK", scope: ruleScope,
+          priority: 100, createdAt: now(), createdBy: input.decidedBy,
+          startsAt: now(), expiresAt: expiresAt!, requestId: req.id, approvedBy: input.decidedBy,
+          grantKind: input.duration.kind === "ONCE" ? "ONCE"
+            : input.duration.kind === "UNTIL_END_OF_DAY" ? "UNTIL_END_OF_DAY" : "TIMED",
+        };
+        await this.repo.createTemporaryRule(t);
+        await this.repo.bumpPolicyVersion(input.familyId, req.childId);
+        producedRuleId = t.id;
+      }
     }
 
     req.status = input.decision === "ALLOW" ? "APPROVED" : "DENIED";

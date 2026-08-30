@@ -35,7 +35,11 @@ export const SAFETY_FLOOR_DOMAINS: string[] = [
 
 /** True if `host` (or a parent domain of it) is on the safety floor. */
 export function isSafetyFloorHost(host: string): boolean {
-  const h = (host || "").replace(/^www\./i, "").toLowerCase();
+  // Normalize HERE rather than trusting the caller. evaluate() already passes a
+  // normalized host, but this is a safety floor: a future caller that forgets
+  // would let "988lifeline.org." (a legal, equivalent form) past it, which is
+  // exactly the failure this floor exists to prevent.
+  const h = (host || "").replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
   if (!h) return false;
   return SAFETY_FLOOR_DOMAINS.some((d) => h === d || h.endsWith(`.${d}`));
 }
