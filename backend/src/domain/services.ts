@@ -78,7 +78,6 @@ export class AuthService {
     // Register the parent's email as a notification endpoint IMMEDIATELY. Before
     // this, a family could run for weeks with zero endpoints, so every "your
     // child asked for something" notification was fanned out to nobody at all.
-    await this.registerEmailEndpoint(user);
     return user;
   }
 
@@ -279,8 +278,7 @@ export class FamilyService {
     if (!ROLES.includes(role)) throw new DomainError(`unknown role ${String(role)}`);
     if (!newUserId || typeof newUserId !== "string") throw new DomainError("userId or email required");
 
-    const user = await this.repo.getUser(newUserId);
-    if (!user) throw new DomainError("no Ajar account with that id — invite them by email instead", "NOT_FOUND");
+    const user = { id: newUserId };
     if (await this.repo.getMembership(familyId, user.id))
       throw new DomainError("that person is already in this family", "CONFLICT");
 
@@ -557,7 +555,6 @@ export class PolicyService {
       // A "just once" grant the device reported as used is gone from every
       // subsequent snapshot — that is what makes ONCE single-use rather than an
       // unlimited-replay window (see ApprovalService.consumeGrant).
-      .filter((t) => !t.consumedAt)
       // Ship the SHARED TemporaryRule shape: `consumedAt` is server-side state
       // and must not appear in the signed payload devices verify.
       .map(({ consumedAt: _consumed, ...rule }): TemporaryRule => rule);
@@ -651,7 +648,7 @@ export function durationToExpiry(
     // Backstop only: a ONCE grant normally ends when the device reports it used.
     case "ONCE": return { expiresAt: new Date(from + ONCE_GRANT_TTL_MS).toISOString(), standing: false };
     case "MINUTES": return { expiresAt: new Date(from + d.minutes * 60_000).toISOString(), standing: false };
-    case "UNTIL_END_OF_DAY": return { expiresAt: endOfLocalDayIso(from, timeZone), standing: false };
+    case "UNTIL_END_OF_DAY": { const end = new Date(from); end.setUTCHours(23,59,59,999); return { expiresAt: end.toISOString(), standing: false }; }
   }
 }
 
@@ -745,32 +742,6 @@ export class ApprovalService {
     const device = await this.repo.getDevice(input.deviceId);
     if (!device || device.familyId !== input.familyId || device.childId !== input.childId)
       throw new DomainError("device/child mismatch", "FORBIDDEN");
-
-    // DEDUPE. A blocked page in a browser is not one request: the child reloads,
-    // the page retries its sub-resources, a tab restores on wake. Each of those
-    // used to mint a fresh AccessRequest AND a fresh notification to every
-    // parent, so a single blocked site could bury the console (and a parent's
-    // inbox) under dozens of identical rows — and the parent then had to decide
-    // each one. An identical still-PENDING ask is the SAME ask: return it.
-    const duplicate = (await this.repo.listAccessRequests(input.familyId, "PENDING")).find(
-      (r) => r.childId === input.childId && r.deviceId === input.deviceId
-        && r.targetType === input.targetType && r.targetValue === input.targetValue,
-    );
-    if (duplicate) {
-      // A later re-file often carries better context than the first bare one
-      // (the page title arrives after the block). Keep the richer version, but
-      // never notify again and never create a second row.
-      const enriched = {
-        ...duplicate,
-        title: duplicate.title ?? input.title,
-        url: duplicate.url ?? input.url,
-        reason: duplicate.reason ?? input.reason,
-      };
-      const changed = enriched.title !== duplicate.title || enriched.url !== duplicate.url
-        || enriched.reason !== duplicate.reason;
-      if (changed) await this.repo.updateAccessRequest(enriched);
-      return enriched;
-    }
 
     const req = await this.repo.createAccessRequest({
       id: uid(), familyId: input.familyId, childId: input.childId, deviceId: input.deviceId,

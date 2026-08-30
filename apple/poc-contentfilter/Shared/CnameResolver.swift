@@ -108,14 +108,16 @@ public final class CnameResolver {
 
         let callback: DNSServiceQueryRecordReply = {
             _, _, _, errorCode, _, rrtype, _, rdlen, rdata, _, context in
+            // Nothing is captured from the enclosing scope (required for a
+            // @convention(c) function pointer); the box arrives via `context`.
             guard let context else { return }
-            let box = Unmanaged<QueryBox>.fromOpaque(context).takeUnretainedValue()
-            box.finished = true
+            let q = Unmanaged<QueryBox>.fromOpaque(context).takeUnretainedValue()
+            q.finished = true
             guard errorCode == kDNSServiceErr_NoError,
                   rrtype == UInt16(kDNSServiceType_CNAME),
                   let rdata, rdlen > 0 else { return }
             let buf = UnsafeRawBufferPointer(start: rdata, count: Int(rdlen))
-            box.target = CnameResolver.decodeDNSName([UInt8](buf))
+            q.target = CnameResolver.decodeDNSName([UInt8](buf))
         }
 
         let err = name.withCString { cname -> DNSServiceErrorType in
@@ -145,7 +147,9 @@ public final class CnameResolver {
             if ready <= 0 { break }                                  // timeout or error
             if DNSServiceProcessResult(ref) != kDNSServiceErr_NoError { break }
         }
-        return box.target
+        // The box is referenced only through an opaque pointer, so keep it alive
+        // explicitly until the query is done.
+        return withExtendedLifetime(box) { box.target }
         #endif
     }
 
