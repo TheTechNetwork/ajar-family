@@ -399,6 +399,16 @@ function hostOf(r) {
   if (r.targetType === "DOMAIN") return r.targetValue;
   try { return r.url ? new URL(r.url).hostname.replace(/^www\./, "") : ""; } catch { return ""; }
 }
+/**
+ * The scope the primary "Open …" button will actually send. `defaultScopeFor`
+ * gives the narrowest-useful shape for the target type, but a CATEGORY ask with
+ * no URL has no host, so THIS_DOMAIN would be rejected by the server. Falling
+ * back to THIS_REQUEST keeps one tap working for every request type.
+ */
+function effectiveDefaultScope(r) {
+  const want = defaultScopeFor(r.targetType);
+  return applicableScopes(r).includes(want) ? want : "THIS_REQUEST";
+}
 function scopeLabel(s, childId) {
   return SCOPE_LABEL[s].replace("{child}", state.childName[childId] || "your kid");
 }
@@ -512,8 +522,7 @@ function renderRequest(r) {
   const id = escapeAttr(r.id);
   const ctx = escapeHtml(human);
   const scopes = applicableScopes(r);
-  const def = defaultScopeFor(r.targetType);
-  const preselect = scopes.includes(def) ? def : "THIS_REQUEST";
+  const preselect = effectiveDefaultScope(r);
 
   return `<li class="req" id="req-${id}" aria-labelledby="reqt-${id}">
     <p class="who-asked">${escapeHtml(who)} · ${escapeHtml(ago(r.createdAt))}</p>
@@ -541,12 +550,12 @@ function renderRequest(r) {
           ${DURATIONS.map((x, i) => `<button type="button" data-approve="${id}" data-di="${i}">${escapeHtml(x.label)}<span class="sr-only"> — ${ctx}</span></button>`).join("")}
         </div>
       </fieldset>
-      <fieldset>
+      ${scopes.includes("THIS_DOMAIN") ? `<fieldset>
         <legend>Or keep it closed</legend>
         <div class="grid">
-          <button type="button" class="btn-danger" data-block="${id}">Keep ${escapeHtml(hostOf(r) || noun)} closed for good<span class="sr-only"> — ${ctx}</span></button>
+          <button type="button" class="btn-danger" data-block="${id}">Keep ${escapeHtml(hostOf(r))} closed for good<span class="sr-only"> — ${ctx}</span></button>
         </div>
-      </fieldset>
+      </fieldset>` : ""}
     </div>
   </li>`;
 }
@@ -556,7 +565,7 @@ function wireRequest(r) {
   const q = (sel) => document.querySelector(sel);
   // Primary: narrowest-useful default for what was actually asked for (§3).
   const yes = q(`[data-yes="${cssEscape(id)}"]`);
-  if (yes) yes.onclick = () => decide(r, "ALLOW", defaultScopeFor(r.targetType), DURATIONS[DEFAULT_DURATION_I].d);
+  if (yes) yes.onclick = () => decide(r, "ALLOW", effectiveDefaultScope(r), DURATIONS[DEFAULT_DURATION_I].d);
 
   // "Not now" is the softest control in the product; it must stay the softest
   // effect. THIS_REQUEST + ONCE, and the Undo below makes it reversible.

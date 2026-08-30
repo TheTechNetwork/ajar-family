@@ -155,14 +155,76 @@ Our core loop (from `README.md` / `docs/ARCHITECTURE.md §7`): **child hits bloc
 - **Reduced motion:** WCAG **SC 2.3.3 Animation from Interactions (AAA)** and the `prefers-reduced-motion` media query — honor users who need motion minimized ([W3C Understanding 2.3.3](https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html)).
 - **Readable/dyslexia‑friendly type:** generous size and line spacing, left‑aligned, avoid justified text and long all‑caps runs ([British Dyslexia Association style guide](https://www.bdadyslexia.org.uk/advice/employers/creating-a-dyslexia-friendly-workplace/dyslexia-friendly-style-guide)).
 
-**Product requirement.** All controls ≥ 44 px hit area; status never color‑only; motion gated behind `prefers-reduced-motion`; body type ≥ 16 px with ≥ 1.5 line height, left‑aligned; full keyboard operability and visible focus.
+**Product requirement.** This list is the bar we hold ourselves to, and it is
+written to be *checkable* — an audit found the previous version claimed three
+properties the code did not implement, because the requirement named no way to
+verify them.
 
-**Change to our UI.**
-- **Tap targets:** parent‑console action buttons are `font-size:0.82rem; padding:0.35rem 0.6rem` (`index.html` `.actions button`) — roughly ~26 px tall, **below the 44 px target**. Bump the primary approve/deny controls to ≥ 44 px height. Block‑screen buttons (`padding:10px 18px`) are borderline — pad to a 44 px hit area.
-- **Color‑independent status:** the block screen's green `.ok` / red `.err` status and the red `.dot` convey state by color alone — **add an icon + word** ("✓ Sent", "⚠ Couldn't send"). Same for parent `.ok`/`.danger` buttons: they already carry text labels (good) — keep it that way and don't let color become the only cue for approve vs. deny.
-- **Reduced motion:** the parent `.flash` toast and any future animation must check `@media (prefers-reduced-motion: reduce)` and drop to an instant, non‑animated state.
-- **Type:** block screen body is 16px/1.5 (good); the parent console is 15px/1.5 — nudge body to ≥ 16 px, keep left alignment, and never justify.
-- **Focus & keyboard:** ensure the block screen's Ask/Back and the parent's primary action are reachable and have a visible focus ring (kids and parents on laptops use keyboards/trackpads).
+1. **Target size.** All controls ≥ **44 px** hit area. (The WCAG floor is 24×24,
+   SC 2.5.8; we hold ourselves to 44.) `<summary>` is a control, and gets 44 px
+   like everything else.
+2. **Contrast, measured.** Text ≥ **4.5:1** (SC 1.4.3) and UI boundaries and
+   focus indicators ≥ **3:1** (SC 1.4.11) against their *actual* backgrounds,
+   computed with the relative-luminance formula, never eyeballed. Every token
+   ships with its number — see `docs/BRAND.md`. A focus ring must clear 3:1
+   against **each fill it can land on**, not just against the page.
+3. **Status is never colour alone** (SC 1.4.1), and every status *change* is
+   delivered to a live region (SC 4.1.3) — a `textContent` write announces to
+   nobody.
+4. **Every control has a programmatic accessible name** (SC 4.1.2), and every
+   input has a real `<label for>` — never a placeholder (SC 3.3.2).
+5. **Focus is visible, never removed, and never orphaned by an async update**
+   (SC 2.4.3). After any re-render or state flip, focus lands somewhere
+   deliberate. Never `disabled` a focused button — use `aria-disabled` plus a
+   guard, so the element stays in the tab order and the accessibility tree.
+6. **Errors say what went wrong and what to do next** (SC 3.3.1, 3.3.3), in the
+   child's or the parent's words. A raw HTTP status or an enum identifier is not
+   an error message.
+7. **Reflow.** Content works at **320 px** and **200 % zoom** with no horizontal
+   scroll and no lost content (SC 1.4.10, 1.4.4). Beware `height:100%` plus
+   `align-items:center`: the top overflow of a flex container cannot be scrolled
+   back to.
+8. **Motion** gated behind `prefers-reduced-motion` — including auto-dismiss
+   timers, not just transitions.
+9. **Body type ≥ 16 px / 1.5**, left-aligned, never justified, no long all-caps
+   runs.
+10. **Never render success text the code has not verified.** If the transport did
+    not acknowledge it, the UI does not claim it happened; if nothing re-opens
+    the page, the UI does not promise that it will.
+
+**Where the five surfaces stand.** (`web/parent/`, both `blocked.html`, both
+`options.html`.)
+
+| Requirement | State | Notes |
+|---|---|---|
+| 1 — 44 px targets | **Done** | One `--tap: 44px` token drives every button, input, select and `summary`. The three `<summary>` disclosures were 18–19.7 px, i.e. under the WCAG 24 px floor, not merely under our own bar. |
+| 2 — measured contrast | **Done** | Token sheet in `web/parent/tokens.css`; numbers in `docs/BRAND.md`. The focus ring is two-tone because no single colour clears 3:1 against both the teal and the coral fill. |
+| 3 — status never colour alone, announced | **Done** | Icon + word on every status; `role="status"` regions on all five surfaces, plus a separate `role="alert"` in the console for blocking errors. |
+| 4 — labels and names | **Done** | Orphan `<label>`s replaced with real `for`/`id` pairs; every repeated button ("Not now", "30 min") carries an `.sr-only` suffix naming which ask it belongs to. |
+| 5 — focus survives async | **Done** | The console's long-poll re-render saves and restores focus (and keeps open `Change…` panels open); the block screens use `aria-disabled` + a guard instead of `disabled`. |
+| 6 — actionable errors | **Done** | Message maps in `app.js` and both `options.js`. No surface renders a bare status code any more. |
+| 7 — reflow | **Done** | Console header wraps and truncates; block screens use `min-height` + `align-items: safe center`; both `options.html` gained the missing viewport meta. |
+| 8 — reduced motion | **Done** | Global `prefers-reduced-motion` block; the toast's auto-dismiss is 6 s (was 1.8 s, below the time a screen-reader user needs to reach it). |
+| 9 — 16 px body | **Done** | Both `options.html` were 15 px and were never mentioned in this section; they are 16 px now. |
+| 10 — no unverified success | **Partly done, and the gap is deliberate.** | The block screens no longer say "this page opens by itself" (no code re-navigates a parked tab) and no longer report "Asked ✓" before the transport acknowledged. But the console's "Sent to Jane's device" still fires on HTTP 200 from `/decide`, before any device has acknowledged the new policy version — the API has no device-ack channel to gate it on. |
+
+**Still open, and named so nobody re-claims them:**
+- **Nothing re-opens the child's page when the answer lands.** `background.js`
+  has no handler for it. The block screen therefore shows an explicit **Open it**
+  button when it detects the approval, rather than promising an auto-open.
+- **The block screen infers the answer from the cached snapshot**, matching only
+  explicit URL / video-id / domain rules. Channel, playlist and category answers
+  are invisible to it, and it stays on "waiting" rather than guessing — honest,
+  but incomplete. The real fix is a decision event on the device long-poll.
+- **The parent's "yes" carries no title or thumbnail** — `AccessRequest.title` is
+  never populated, so many cards still read `YouTube video — dQw4w9WgXcQ`. A
+  one-tap decision on an opaque id is not a decision.
+- **A timed "yes" cannot be undone.** The console's 5-second Undo works on any
+  decision that produced a standing rule (that is every "Not now", and any "for
+  good"), because `DELETE /rules/:id` exists. There is no delete endpoint for a
+  temporary grant, so the console does not offer an Undo it cannot honour.
+- **The options page lock is a page-level gate, not a real one.** See the header
+  comment in `windows/extension/options.js`.
 
 ---
 
@@ -184,8 +246,11 @@ Our core loop (from `README.md` / `docs/ARCHITECTURE.md §7`): **child hits bloc
 | Block subhead | "A parent set up filtering on this computer. You can ask a parent to allow this." | "Ask Mom to unlock it — she'll get a message right away." | Names the ally, promises speed, relatedness (§4, §1) |
 | Note label/placeholder | "Add a note for your parent (optional)" / "Why do you want to watch this?" | "Add a note (optional) — e.g. 'it's for homework'" | Autonomy‑supportive; "why do you want" reads as demanding justification (§4) |
 | Primary button (`blocked.html`) | "Request Access" | "Ask to unlock" | Plain, kid‑readable, matches unified verb (§7) |
-| Sent status (`blocked.js`) | "Request sent. A parent will be notified." | "Asked ✓ — this page will unlock by itself if Mom says yes." | Says what happens next; competence + relief (§2, §4); icon not color‑only (§8) |
+| Sent status (`blocked.js`) | "Request sent. A parent will be notified." | "✓ Sent. Waiting on a parent." + "You asked 4 min ago. Nothing else to do." | Says what happens next and how long it has been. **The earlier proposal here — "this page will unlock by itself" — was retracted: no code re-navigates a parked tab, so it was a promise the product does not keep.** When the answer lands the screen shows an **Open it** button (§2, §8, and requirement 10 above) |
 | Error status (`blocked.js`) | "Couldn't send the request (the filter service may be unreachable). Try again." | "⚠ Couldn't send — [Try again]" (button, not just text) | No dead‑end; actionable; concise (§2, §8) |
+| Approved status (`blocked.js`) | *(did not exist)* | h1 "You're in" · "A parent said yes. It may close again later on its own." · **[Open it]** | A yes the child never sees is a yes that did not happen (§2) |
+| Declined status (`blocked.js`) | *(did not exist — the child sat on "Asked" forever)* | h1 "Not this one" · "A parent said not this time. You can ask again with a note, or go ask them in person." · **[Ask again]** | Closes the loop. Styled `--muted`, **never** the error colour: a no is an answer, not a fault. Never a dead end (§2, §4) |
+| Why it's closed (`blocked.js` REASON_COPY) | "This site isn't on the open list yet." | "New sites go past a parent first." / "This site hasn't been opened yet." | Names an agent instead of an invisible list, and "yet" marks the state as changeable — both reduce the freedom threat that drives circumvention (§4) |
 | Parent deny (`app.js`) | "Deny" | "Not now" | Softer, less punitive, leaves the door open (§4) — keep an explicit "Block" only inside Change… for true blocks |
 | Parent primary (`app.js`) | six "Allow 15m/30m/1h/…" buttons | "Unlock this video · 30 min" (single) + "Change…" | Collapses decision load; narrowest‑useful default (§2, §3) |
 | Approved toast (`app.js`) | "Approved — child device will update in seconds" | keep (good — states outcome + speed) | Already models §1/§9 well |
