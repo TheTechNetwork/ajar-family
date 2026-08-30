@@ -22,6 +22,7 @@
 import { normalizeYouTube, youTubePolicyKey, isPlaybackSupportUrl } from "./youtube-normalize.js";
 import { getConfig, startPolicySync, startCategoryFilterSync, postAccessRequest } from "./backend-client.js";
 import { makeResolver } from "./cname-resolve.js";
+import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
 
 // On-device CNAME resolver (anti-cloaking). Resolves asynchronously + caches;
 // the synchronous block listener reads the cached chain. See cname-resolve.js.
@@ -93,6 +94,7 @@ function applySnapshot(snapshot, serverNowMs) {
     CLOCK_ANCHOR = { serverNowMs, perfNowAtAnchor: performance.now() };
   }
   chrome.storage.local.set({ snapshot: SNAPSHOT, clockAnchor: CLOCK_ANCHOR });
+  reevaluateOpenTabs(); // an approval just landed — reopen what it unblocked
 }
 
 /** Install + persist a verified category filter set (from native host or backend). */
@@ -101,13 +103,85 @@ function applyCategoryFilters(rawSet) {
   chrome.storage.local.set({ categoryFilters: rawSet });
 }
 
-// Restore the last cached snapshot + filters on worker restart so enforcement is
-// immediate and offline-safe (the filters are held as the raw serialized set).
-chrome.storage.local.get(["snapshot", "clockAnchor", "categoryFilters"], (v) => {
-  if (v && v.snapshot) SNAPSHOT = v.snapshot;
-  if (v && v.clockAnchor) CLOCK_ANCHOR = v.clockAnchor;
-  if (v && v.categoryFilters) setCategoryFilters(v.categoryFilters);
-});
+/** True once we've finished loading cached policy (or established there is none).
+ *  Until then the web is UNPROTECTED, so we re-check open tabs the moment it flips. */
+let POLICY_READY = false;
+
+/**
+ * Restore cached policy on worker restart.
+ *
+ * SECURITY: chrome.storage.local lives in the child's own profile directory and
+ * is therefore attacker-writable. Verifying only on fetch (as we used to) meant a
+ * child could hand-edit the cache to an allow-all policy and we would enforce it.
+ * So the cached snapshot and the cached category filters are re-verified against
+ * the pinned signing key on EVERY load, and discarded if they don't check out.
+ */
+async function restoreCachedPolicy() {
+  try {
+    const v = await chrome.storage.local.get(["snapshot", "clockAnchor", "categoryFilters"]);
+    const cfg = await getConfig();
+    const key = cfg.signingKeyB64;
+    if (v?.snapshot && key && await verifySnapshotSignature(v.snapshot, key)) {
+      SNAPSHOT = v.snapshot;
+    } else if (v?.snapshot) {
+      console.warn("[ajar] discarding cached snapshot: signature invalid or no pinned key");
+      await chrome.storage.local.remove("snapshot");
+    }
+    if (v?.categoryFilters && key
+        && await verifyCanonicalSignature(v.categoryFilters.set ?? v.categoryFilters,
+                                          v.categoryFilters.signature ?? "", key)) {
+      setCategoryFilters(v.categoryFilters.set ?? v.categoryFilters);
+    } else if (v?.categoryFilters) {
+      await chrome.storage.local.remove("categoryFilters");
+    }
+    // The clock anchor is unsigned; only ever let it move time FORWARD from now,
+    // so a rewritten anchor cannot extend an expired grant.
+    if (v?.clockAnchor && typeof v.clockAnchor.serverNowMs === "number"
+        && v.clockAnchor.serverNowMs <= Date.now() + 60_000) {
+      CLOCK_ANCHOR = v.clockAnchor;
+    }
+  } catch (e) {
+    console.warn("[ajar] could not restore cached policy:", e);
+  } finally {
+    POLICY_READY = true;
+    reevaluateOpenTabs(); // close the cold-start window immediately
+  }
+}
+restoreCachedPolicy();
+
+/**
+ * Re-decide every open tab against current policy.
+ *
+ * Serves two jobs at once:
+ *  - closes the MV3 cold-start gap (the request that WAKES the service worker is
+ *    decided with no snapshot in memory, so it is allowed; this catches it a
+ *    moment later), and
+ *  - delivers the promise the block page makes — "this page opens by itself if a
+ *    parent says yes" — by sending a now-allowed tab back to where it was going.
+ */
+async function reevaluateOpenTabs() {
+  if (!chrome.tabs?.query) return;
+  let tabs = [];
+  try { tabs = await chrome.tabs.query({}); } catch { return; }
+  for (const tab of tabs) {
+    if (!tab.url || !tab.id) continue;
+    if (tab.url.startsWith(EXT_BLOCK_PAGE)) {
+      // On our block page: if the original URL is now allowed, go back to it.
+      try {
+        const original = new URL(tab.url).searchParams.get("u");
+        if (original && decide(original, "main_frame").action === "ALLOW") {
+          chrome.tabs.update(tab.id, { url: original });
+        }
+      } catch { /* ignore */ }
+    } else if (/^https?:/.test(tab.url)) {
+      // On a real page that policy now blocks (cold-start slip, or a new rule).
+      const res = decide(tab.url, "main_frame");
+      if (res.action === "BLOCK") {
+        chrome.tabs.update(tab.id, { url: blockedUrlFor(tab.url, res) });
+      }
+    }
+  }
+}
 
 // Policy source selection:
 //  - Backend HTTP mode (dev / browser-testable): if enrolled via the options page,
@@ -252,7 +326,7 @@ function hostCandidates(host) {
 /** @type {{version:number, filters:Record<string,{m:number,k:number,bits:Uint8Array}>}|null} */
 let CATEGORY_FILTERS = null;
 /** Install a fetched+verified filter set (decodes base64 once for fast queries). */
-function setCategoryFilters(rawSet) {
+export function setCategoryFilters(rawSet) {
   if (!rawSet || !rawSet.filters) { CATEGORY_FILTERS = null; return; }
   const filters = {};
   for (const cat of Object.keys(rawSet.filters)) {
@@ -320,7 +394,7 @@ function matchTarget(r, ctx, yt, hosts, hostCats) {
 /**
  * @returns {{action:"ALLOW"|"BLOCK", reason:string, matchedKey?:string}}
  */
-function evaluate(snapshot, ctx) {
+export function evaluate(snapshot, ctx) {
   const yt = normalizeYouTube(ctx.url);
 
   let host = "";
@@ -443,6 +517,11 @@ function decide(url, type) {
   return evaluate(SNAPSHOT, ctx);
 }
 
+function blockedUrlFor(url, res) {
+  return `${EXT_BLOCK_PAGE}?u=${encodeURIComponent(url)}&reason=${encodeURIComponent(res.reason)}` +
+    (res.matchedKey ? `&key=${encodeURIComponent(res.matchedKey)}` : "");
+}
+
 function onBeforeRequestBlocking(details) {
   // Only gate top-level document navigations and sub_frame (embeds) here; media
   // (googlevideo) is handled by the playback-support carve-out inside decide().
@@ -452,10 +531,7 @@ function onBeforeRequestBlocking(details) {
     // Redirect only real page navigations to the friendly block page; for
     // sub-resources cancel instead (a redirect would break the parent page).
     if (details.type === "main_frame") {
-      const redirectUrl =
-        `${EXT_BLOCK_PAGE}?u=${encodeURIComponent(url)}&reason=${encodeURIComponent(res.reason)}` +
-        (res.matchedKey ? `&key=${encodeURIComponent(res.matchedKey)}` : "");
-      return { redirectUrl };
+      return { redirectUrl: blockedUrlFor(url, res) };
     }
     return { cancel: true };
   }

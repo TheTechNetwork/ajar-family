@@ -179,24 +179,39 @@ is resolved depends on the enforcement point:**
   window. DoH exposes the hostname to the DoH provider (the browser is about to
   resolve it anyway) — the endpoint is configurable and can be disabled.
 
-**Honest status — what each platform actually enforces today.** The shared engine
-is general, but the adapters are not uniformly wired to it. Verified by reading
-the code, not the commit messages:
+**Status — what each platform actually enforces.** Verified by a cross-platform
+conformance corpus (below), not by commit messages:
 
 | Capability | Backend/console | Windows ext | macOS Safari ext | Apple network filter |
 |---|---|---|---|---|
 | URL / YOUTUBE_* rules | ✅ | ✅ | ✅ | ✅ |
-| DOMAIN rules | ✅ | ✅ | ⚠️ **unreachable** | ✅ |
-| CATEGORY rules | ✅ | ✅ | ⚠️ **unreachable** | ❌ `PolicyStore.swift` returns `nil` |
-| Bloom filter querying | ✅ (builds) | ✅ | ⚠️ **unreachable** | ❌ no Swift querier |
-| CNAME chain folding | ✅ | ✅ | ⚠️ **unreachable**, no resolver | ⚠️ one canonical name, not the chain |
+| DOMAIN rules | ✅ | ✅ | ✅ | ✅ |
+| CATEGORY rules | ✅ | ✅ | ✅ | see `apple/` status |
+| Bloom filter querying | ✅ (builds) | ✅ | ✅ | see `apple/` status |
+| CNAME chain folding | ✅ | ✅ | ✅ | ⚠️ one canonical name, not the chain |
+| Safety floor (non-overridable) | ✅ | ✅ | ✅ | see `apple/` status |
 
-⚠️ **macOS Safari extension**: `decide()` returns `{blocked:false}` for every
-non-YouTube URL *before* `evaluate()` runs (ADR-004 scoped the PoC to YouTube), so
-its CATEGORY / Bloom / DOMAIN / CNAME code cannot fire. That code is **currently
-dead** — either the ADR's scope widens (redirecting a specifically-blocked
-navigation is not "blocking Safari") or the code should be removed. Tracked as an
-open decision; until it is resolved, macOS enforces YouTube only.
+**ADR-004 clarified.** "Never block Safari to gain enforcement" means we never
+disable, kill, or blanket-block Safari — it does **not** mean "only ever gate
+YouTube". The macOS extension previously returned early for every non-YouTube
+URL, which made its CATEGORY / DOMAIN / Bloom / CNAME code unreachable: it
+advertised general filtering and enforced none of it. It now runs the shared
+evaluator for every http(s) navigation and redirects only the specifically
+blocked ones, which is what the ADR always permitted. Its `host_permissions`
+widened to `<all_urls>` accordingly — enforcing rules on arbitrary sites requires
+observing navigations to arbitrary sites; the privacy posture is unchanged (URLs
+are inspected locally, only a URL the child explicitly asks about is ever sent).
+
+**Conformance corpus — the guard against silent mirror drift.** The Windows and
+macOS extensions (and the Apple Swift) are hand-written mirrors of
+`shared/policy/policy-model.ts`. Mirrors drift, and drift here is invisible
+because every implementation's own tests keep passing while the platforms
+disagree about what is blocked. `shared/conformance/vectors.ts` is ONE corpus of
+(snapshot, context, expected verdict) cases; `tools/conformance/run-mirrors.mjs`
+stubs the extension APIs, imports both mirrors, and asserts they agree with the
+spec. **CI fails on any disagreement** (`npm run conformance`). Reintroducing the
+macOS early-return breaks 7 of its checks — i.e. this corpus would have caught
+that bug the day it was written. Add a vector whenever you touch evaluation.
 
 The Chromium extension, the backend, and the Apple network filter each resolve the
 CNAME chain with the facility their platform provides.

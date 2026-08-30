@@ -28,3 +28,16 @@ jobs:
 
       - name: Typecheck shared spec (strict)
         run: npx tsc -p shared/tsconfig.json --noEmit
+
+      # The Windows + macOS extensions hand-mirror the shared evaluator. Each
+      # implementation's own tests can pass while the platforms silently disagree
+      # about what is blocked, so run ONE corpus against all of them.
+      - name: Conformance (shared spec vs. platform mirrors)
+        run: npm run conformance
+
+      # The OpenAPI document is the client contract; fail if the committed file
+      # drifts from the one the code generates.
+      - name: OpenAPI is in sync
+        run: |
+          npm run openapi --workspace @ajar/backend
+          git diff --exit-code backend/openapi.json

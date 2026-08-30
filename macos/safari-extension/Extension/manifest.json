@@ -21,13 +21,8 @@
 
   "content_scripts": [
     {
-      "_note": "Runs on the YouTube app surfaces. document_start so the SPA history patch installs before YouTube's own router. YouTube is an SPA — route changes via history.pushState do NOT hit the network, so content.js must catch them and ask the background worker to re-evaluate (B3).",
-      "matches": [
-        "*://*.youtube.com/*",
-        "*://youtu.be/*",
-        "*://m.youtube.com/*",
-        "*://*.youtube-nocookie.com/*"
-      ],
+      "_note": "document_start so the SPA history patch installs before the page's own router. Single-page apps change route via history.pushState WITHOUT a network request, so content.js must catch them and ask the background worker to re-evaluate (B3). Scoped to all http(s) pages because the shared evaluator enforces DOMAIN/CATEGORY rules everywhere, not just YouTube.",
+      "matches": ["http://*/*", "https://*/*"],
       "js": ["content.js"],
       "run_at": "document_start",
       "all_frames": true
@@ -56,9 +51,10 @@
     "*://*.youtube-nocookie.com/*",
     "*://youtubei.googleapis.com/*",
     "*://localhost/*",
-    "*://127.0.0.1/*"
+    "*://127.0.0.1/*",
+    "<all_urls>"
   ],
-  "_host_permissions_note": "Scoped to YouTube surfaces (+ the InnerTube API host). We deliberately do NOT request all-URLs. The media CDN *.googlevideo.com and other YOUTUBE_PLAYBACK_SUPPORT_HOSTS are NOT gated here — they must stay reachable while any video is approved (B7); gating happens at the watch page / SPA route, which is per-video. localhost/127.0.0.1 are added so the background worker can reach a LOCAL backend in dev (options-page enrollment + policy long-poll); for a hosted backend add its exact origin here instead of using <all_urls>.",
+  "_host_permissions_note": "<all_urls> is REQUIRED and justified: the shared policy model is not YouTube-only — it evaluates DOMAIN / URL / URL_PATTERN / CATEGORY rules and supports a default-deny web posture (DefaultPolicy.webDefault). Enforcing those on arbitrary sites means observing navigations to arbitrary sites. ADR-004 still holds: we never disable or blanket-block Safari, we only redirect a specifically-blocked navigation to our own block page. The extension inspects URLs to make allow/block decisions and does NOT exfiltrate browsing history (ARCHITECTURE.md privacy posture); only a URL the child explicitly asks about is ever sent. The media CDN *.googlevideo.com and other playback-support hosts stay reachable while a video is approved (B7).",
 
   "web_accessible_resources": [
     {

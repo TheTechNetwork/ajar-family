@@ -23,6 +23,10 @@
 import { normalizeYouTube, youTubePolicyKey } from "./youtube-normalize.js";
 import { getConfig, startPolicySync, startCategoryFilterSync, postAccessRequest } from "./backend-client.js";
 import { verifySnapshotSignature } from "./policy-verify.js";
+import { makeResolver } from "./cname-resolve.js";
+
+// On-device CNAME resolver (anti-cloaking); async + cached, read synchronously.
+const CNAME = makeResolver();
 
 const STORAGE_KEY = "devicePolicySnapshot";
 const BLOCKED_PAGE = "blocked.html";
@@ -174,7 +178,7 @@ function hostCandidates(host) {
   return out;
 }
 let CATEGORY_FILTERS = null;
-function setCategoryFilters(rawSet) {
+export function setCategoryFilters(rawSet) {
   if (!rawSet || !rawSet.filters) { CATEGORY_FILTERS = null; return; }
   const filters = {};
   for (const cat of Object.keys(rawSet.filters)) {
@@ -244,7 +248,7 @@ function matchTarget(r, ctx, yt, hosts, hostCats) {
  *   temporary approvals → URL → YOUTUBE_VIDEO → YOUTUBE_PLAYLIST → YOUTUBE_CHANNEL
  *   → URL_PATTERN → DOMAIN → defaults (YouTube default handled distinctly).
  */
-function evaluate(snap, ctx) {
+export function evaluate(snap, ctx) {
   const yt = normalizeYouTube(ctx.url);
 
   let host = "";
@@ -346,28 +350,47 @@ function matchesPattern(url, pattern) {
 
 /**
  * Decide whether a URL is blocked. Returns { blocked, key, reason }.
- * Fail-closed for YouTube when we have no snapshot (a missing policy must not
- * silently open YouTube); non-YouTube URLs are never touched by this extension.
+ *
+ * ADR-004 ("never block Safari to gain enforcement") means we never disable or
+ * kill Safari, and never blanket-block to compensate for a gap. It does NOT mean
+ * "only ever gate YouTube": redirecting one specifically-blocked navigation to
+ * our own block page leaves Safari and all other browsing fully functional.
+ *
+ * This function used to `return {blocked:false}` for every non-YouTube URL,
+ * which silently made the CATEGORY / DOMAIN / Bloom / CNAME code below
+ * unreachable — the extension advertised general filtering and enforced none of
+ * it. It now runs the SHARED evaluator for every http(s) URL.
+ *
+ * Fail-open posture for ordinary web (a missing snapshot must not brick the
+ * machine) but fail-CLOSED for YouTube, which is default-deny by design.
  */
 function decide(url) {
   const yt = normalizeYouTube(url);
-  if (!yt.isYouTube) return { blocked: false }; // never gate non-YouTube (never block Safari)
+
+  // Only http(s) is in scope — never touch about:, data:, file:, extension pages.
+  let scheme = "";
+  try { scheme = new URL(url).protocol; } catch { return { blocked: false }; }
+  if (scheme !== "http:" && scheme !== "https:") return { blocked: false };
 
   if (!snapshot) {
-    // Fail closed on the gated surface only.
-    return { blocked: true, key: youTubePolicyKey(yt), reason: "no-policy:fail-closed" };
+    return yt.isYouTube
+      ? { blocked: true, key: youTubePolicyKey(yt), reason: "no-policy:fail-closed" }
+      : { blocked: false, reason: "no-policy:fail-open" };
   }
 
+  const host = (() => { try { return new URL(url).hostname; } catch { return ""; } })();
   const ctx = {
     url,
     childId: snapshot.childId,
     deviceId: snapshot.deviceId,
     nowMs: Date.now(), // TODO(prod): monotonic/UTC-anchored per ADR-009
+    resolvedHosts: CNAME.chainFor(host),
   };
+  if (host) CNAME.prime(host); // fills the cache for subsequent navigations
   const res = evaluate(snapshot, ctx);
   return {
     blocked: res.action === "BLOCK",
-    key: res.matchedKey || youTubePolicyKey(yt),
+    key: res.matchedKey || (yt.isYouTube ? youTubePolicyKey(yt) : `URL:${url}`),
     reason: res.reason,
   };
 }

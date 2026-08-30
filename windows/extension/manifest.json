@@ -19,6 +19,7 @@
   "//options_note": "Dev/browser-testable enrollment: point the extension at the backend and redeem a one-time code. In production on Windows the LocalSystem service is the policy source and this page is unnecessary.",
 
   "permissions": [
+    "tabs",
     "webRequest",
     "webRequestBlocking",
     "declarativeNetRequest",
@@ -28,6 +29,7 @@
   ],
 
   "//permissions_note": {
+    "tabs": "Re-check already-open tabs when policy changes: reopen a page the parent has just approved, and catch anything the MV3 cold-start window let slip.",
     "webRequest": "Observe network requests (URLs) to evaluate against policy.",
     "webRequestBlocking": "Synchronous onBeforeRequest so we can cancel/redirect a disallowed navigation BEFORE it loads. Available because policy-installed (see policy_install_note). This is the per-URL decision path.",
     "declarativeNetRequest": "Static/dynamic rules for coarse host-level blocks (e.g. unsupported YouTube-adjacent hosts) that don't need per-request JS. Complements, does not replace, the blocking webRequest per-video path. DNR dynamic-rule limits: 30,000 rules total, 5,000 'unsafe' (redirect/modifyHeaders) — https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest .",
