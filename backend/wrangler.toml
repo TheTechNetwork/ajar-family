@@ -2,6 +2,9 @@
 # Deploy: from backend/, `npm run build` then `wrangler deploy`.
 # Secrets (never in git): set with `wrangler secret put <NAME>`:
 #   AUTH_SECRET, SIGNING_PUBLIC_KEY_B64, SIGNING_PRIVATE_KEY_B64
+# ...or, preferred, set them as GitHub repository secrets and let the deploy
+# workflow sync them (.github/workflows/deploy.yml) so GitHub is the one place
+# they are managed and nobody needs a local wrangler login.
 # See docs/DEPLOYMENT.md for generating the Ed25519 keypair and CI wiring.
 name = "ajar-backend"
 main = "dist/worker.js"
@@ -12,16 +15,21 @@ compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
 
 # ---------------------------------------------------------------------------
-# PERSISTENCE: the durable store (SqlStore over D1) is implemented. Bind a D1
-# database as `DB` to switch the Worker from per-isolate in-memory to durable,
-# cross-isolate storage — the schema is created automatically on first use
-# (IF NOT EXISTS). Create it: `wrangler d1 create ajar`, then uncomment
-# and paste the id. See docs/DEPLOYMENT.md.
+# PERSISTENCE. This binding is NOT optional for a real deployment.
+#
+# Without it the Worker falls back to a per-isolate in-memory store: it starts
+# fine, serves traffic, and silently loses every family, device and approval
+# whenever the isolate recycles. That failure looks like "the app randomly signs
+# me out and forgets my kids", which is worse than not deploying at all — so the
+# binding is committed rather than left commented out for someone to remember.
+#
+# The schema is created on first use (IF NOT EXISTS) and MIGRATIONS_SQL brings an
+# older database forward, so there is no separate migrate step.
 # ---------------------------------------------------------------------------
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "ajar"
-# database_id = "<created via: wrangler d1 create ajar>"
+[[d1_databases]]
+binding = "DB"
+database_name = "ajar-alpha"
+database_id = "df4b4ce0-0895-4b8a-864c-62a589240e25"
 
 [observability]
 enabled = true

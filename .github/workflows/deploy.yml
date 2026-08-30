@@ -1,52 +1,167 @@
 name: Deploy backend (Cloudflare Workers)
 
-# Deploys the backend Worker on pushes to main and on version tags.
-# Requires repo secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID.
-# Worker runtime secrets (AUTH_SECRET, SIGNING_PUBLIC_KEY_B64,
-# SIGNING_PRIVATE_KEY_B64) are set once with `wrangler secret put` — see
-# docs/DEPLOYMENT.md. This job is skipped automatically if the Cloudflare
-# secrets are not configured, so it never blocks a fork or an unconfigured repo.
+# Deploys the Ajar backend Worker. The design goal is that a deployment needs
+# NOBODY at a terminal: GitHub is the single place both the deploy credentials
+# and the Worker's runtime secrets are managed, and the workflow pushes the
+# latter into Cloudflare on every deploy.
+#
+# workflow_dispatch is deliberately included so an alpha can be shipped from a
+# feature branch WITHOUT merging its pull request — merging is a review
+# decision, not a deployment mechanism, and conflating the two is how unfinished
+# work gets merged just to get it deployed.
 
 on:
   push:
     branches: ["main"]
     tags: ["v*"]
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'shared/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/deploy.yml'
+      - '!**/*.md'
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm shipping this ref'
+        required: true
+        default: ''
+
+# One deploy per ref. Not keyed by SHA: when two commits land close together the
+# NEWEST is the one that should ship, so an older pending run is dropped. A
+# cancelled pull-request check is waste; a cancelled deploy is a thing that did
+# not ship while reporting nothing wrong — hence cancel-in-progress on PRs only.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
-  deploy:
+  # Needs no Cloudflare account. --dry-run performs the whole bundle, which is
+  # the real portability test: the Worker imports @ajar/shared, and if anything
+  # in that shared code starts pulling in a node: builtin the compat flags do
+  # not allow, the bundle fails HERE with the offending import named, rather
+  # than at deploy time or, worse, at runtime in front of a family.
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - name: Bundle the Worker without deploying it
+        working-directory: backend
+        run: npx wrangler deploy --dry-run --outdir /tmp/worker-build
 
-      - name: Install
-        run: npm ci
+  deploy:
+    needs: check
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'workflow_dispatch' || inputs.confirm == 'deploy')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
 
-      - name: Build
-        run: npm run build
-
-      - name: Test
-        run: npm test
-
-      - name: Check Cloudflare credentials
+      # A step's own `env:` is NOT visible to that step's own `if:` — the guard
+      # has to be a separate step that writes an output.
+      - name: Check the account is configured
         id: creds
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          if [ -n "${{ secrets.CLOUDFLARE_API_TOKEN }}" ] && [ -n "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
-            echo "have_creds=true" >> "$GITHUB_OUTPUT"
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::notice::CLOUDFLARE_API_TOKEN is not set — built but not deployed. See docs/DEPLOYMENT.md."
+            echo "have=false" >> "$GITHUB_OUTPUT"
           else
-            echo "have_creds=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Cloudflare secrets not set — skipping deploy."
+            echo "have=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Deploy to Cloudflare Workers
-        if: steps.creds.outputs.have_creds == 'true'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: backend
-          command: deploy
+      # Runtime secrets BEFORE the deploy, so a first-ever deploy comes up
+      # already configured instead of serving a window of 500s. The backend
+      # refuses to run on Workers without AUTH_SECRET, by design: a parental
+      # control with a guessable token secret is worse than one that is down.
+      - name: Sync the Worker's runtime secrets
+        if: steps.creds.outputs.have == 'true'
+        working-directory: backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          SIGNING_PUBLIC_KEY_B64: ${{ secrets.SIGNING_PUBLIC_KEY_B64 }}
+          SIGNING_PRIVATE_KEY_B64: ${{ secrets.SIGNING_PRIVATE_KEY_B64 }}
+          # Optional. Without mail, password reset and approval notifications
+          # are generated but never delivered.
+          MAIL_ENDPOINT: ${{ secrets.MAIL_ENDPOINT }}
+          MAIL_TOKEN: ${{ secrets.MAIL_TOKEN }}
+          MAIL_FROM: ${{ vars.MAIL_FROM }}
+          PASSWORD_RESET_URL: ${{ vars.PASSWORD_RESET_URL }}
+          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
+          # Ops-only: gates the GLOBAL category dataset import. Unset = the
+          # endpoint is disabled, which is the correct default.
+          CATEGORY_ADMIN_TOKEN: ${{ secrets.CATEGORY_ADMIN_TOKEN }}
+        run: |
+          set -u
+          missing=""
+          for name in AUTH_SECRET SIGNING_PUBLIC_KEY_B64 SIGNING_PRIVATE_KEY_B64 \
+                      MAIL_ENDPOINT MAIL_TOKEN MAIL_FROM PASSWORD_RESET_URL \
+                      ALLOWED_ORIGIN CATEGORY_ADMIN_TOKEN; do
+            value="$(printenv "$name" || true)"
+            if [ -z "$value" ]; then missing="$missing $name"; continue; fi
+            # printf, not echo: a key or token can contain backslashes that some
+            # shells' echo would interpret.
+            printf '%s' "$value" | npx wrangler secret put "$name"
+            echo "synced $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::Not set as repository secrets, so left as they are in Cloudflare:$missing"
+            echo "The Worker returns 500 to everything until AUTH_SECRET exists (deliberate)."
+            echo "Without SIGNING_* it mints a NEW keypair per isolate, so every device's cached"
+            echo "policy fails signature verification and enforcement stops. Set them."
+          fi
+
+      - name: Deploy
+        if: steps.creds.outputs.have == 'true'
+        working-directory: backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy
+
+      # Prove the thing that is actually deployed answers, rather than trusting
+      # that a successful upload means a working service.
+      - name: Smoke-test the deployment
+        if: steps.creds.outputs.have == 'true'
+        env:
+          BASE: ${{ vars.ALPHA_BASE_URL }}
+        run: |
+          if [ -z "${BASE:-}" ]; then
+            echo "::notice::Set the ALPHA_BASE_URL repository variable to smoke-test after deploy."
+            exit 0
+          fi
+          for i in 1 2 3 4 5; do
+            code="$(curl -sS -o /tmp/health -w '%{http_code}' "$BASE/v1/health" || true)"
+            if [ "$code" = "200" ]; then
+              echo "health: $(cat /tmp/health)"
+              # A signing key must be SERVED and STABLE, or devices cannot verify policy.
+              curl -sS "$BASE/v1/signing-key" | head -c 200; echo
+              exit 0
+            fi
+            echo "attempt $i: HTTP $code — retrying"; sleep 5
+          done
+          echo "::error::Deployed Worker did not return a healthy /v1/health"
+          exit 1
