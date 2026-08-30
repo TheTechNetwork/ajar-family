@@ -8,8 +8,8 @@
     /* Calm, non-punitive framing (UX_PRINCIPLES §4). Ajar palette (docs/BRAND.md). */
     :root {
       --bg: #F6F4EE; --card: #ffffff; --ink: #12241F; --muted: #5c6b64;
-      --line: #e3e1d8; --accent: #18A08C; --accent-ink: #ffffff;
-      --asked: #b7791f; --err: #a15b4a;
+      --line: #e3e1d8; --accent: #0d6d5e; --accent-ink: #ffffff;
+      --asked: #7d5307; --err: #a15b4a;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -82,7 +82,7 @@
       <button class="primary" id="request">Ask to unlock</button>
       <button id="back">Go back</button>
     </div>
-    <div class="status" id="status"></div>
+    <div class="status" id="status" role="status" aria-live="polite"></div>
 
     <p class="privacy">Only pages you ask about are shared with your parent. Your other browsing isn't sent.</p>
   </main>

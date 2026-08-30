@@ -8,8 +8,8 @@
     /* Ajar palette (docs/BRAND.md): calm teal + coral "yes", soft signal states. */
     :root {
       --bg:#F6F4EE; --card:#fff; --line:#e3e1d8; --ink:#12241F; --muted:#5c6b64;
-      --accent:#18A08C; --accent-ink:#0f7a6a; --yes:#FF8A5B; --yes-ink:#e4703f;
-      --asked:#b7791f; --danger:#a15b4a;
+      --accent:#0d6d5e; --accent-brand:#18A08C; --accent-ink:#0f7a6a; --yes:#FF8A5B; --yes-ink:#e4703f;
+      --asked:#7d5307; --danger:#a15b4a;
     }
     * { box-sizing: border-box; }
     body { font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--ink); }
@@ -25,7 +25,7 @@
     .row > * { flex: 1; min-width: 8rem; }
     /* 44px min hit area everywhere (WCAG 2.5.8 / Apple HIG — UX_PRINCIPLES §8). */
     button { min-height: 44px; padding: 0.5rem 1rem; font-size: 0.95rem; font-weight: 600; border:0; border-radius: 8px; background: var(--accent); color:#fff; cursor:pointer; }
-    button:focus-visible { outline: 3px solid var(--yes); outline-offset: 2px; }
+    button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
     button.secondary { background:#eceae1; color: var(--ink); }
     button.ghost { background:transparent; color: var(--accent-ink); min-height: 36px; padding: 0.25rem 0.5rem; font-weight:600; text-decoration: underline; }
     button.yes { background: var(--yes); color:#3a1e12; }
@@ -49,9 +49,11 @@
     .flash.show { opacity: 0.97; }
     /* Respect reduced-motion (UX_PRINCIPLES §8 / WCAG 2.3.3). */
     @media (prefers-reduced-motion: reduce) { .flash { transition: none; } }
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
   </style>
 </head>
 <body>
+  <div id="live" class="sr-only" role="status" aria-live="polite"></div>
   <header>
     <h1>🚪 Ajar — Parent Console</h1>
     <span class="who" id="who"></span>
@@ -85,14 +87,14 @@
         <div style="flex:0"><button id="btnCreateFamily">Create</button></div>
       </div>
       <div id="childrenBox" class="hide">
-        <label>Children</label>
+        <h3 style="font-size:0.95rem;margin:0 0 0.35rem">Children</h3>
         <div id="children"></div>
         <div class="row">
-          <div><input id="childName" placeholder="New child name (e.g. Jane)" /></div>
+          <div><label class="sr-only" for="childName">New child's name</label><input id="childName" placeholder="New child name (e.g. Jane)" autocomplete="off" /></div>
           <div style="flex:0"><button id="btnAddChild" class="secondary">Add child</button></div>
         </div>
         <div id="enrollBox" class="hide" style="margin-top:0.75rem">
-          <label>Enrollment code (enter in the child's browser extension → Options)</label>
+          <h3 style="font-size:0.95rem;margin:0 0 0.35rem" id="enrollLabel">Enrollment code (enter in the child's browser extension → Options)</h3>
           <div><span class="code" id="enrollCode">------</span> <span class="muted" id="enrollMeta"></span></div>
         </div>
       </div>

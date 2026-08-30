@@ -1041,6 +1041,17 @@
           }
         ],
         "description": "Replaces the entire domain→category dataset. The bundled list is only a seed; import a maintained feed here without a code change.",
+        "parameters": [
+          {
+            "name": "x-admin-token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Deployment ops secret (CATEGORY_ADMIN_TOKEN). The endpoint is disabled with 503 when unset."
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1085,6 +1096,26 @@
           },
           "401": {
             "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Import not enabled on this deployment",
             "content": {
               "application/json": {
                 "schema": {

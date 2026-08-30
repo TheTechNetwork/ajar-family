@@ -16,6 +16,10 @@
       "types": "./dist/categories/index.d.ts",
       "default": "./dist/categories/index.js"
     },
+    "./safety": {
+      "types": "./dist/safety/safety-floor.d.ts",
+      "default": "./dist/safety/safety-floor.js"
+    },
     "./net": {
       "types": "./dist/net/cname.d.ts",
       "default": "./dist/net/cname.js"

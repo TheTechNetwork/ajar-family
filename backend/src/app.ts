@@ -16,6 +16,8 @@ import { NullResolver, type CnameResolver } from "./categories/resolver.js";
 export interface AppConfig {
   /** HMAC secret for bearer tokens. */
   authSecret: string;
+  /** Ops secret gating the GLOBAL category-dataset import. Unset = disabled. */
+  categoryAdminToken?: string;
   /** Base64 SPKI/PKCS8 policy-signing keypair. Generated if omitted (dev only). */
   signingPublicKeyB64?: string;
   signingPrivateKeyB64?: string;
@@ -27,6 +29,7 @@ export class App {
   readonly hub: EventHub;
   readonly authSecret: string;
   readonly signingPublicKeyB64: string;
+  readonly categoryAdminToken?: string;
   readonly auth: AuthService;
   readonly family: FamilyService;
   readonly enrollment: EnrollmentService;
@@ -42,6 +45,7 @@ export class App {
     this.hub = hub;
     this.authSecret = cfg.authSecret;
     this.signingPublicKeyB64 = signingPublicKeyB64;
+    this.categoryAdminToken = cfg.categoryAdminToken;
     this.categories = new RepositoryCategoryProvider(repo);
     this.cnameResolver = resolver;
     this.auth = new AuthService(repo);

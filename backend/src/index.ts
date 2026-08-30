@@ -36,6 +36,7 @@ async function main(): Promise<void> {
       authSecret: process.env.AUTH_SECRET ?? "dev-insecure-secret-change-me",
       signingPublicKeyB64: process.env.SIGNING_PUBLIC_KEY_B64,
       signingPrivateKeyB64: process.env.SIGNING_PRIVATE_KEY_B64,
+      categoryAdminToken: process.env.CATEGORY_ADMIN_TOKEN,
     },
     // Follow CNAME chains for category lookups via the host's system resolver.
     cnameResolver: new NodeCnameResolver(),

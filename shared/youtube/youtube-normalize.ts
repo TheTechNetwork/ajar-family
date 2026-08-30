@@ -82,7 +82,7 @@ const CHANNEL_ID_RE = /^UC[A-Za-z0-9_-]{22}$/;
 const PLAYLIST_ID_RE = /^(?:PL|UU|LL|FL|RD|OL|EL)[A-Za-z0-9_-]{10,}$/;
 
 function stripWww(host: string): string {
-  return host.replace(/^www\./i, "").toLowerCase();
+  return host.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
 }
 
 function isValidVideoId(id: string | null | undefined): id is string {

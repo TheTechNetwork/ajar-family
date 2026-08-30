@@ -295,8 +295,9 @@ export const openapiDocument = {
     "/v1/categories/dataset": {
       put: { tags: ["categories"], summary: "Replace the categorization dataset from a feed (ops)", security: userAuth,
         description: "Replaces the entire domain→category dataset. The bundled list is only a seed; import a maintained feed here without a code change.",
+        parameters: [{ name: "x-admin-token", in: "header", required: true, schema: { type: "string" }, description: "Deployment ops secret (CATEGORY_ADMIN_TOKEN). The endpoint is disabled with 503 when unset." }],
         requestBody: { required: true, content: json({ $ref: "#/components/schemas/CategoryDatasetImport" }) },
-        responses: { "200": { description: "New dataset version + stats", content: json({ type: "object", properties: { version: { type: "integer" }, categories: { type: "array", items: { $ref: "#/components/schemas/CategoryStat" } } } }) }, "400": errorResponses["400"], "401": errorResponses["401"] } },
+        responses: { "200": { description: "New dataset version + stats", content: json({ type: "object", properties: { version: { type: "integer" }, categories: { type: "array", items: { $ref: "#/components/schemas/CategoryStat" } } } }) }, "400": errorResponses["400"], "401": errorResponses["401"], "403": errorResponses["403"], "503": { description: "Import not enabled on this deployment", content: json({ $ref: "#/components/schemas/Error" }) } } },
     },
     "/v1/categories/filters": {
       get: { tags: ["categories"], summary: "Signed per-category Bloom-filter asset (device)", security: [{ bearerAuth: [] }],

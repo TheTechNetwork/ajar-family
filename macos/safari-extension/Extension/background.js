@@ -167,7 +167,7 @@ function _b64ToBytes(b64) {
   return out;
 }
 function hostCandidates(host) {
-  const h = (host || "").replace(/^www\./i, "").toLowerCase();
+  const h = (host || "").replace(/\.$/, "").replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
   if (!h) return [];
   const parts = h.split("."); const out = [];
   for (let i = 0; i < parts.length - 1; i++) out.push(parts.slice(i).join("."));
@@ -201,6 +201,19 @@ function categoriesFromFilters(host) {
 }
 
 /** Returns the matched policy key if `r` targets the request, else null. */
+
+// --- SAFETY FLOOR: lockstep mirror of shared/safety/safety-floor.ts. Crisis and
+// emergency resources are ALLOWED above every tier and are never reported.
+const SAFETY_FLOOR_DOMAINS = ["988lifeline.org","suicidepreventionlifeline.org","crisistextline.org",
+  "befrienders.org","findahelpline.com","samaritans.org","papyrus-uk.org","thetrevorproject.org",
+  "childline.org.uk","kidshelpphone.ca","childhelphotline.org","youthline.co.nz","rainn.org",
+  "thehotline.org","childhelp.org","humantraffickinghotline.org","who.int","cdc.gov","samhsa.gov","nhs.uk"];
+function isSafetyFloorHost(host) {
+  const h = (host || "").replace(/\.$/, "").replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
+  if (!h) return false;
+  return SAFETY_FLOOR_DOMAINS.some((d) => h === d || h.endsWith(`.${d}`));
+}
+
 function matchTarget(r, ctx, yt, hosts, hostCats) {
   switch (r.target) {
     case "URL":
@@ -236,7 +249,7 @@ function evaluate(snap, ctx) {
 
   let host = "";
   try {
-    host = new URL(ctx.url).hostname.replace(/^www\./i, "").toLowerCase();
+    host = new URL(ctx.url).hostname.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
   } catch {
     /* leave host empty */
   }
@@ -244,7 +257,7 @@ function evaluate(snap, ctx) {
   // rules evaluate over all of them so CNAME cloaking can't bypass a block.
   const hosts = [...new Set(
     [host, ...(ctx.resolvedHosts || [])]
-      .map((h) => (h || "").replace(/^www\./i, "").toLowerCase())
+      .map((h) => (h || "").replace(/\.$/, "").replace(/^www\./i, "").toLowerCase())
       .filter(Boolean),
   )];
   // Inline map (small deployments) UNION the cached Bloom filters (scalable path).
@@ -253,6 +266,9 @@ function evaluate(snap, ctx) {
     for (const c of categoriesForHost(snap.categories, h)) hostCats.add(c);
     for (const c of categoriesFromFilters(h)) hostCats.add(c);
   }
+
+  // Tier 0 — safety floor, above every other tier (never blocked, never reported).
+  for (const h of hosts) if (isSafetyFloorHost(h)) return { action: "ALLOW", reason: "safety-floor", matchedKey: `SAFETY:${h}` };
 
   const applicable = (snap.rules || []).filter((r) => ruleAppliesToScope(r, ctx));
 
@@ -307,7 +323,7 @@ function evaluate(snap, ctx) {
 function normalizeExactUrl(raw) {
   try {
     const u = new URL(raw);
-    u.hostname = u.hostname.replace(/^www\./i, "").toLowerCase();
+    u.hostname = u.hostname.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
     u.hash = "";
     u.searchParams.sort();
     let s = u.toString();

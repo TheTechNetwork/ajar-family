@@ -12,6 +12,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["policy/**/*.ts", "youtube/**/*.ts", "categories/**/*.ts", "net/**/*.ts"],
+  "include": ["policy/**/*.ts", "youtube/**/*.ts", "categories/**/*.ts", "net/**/*.ts", "safety/**/*.ts"],
   "exclude": ["dist", "node_modules"]
 }

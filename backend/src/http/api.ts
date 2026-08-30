@@ -97,6 +97,15 @@ export function buildRouter(app: App): Router {
   // this further before production, see docs/SECURITY.md).
   r.put("/v1/categories/dataset", async (req) => {
     await requireUser(app, req);
+    // The category dataset is GLOBAL, not family-scoped: any authenticated user
+    // could otherwise wipe or poison enforcement for every family on the
+    // instance (registration is open). Until there is an admin role this is an
+    // ops action gated by a deployment secret, and OFF unless configured.
+    const admin = app.categoryAdminToken;
+    if (!admin) return err(503, "category dataset import is not enabled on this deployment", "DISABLED");
+    const offered = req.headers["x-admin-token"] ?? "";
+    if (offered.length !== admin.length || offered !== admin)
+      return err(403, "admin token required", "FORBIDDEN");
     const b = await req.json<{ categories?: Record<string, string[]> }>();
     if (!b?.categories || typeof b.categories !== "object" || Array.isArray(b.categories)) {
       return err(400, "body must be { categories: { <slug>: string[] } }", "BAD_REQUEST");

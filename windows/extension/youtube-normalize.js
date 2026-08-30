@@ -71,12 +71,44 @@ export const YOUTUBE_PLAYBACK_SUPPORT_HOSTS = [
   "fonts.gstatic.com", // player glyphs
 ];
 
+/**
+ * Paths on the YouTube PAGE host that are genuinely player plumbing.
+ *
+ * `www.youtube.com` serves both the InnerTube player API *and* every watch page,
+ * search page and Short. Treating the whole host as "playback support" meant that
+ * while ANY video was approved, every other video and all of YouTube search was
+ * allowed — the product's headline guarantee, silently void. So on that host the
+ * carve-out is restricted to these paths, and never applies to a document load.
+ */
+const YT_PLAYER_PATHS = [
+  /^\/youtubei\//,        // InnerTube player API
+  /^\/s\/player\//,        // base player JS/CSS
+  /^\/api\/timedtext/,     // captions
+  /^\/videoplayback/,      // media (also served from googlevideo)
+  /^\/generate_204/, /^\/error_204/, // beacons
+];
+
+/**
+ * Is this request the *plumbing* an already-approved video needs, rather than a
+ * page? Requires a sub-resource request type AND, on the page host, a player path.
+ * @param {string} rawUrl
+ * @param {string} requestType chrome.webRequest ResourceType
+ */
+export function isPlaybackSupportUrl(rawUrl, requestType) {
+  if (requestType === "main_frame" || requestType === "sub_frame") return false;
+  let u;
+  try { u = new URL(rawUrl); } catch { return false; }
+  if (!isPlaybackSupportHost(u.hostname)) return false;
+  if (stripWww(u.hostname) === "youtube.com") return YT_PLAYER_PATHS.some((re) => re.test(u.pathname));
+  return true;
+}
+
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 const CHANNEL_ID_RE = /^UC[A-Za-z0-9_-]{22}$/;
 const PLAYLIST_ID_RE = /^(?:PL|UU|LL|FL|RD|OL|EL)[A-Za-z0-9_-]{10,}$/;
 
 function stripWww(host) {
-  return host.replace(/^www\./i, "").toLowerCase();
+  return host.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
 }
 
 function isValidVideoId(id) {

@@ -17,8 +17,9 @@
  */
 
 import { normalizeYouTube, youTubePolicyKey } from "../youtube/youtube-normalize.js";
-import { categoriesForHost } from "../categories/category-data.js";
+import { categoriesForHost, normalizeHost } from "../categories/category-data.js";
 import type { CategoryFilters } from "../categories/bloom.js";
+import { isSafetyFloorHost } from "../safety/safety-floor.js";
 
 // ---------------------------------------------------------------------------
 // Targets, actions, scopes
@@ -196,7 +197,7 @@ export function evaluate(
 
   let host = "";
   try {
-    host = new URL(ctx.url).hostname.replace(/^www\./i, "").toLowerCase();
+    host = normalizeHost(new URL(ctx.url).hostname);
   } catch {
     /* leave host empty */
   }
@@ -204,7 +205,7 @@ export function evaluate(
   // DOMAIN/CATEGORY rules can't be dodged by CNAME cloaking. De-duped, normalized.
   const hosts = [...new Set(
     [host, ...(ctx.resolvedHosts ?? [])]
-      .map((h) => (h || "").replace(/^www\./i, "").toLowerCase())
+      .map((h) => normalizeHost(h || ""))
       .filter(Boolean),
   )];
 
@@ -215,6 +216,16 @@ export function evaluate(
   for (const h of hosts) {
     for (const c of categoriesForHost(snapshot.categories, h)) hostCats.add(c);
     if (ctx.categoryFilters) for (const c of ctx.categoryFilters.categoriesForHost(h)) hostCats.add(c);
+  }
+
+  // Tier 0 — the SAFETY FLOOR, above everything including device rules and
+  // temporary blocks. A child must never have to ask a parent for a crisis line.
+  // Deliberately not overridable and deliberately not reported. See
+  // shared/safety/safety-floor.ts.
+  for (const h of hosts) {
+    if (isSafetyFloorHost(h)) {
+      return { action: "ALLOW", reason: "safety-floor", matchedKey: `SAFETY:${h}` };
+    }
   }
 
   const applicable = snapshot.rules.filter((r) => ruleAppliesToScope(r, ctx));
@@ -306,7 +317,7 @@ function matchTarget(
 export function normalizeExactUrl(raw: string): string {
   try {
     const u = new URL(raw);
-    u.hostname = u.hostname.replace(/^www\./i, "").toLowerCase();
+    u.hostname = normalizeHost(u.hostname);
     u.hash = "";
     // sort query params for stable comparison
     u.searchParams.sort();

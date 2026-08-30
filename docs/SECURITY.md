@@ -45,6 +45,17 @@ living document for an alpha, not a completed audit.
 
   Cached snapshots restored from `chrome.storage.local` / `browser.storage.local`
   are **not** re-verified on load — only on fetch. Treated as a known gap.
+- **Safety floor (non-overridable).** Crisis, abuse and public-health resources
+  (`shared/safety/safety-floor.ts`) resolve to ALLOW *above every tier* — above
+  device rules, temporary blocks and default-deny. A parent cannot switch it off,
+  and reaching one is never reported. Rationale: under default-deny, asking to
+  unlock a crisis line means disclosing it to every approver in the family.
+- **Host normalization.** A trailing root dot (`reddit.com.`) is stripped before
+  matching. Without this, one character defeated every DOMAIN and CATEGORY rule.
+- **Category dataset import** (`PUT /v1/categories/dataset`) is GLOBAL data and
+  is now **disabled unless `CATEGORY_ADMIN_TOKEN` is set**, then requires that
+  token in `x-admin-token`. Previously any registered user could wipe or poison
+  category enforcement for every family on the instance.
 - **Authorization.** Every family-scoped mutation checks membership + role
   (`requireRole`/`requireManage`); no IDOR. All SQL is parameterized.
 - **CORS.** Permissive `*` by default (bearer tokens, no cookies — safe); set
@@ -64,6 +75,20 @@ living document for an alpha, not a completed audit.
   parent API to an ops tool) before production.
 - **Rate limiter is per-instance.** Fine for a single node/isolate; needs a
   shared store to be effective across a fleet.
+- **The child controls the client's trust anchor.** The extension's Options page
+  is reachable by the child: Unenroll wipes cached policy, and re-enrolling
+  against an attacker-chosen `backendUrl` adopts that server's signing key, so
+  correctly-signed allow-all policy is accepted. Signature verification proves
+  "from the server I am configured to trust" — and that config is child-writable.
+  Needs the options page locked behind a parent secret + a pinned signing key.
+- **One approved video no longer opens all of YouTube** (fixed: the playback
+  carve-out now requires a sub-resource request type and, on `www.youtube.com`,
+  a true player path). Media hosts remain opaque by design — an approved video
+  and a blocked one are indistinguishable on `*.googlevideo.com`.
+- **MV3 cold start is fail-open.** The request that wakes the service worker is
+  decided with no snapshot in memory; only YouTube fails closed.
+- **No device heartbeat.** `lastSyncedVersion` is written once at enrollment, so
+  a device that stops syncing (or is unenrolled) is silent to the parent.
 - **Before public launch:** a formal third-party penetration test, secret
   rotation policy, and the input-validation layer.
 

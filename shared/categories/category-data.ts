@@ -32,7 +32,10 @@ export const DEFAULT_CATEGORY_DOMAINS: Record<string, string[]> = {
 /** Lowercase a host and drop a leading `www.` (the canonical form domains are
  *  stored and compared in). */
 export function normalizeHost(host: string): string {
-  return host.replace(/^www\./i, "").toLowerCase();
+  // The trailing root dot is legal in a URL ("reddit.com.") and resolves to the
+  // same site, so it MUST be stripped or one character defeats every DOMAIN and
+  // CATEGORY rule. Also drop a leading "www.".
+  return host.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
 }
 
 /**

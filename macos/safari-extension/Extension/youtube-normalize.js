@@ -52,7 +52,7 @@ const CHANNEL_ID_RE = /^UC[A-Za-z0-9_-]{22}$/;
 const PLAYLIST_ID_RE = /^(?:PL|UU|LL|FL|RD|OL|EL)[A-Za-z0-9_-]{10,}$/;
 
 function stripWww(host) {
-  return host.replace(/^www\./i, "").toLowerCase();
+  return host.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
 }
 
 function isValidVideoId(id) {
@@ -187,12 +187,12 @@ export function youTubePolicyKey(o) {
  */
 export function isPlaybackSupportHost(host) {
   if (!host) return false;
-  const h = host.replace(/^www\./i, "").toLowerCase();
+  const h = host.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
   return YOUTUBE_PLAYBACK_SUPPORT_HOSTS.some((entry) => {
     if (entry.startsWith("*.")) {
       const suffix = entry.slice(1); // ".googlevideo.com"
       return h === entry.slice(2) || h.endsWith(suffix);
     }
-    return h === entry.replace(/^www\./i, "");
+    return h === entry.replace(/\.$/, "").replace(/^www\./i, "");
   });
 }

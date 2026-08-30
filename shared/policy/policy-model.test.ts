@@ -55,3 +55,25 @@ test("CNAME resolution: a CATEGORY block catches a cloaked alias via the inline 
   assert.equal(evaluate(snap, { url: "https://social.kidsite.com/x", childId: "c", deviceId: "d", nowMs: Date.now(),
     resolvedHosts: ["social.kidsite.com.fbcdn.facebook.com"] }).action, "BLOCK");
 });
+
+test("a trailing root dot cannot defeat a block (reddit.com. === reddit.com)", () => {
+  const snap: DevicePolicySnapshot = {
+    ...base,
+    defaults: { webDefault: "ALLOW", youTubeDefault: "ALLOW" },
+    rules: [{ id: "d1", target: "DOMAIN", value: "reddit.com", action: "BLOCK", scope, createdAt: "", createdBy: "p" }],
+  };
+  for (const u of ["https://reddit.com/r/x", "https://reddit.com./r/x",
+                   "https://WWW.Reddit.COM./r/x", "https://old.reddit.com./r/x"]) {
+    assert.equal(evaluate(snap, ctx(u)).action, "BLOCK", u);
+  }
+});
+
+test("a trailing dot cannot defeat a CATEGORY block either", () => {
+  const snap: DevicePolicySnapshot = {
+    ...base,
+    defaults: { webDefault: "ALLOW", youTubeDefault: "ALLOW" },
+    rules: [{ id: "c1", target: "CATEGORY", value: "social", action: "BLOCK", scope, createdAt: "", createdBy: "p" }],
+    categories: { social: ["tiktok.com"] },
+  };
+  assert.equal(evaluate(snap, ctx("https://tiktok.com./@x")).action, "BLOCK");
+});
