@@ -36,6 +36,29 @@ final class FilterDataProvider: NEFilterDataProvider {
     private let cnameCache = CnameChainCache.shared
 
     override func startFilter(completionHandler: @escaping (Error?) -> Void) {
+        #if DEBUG
+        // THE EXTENSION IS A SEPARATE PROCESS FROM THE APP.
+        //
+        // `PolicyStore.allowUnsignedDevelopmentSnapshots` is a static — that is,
+        // per-process — flag. The app sets it when the PoC harness seeds a local
+        // unsigned policy, but nothing set it here, so this provider used to take
+        // the signed path, find no enrolled signing key, and return
+        // `.untrusted("no trusted signing key")`. `evaluate()` fails CLOSED on
+        // untrusted, so EVERY flow was blocked with `snapshot-untrusted:...` and
+        // the seeded rules were never consulted at all.
+        //
+        // The symptom was badly misleading: the blocked video was blocked and the
+        // ALLOWED video was blocked too, which reads like "the filter cannot see
+        // the video id" — i.e. a false negative for experiment A2 — when in fact
+        // the URL was fine and the policy was simply never trusted. Only the
+        // safety floor still worked, because Tier 0 runs before the state check.
+        //
+        // The persisted half of the gate (`policy_dev_unsigned` in the App Group)
+        // is written ONLY by the app's DEBUG seeding path, so honouring it here
+        // does not widen what a release build will trust: this whole block is
+        // compiled out of Release.
+        PolicyStore.allowUnsignedDevelopmentSnapshots = true
+        #endif
         completionHandler(nil)
     }
 
@@ -72,6 +95,23 @@ final class FilterDataProvider: NEFilterDataProvider {
                 url=\(urlString, privacy: .private)
                 """)
         }
+
+        #if DEBUG
+        // PoC instrument for A1-A3 (Shared/FlowLog.swift). The unified log
+        // redacts the URL by design, so the experiments read it from the App
+        // Group instead. Same `isReportable` gate as the log above, so a
+        // safety-floor hit is not recorded here either.
+        //
+        // Recorded BEFORE the needRules() branch below, so a flow handed to the
+        // control provider appears with the verdict the DATA provider reached on
+        // the cached chain — which is the number A2 is asking about.
+        if decision.isReportable {
+            FlowLog.record(kind: remediable ? "browser" : "socket",
+                           url: urlString,
+                           action: decision.action.rawValue,
+                           reason: decision.reason)
+        }
+        #endif
 
         // A CNAME chain can only ever turn an ALLOW into a BLOCK (it adds hosts
         // to match against), so a decision that is already BLOCK needs no

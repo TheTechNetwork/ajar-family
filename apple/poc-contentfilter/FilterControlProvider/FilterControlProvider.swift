@@ -21,6 +21,13 @@ final class FilterControlProvider: NEFilterControlProvider {
     private let queue = DispatchQueue(label: "com.ajar.control.cname", qos: .userInitiated)
 
     override func startFilter(completionHandler: @escaping (Error?) -> Void) {
+        #if DEBUG
+        // Same per-process gate as FilterDataProvider.startFilter — see the long
+        // comment there. This provider evaluates policy too (the needRules()
+        // path), so without this it would also fail closed on every flow it was
+        // handed, for a reason that has nothing to do with the flow.
+        PolicyStore.allowUnsignedDevelopmentSnapshots = true
+        #endif
         // Register the remediation entries referenced by the data provider's
         // `.remediateVerdict(remediationURLMapKey:remediationButtonTextMapKey:)`.
         // SDK: remediationMap is [String: [String: NSObject]] — values must be

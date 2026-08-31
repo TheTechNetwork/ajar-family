@@ -21,6 +21,14 @@ final class FilterController: ObservableObject {
     @Published var selfTestFailures: [PolicySelfTest.Failure] = []
     @Published var selfTestRan = false
 
+    #if DEBUG
+    /// Flows the data provider recorded, newest first — the A1/A2 evidence.
+    /// See `Shared/FlowLog.swift` for why this is not read from the system log.
+    @Published var flowRows: [String] = []
+    func refreshFlowLog() { flowRows = FlowLog.all() }
+    func clearFlowLog() { FlowLog.clear(); flowRows = [] }
+    #endif
+
     private let store = PolicyStore.shared
     private let familyId = "poc-family"
     private let childId = "poc-child"

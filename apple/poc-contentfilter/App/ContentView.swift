@@ -62,6 +62,34 @@ struct ContentView: View {
                     Label("ALWAYS ALLOWED (safety floor, never logged): 988lifeline.org",
                           systemImage: "lifepreserver")
                 }
+                #if DEBUG
+                Section("4 · Observed flows — A1/A2 evidence") {
+                    HStack {
+                        Button("Refresh") { controller.refreshFlowLog() }
+                        Spacer()
+                        Button("Clear") { controller.clearFlowLog() }
+                    }
+                    if controller.flowRows.isEmpty {
+                        Text("Empty. Browse in Safari, then Refresh. If this stays empty the data provider cannot write to the App Group — which is itself the A2 finding.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(controller.flowRows.enumerated()), id: \.offset) { _, row in
+                            let parts = row.split(separator: "\t", omittingEmptySubsequences: false)
+                            VStack(alignment: .leading, spacing: 1) {
+                                if parts.count >= 5 {
+                                    Text("\(parts[1]) · \(parts[2]) · \(parts[3])")
+                                        .font(.caption2.bold())
+                                    Text(String(parts[4]))
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .textSelection(.enabled)
+                                } else {
+                                    Text(row).font(.system(.caption2, design: .monospaced))
+                                }
+                            }
+                        }
+                    }
+                }
+                #endif
                 if let err = controller.lastError {
                     Section("Error") { Text(err).foregroundStyle(.red) }
                 }
