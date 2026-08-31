@@ -26,6 +26,17 @@ settings:
     DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
+    # Defaults; CI overrides CURRENT_PROJECT_VERSION on the xcodebuild command
+    # line with the next build number App Store Connect will accept. Ported from
+    # AjarFilter, where it was learned by rejection rather than by design:
+    # XcodeGen writes a LITERAL CFBundleVersion of "1" when this is unset, so
+    # passing CURRENT_PROJECT_VERSION=N changed a build setting nothing
+    # referenced — CI archived and exported happily and the upload was refused
+    # with "The bundle version must be higher than the previously uploaded
+    # version: '1'", the correct number sitting one layer away in a variable.
+    # The Info.plist keys below must INTERPOLATE these, not restate their values.
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
     TARGETED_DEVICE_FAMILY: "1,2"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 
@@ -50,6 +61,8 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: Ajar Parent
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
         # Answered once here instead of on every upload. Same basis as the
         # filter app: only OS-provided encryption (TLS via URLSession, Keychain).
         # Re-confirm if a third-party crypto library is ever linked.

@@ -257,7 +257,12 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-          BUNDLE_ID: family.ajar.child
+          # Renamed with the app (family.ajar.child -> family.ajar.filter). Until
+          # an App Store Connect record exists for the NEW id this step fails with
+          # "no App Store Connect record for family.ajar.filter" — which is the
+          # correct failure: Apple is the only source of truth for the next build
+          # number, and guessing is what produced the DUPLICATE above.
+          BUNDLE_ID: family.ajar.filter
         run: |
           set -euo pipefail
           n="$(node .github/scripts/asc-next-build.mjs)"
