@@ -46,6 +46,15 @@ targets:
         # local automatic signing, where Xcode ignores it.
         PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_APP)
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        # App Store validation refuses an upload without an icon, with two
+        # separate errors: "Missing required icon files" and "Missing Info.plist
+        # CFBundleIconName". Naming the icon set here fixes BOTH — the asset
+        # catalog compiler emits the icon assets and writes CFBundleIconName into
+        # the built Info.plist, which is not a key you add by hand.
+        # A single 1024x1024 opaque PNG is sufficient on modern Xcode; an icon
+        # with an alpha channel is rejected, so App/Assets.xcassets holds a
+        # flattened one.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: App/Info.plist
       properties:
