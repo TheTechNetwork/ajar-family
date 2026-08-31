@@ -42,6 +42,13 @@ jobs:
       - name: Design tokens are in sync across surfaces
         run: node web/parent/sync-tokens.mjs --check
 
+      # sync-tokens only proves the four copies MATCH — it never checked that any
+      # of them is readable. The ratios in tokens.css and docs/BRAND.md were
+      # hand-written comments, and one was already wrong by 6x (a focus ring
+      # documented at 15.91:1 whose load-bearing pair was 2.59:1). Recompute them.
+      - name: Contrast ratios are computed, not claimed
+        run: node web/parent/check-contrast.mjs
+
       # The OpenAPI document is the client contract; fail if the committed file
       # drifts from the one the code generates.
       - name: OpenAPI is in sync

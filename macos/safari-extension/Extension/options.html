@@ -65,10 +65,22 @@
   --ok-wash:       #EAF3EC;
 
   /* Two-tone focus indicator. A single dark ring measures only 2.59:1 against
-     the teal primary button, so the ring is painted as: 2px halo in the
-     surface colour (6.24:1 vs teal, 6.44:1 vs coral in dark) then 3px in
-     --focus (16.18:1 vs the halo). Both bands stay ≥3:1 against whatever they
-     touch, on every fill, in both themes. SC 1.4.11 / 2.4.13. */
+     the teal primary button, so the ring is painted as: 2px halo in the surface
+     colour (the INNER band, sitting on the control) then 3px in --focus (the
+     OUTER band, sitting on the page).
+
+     Perceptibility is carried by the OUTER band against the page ground —
+     14.71:1 light, 16.65:1 dark — which is the pair SC 1.4.11 / 2.4.13 turns on.
+     The halo is a spacer that keeps the dark band off a coloured fill; it is the
+     surface colour, so on a plain card it is 1.00:1 and invisible by design.
+
+     Against coloured fills the halo lands at 3.26:1 (light teal), 2.32:1 (light
+     coral), 6.02:1 and 6.44:1 (dark). An earlier version of this comment claimed
+     "both bands stay ≥3:1 against whatever they touch, on every fill, in both
+     themes" — that was false, and it was false in the specific way this palette
+     has been wrong before: it quoted the flattering pairs (teal in light, coral
+     in dark) and skipped light-mode coral. Every ratio here is now computed by
+     web/parent/check-contrast.mjs, which runs in CI. */
   --focus:         #12241F;
   --focus-halo:    #FFFFFF;
 

@@ -204,10 +204,25 @@ exist. It does now.
 A single ring in Deep Pine measures **2.59:1 against the teal primary button**
 and a single white ring measures **2.49:1 against the dark-theme teal** and
 **2.32:1 against coral**. A one-colour ring cannot clear 3:1 against every fill
-we ship. The ring is therefore painted as **2px in the surface colour, then 3px
-in `--focus`**: the inner band clears 6.24:1 against teal (6.02:1 in dark, 6.44:1
-against coral) and the outer band clears 16.18:1 against the inner band and the
-card. Both bands stay ≥3:1 against whatever they touch, in both themes.
+we ship. The ring is therefore painted as **2px in the surface colour (the inner
+band, on the control), then 3px in `--focus` (the outer band, on the page)**.
+
+**The outer band carries perceptibility**: 14.71:1 against the light ground,
+16.65:1 against the dark ground, and 16.18:1 against the inner band. That is the
+pair SC 1.4.11 / 2.4.13 turns on, and it is the one CI asserts.
+
+The inner halo is a **spacer**, not a band that has to be seen: it is the surface
+colour, so on a plain card it is 1.00:1 and invisible by design. Against coloured
+fills it measures 3.26:1 (light teal), **2.32:1 (light coral)**, 6.02:1 (dark
+teal) and 6.44:1 (dark coral).
+
+> A previous version of this section claimed *"both bands stay ≥3:1 against
+> whatever they touch, in both themes."* That was **wrong** — light-mode coral is
+> 2.32:1 — and wrong in this palette's characteristic way: it quoted teal in light
+> and coral in dark, the two flattering pairs, and omitted the third. The ring is
+> still compliant, because the outer band is what makes focus perceivable. The
+> numbers above are now computed by `web/parent/check-contrast.mjs` in CI rather
+> than written by hand.
 
 **Rule.** Every new token ships with its measured ratio against `#fff` and
 `#F6F4EE` (light) or `#1A2A26` (dark). Text pairs must reach **4.5:1**
