@@ -160,4 +160,3 @@ struct RequestRow: View {
     }
 }
 
-extension ApprovalDuration: Hashable {}

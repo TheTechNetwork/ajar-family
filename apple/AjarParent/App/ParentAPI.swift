@@ -73,7 +73,13 @@ enum ApprovalScope: String, Codable, CaseIterable {
 }
 
 /// `oneOf` in the schema; encoded as a tagged object.
-enum ApprovalDuration: Equatable {
+///
+/// Hashable is declared HERE rather than in an extension elsewhere: Swift only
+/// synthesises `hash(into:)` when the conformance is stated in the same file as
+/// the type, and `.minutes(Int)` carries an associated value. An
+/// `extension ApprovalDuration: Hashable {}` in another file compiles to
+/// "extension outside of file declaring enum ... prevents automatic synthesis".
+enum ApprovalDuration: Hashable {
     case minutes(Int)
     case untilEndOfDay
     case once
