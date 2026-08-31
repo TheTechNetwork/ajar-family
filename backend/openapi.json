@@ -963,6 +963,38 @@
         }
       }
     },
+    "/blocked": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Request-Access block page (HTML, rendered by the iOS content filter)",
+        "security": [],
+        "parameters": [
+          {
+            "name": "u",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The blocked flow URL, substituted by NEFilterProvider. Non-http(s) values are ignored."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML page",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/openapi.json": {
       "get": {
         "tags": [
