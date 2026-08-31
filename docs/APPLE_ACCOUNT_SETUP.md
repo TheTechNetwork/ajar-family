@@ -34,7 +34,7 @@ above it, and the two marked ⏳ have waiting attached — start them early.
 | 1 | Enroll as an **Organization** ⏳ | §1 | everything (D-U-N-S + verification can take days-to-weeks) |
 | 2 | Note the **Team ID**, set roles | §2 | every later step |
 | 3 | **Request the Family Controls distribution entitlement** ⏳ | §6 | ALL distribution signing — file it the day you decide TestFlight is the goal |
-| 3b | **Create a child Apple Account in a Family Sharing group** ⏳ | §2.1 | **the entire A1–A6 on-device matrix** — measured, see below |
+| 3b | **Create a child Apple Account in a Family Sharing group** | §2.1 | **A6 tamper tests only** — A1–A5 do not need it (measured; an earlier version of this table said otherwise) |
 | 4 | Register 3 App IDs + 1 App Group | §4 | signing anything |
 | 5 | Create the **App Store Connect API key** (App Manager) | §8.1 | CI signing + upload |
 | 6 | Set 3 GitHub secrets + 1 variable | §8.1 | CI signing + upload |
@@ -49,13 +49,11 @@ Step 3 is a human review at Apple with calendar time attached. No amount of
 correct CI gets past it: development signing works without it, App Store and
 TestFlight signing do not.
 
-Step 3b is not a review but it is a hard gate, and it was measured rather than
-predicted: on a device signed in with an **adult** Apple Account,
-`requestAuthorization(for: .child)` fails with
-`FamilyControlsError.invalidAccountType`. Because TN3134 grants the content
-filter on an unsupervised device only to a **Family-Controls-authorized** app,
-that failure blocks the whole A1–A6 protocol, not just the tamper tests. See
-§2.1.
+Step 3b is narrower than this document first claimed. `requestAuthorization(for:
+.child)` does fail with `FamilyControlsError.invalidAccountType` on an adult
+Apple Account — but a later run measured that the filter **enables and enforces
+anyway**, with authorization Not Determined. It gates A6 (tamper resistance),
+not the enforcement tests. See §2.1.
 
 The **distribution certificate is created by hand** from a CSR (§3.1) — but not
 in Keychain Access, and not on a Mac: OpenSSL produces the CSR anywhere. Add it
@@ -110,36 +108,38 @@ between steps 4 and 5. Provisioning profiles are still minted by CI (§5).
 
 ---
 
-## 2.1 The child Apple Account — the on-device gate
+## 2.1 The child Apple Account — what it actually gates
 
-**Measured, not predicted.** With the app signed and running on an iPhone,
-`requestAuthorization(for: .child)` returns
-`FamilyControlsError.invalidAccountType` when the device is signed in with an
-ordinary adult Apple Account. `.child` authorization requires the device to be
-signed in as a **child or teen member of a Family Sharing group**.
+**Corrected by measurement.** This section first said a child Apple Account
+blocked the entire A1–A6 protocol. That was wrong, and wrong in the direction
+that costs money: it implied a spare iPhone was needed before any enforcement
+could be tested.
 
-This is the current critical path. Everything upstream of it — toolchain,
-signing, App IDs, the App Group, development profiles — is done; nothing in the
-A1–A6 protocol (`docs/APPLE_CONTENT_FILTER_POC.md`) can run until it is
-resolved, because on an unsupervised device the classic content filter is
-granted only to a Family-Controls-authorized app (TN3134).
+What is true: `requestAuthorization(for: .child)` returns
+`FamilyControlsError.invalidAccountType` on a device signed in with an adult
+Apple Account.
 
-- [ ] The person who will act as **parent** needs a Family Sharing group they
-      organize, with a payment method on file — Apple requires one to verify
-      parental consent when creating a child account.
-- [ ] Add or create a **child/teen Apple Account** in that group. Exact age
-      bands and what a minor may do without consent vary by country; check
-      Apple's current Family Sharing docs for your region rather than assuming.
-- [ ] Sign the **test device** into that account.
+What was then measured on an iPhone 16 Pro Max running iOS 27.0: **A1–A3 passed
+with FamilyControls authorization Not Determined.** The content filter enabled
+and enforced per-video policy regardless. On iOS 27 the
+`com.apple.developer.family-controls` **entitlement** was sufficient to run a
+content filter; `.child` **authorization** was not required for enforcement.
+That contradicts the TN3134 reading ADR-001 was originally built on.
 
-> **Budget a second device.** The measured failure was on a device signed in
-> with the developer's own adult account. Re-signing a daily-driver phone into a
-> child account is disruptive and hard to undo cleanly, so the practical answer
-> is usually a spare iPhone dedicated to testing — not a blocker, but it is
-> hardware someone has to find.
+So the account is needed for what it was always actually for:
 
-> A child account also cannot simply be removed from the family group on a whim
-> in some regions, so create it deliberately rather than as a throwaway.
+- [ ] **A6 — tamper resistance.** Whether a child can disable the filter,
+      delete the app, or sign out of iCloud is exactly what `.child`
+      authorization governs, and none of it can be tested without one.
+- [ ] Not needed for A1–A5: install, per-video enforcement, the block page,
+      propagation timing, or temporary approvals.
+
+When you do need it: the parent needs a Family Sharing group they organize with
+a payment method on file (Apple requires one to verify parental consent), and
+the test device signed into the child/teen account. Age bands vary by country —
+check Apple's current docs for your region. Re-signing a daily driver into a
+child account is disruptive, so a spare device is the practical answer **for A6**
+— but it is no longer blocking the enforcement work.
 
 ---
 

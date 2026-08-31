@@ -476,12 +476,23 @@ the evaluator — the spec cannot currently express "sub-resource, not a documen
 load", and that distinction is load-bearing. Without it, one approved video
 opens all of YouTube; a bug this project has already had once.
 
-**Open decision, deliberately not taken unilaterally.** Closing this means
-allowing host-only flows to `www.youtube.com` while any video approval is
-active. On iOS that is defensible — a real navigation would have arrived as a
-WebKit browser flow and been gated on its full URL — but it is a loosening on a
-child-safety path, so it is a product decision, not a refactor. Recorded here
-rather than resolved.
+**Settled on device, and not the way this section first proposed.** Rather than
+allowing host-only flows to `www.youtube.com` while an approval is active, the
+iOS provider now applies `youTubeDefault` to **browser flows only**. Socket
+flows carry no video id, so applying a per-video default to them could only ever
+block the host outright — which is what made an *allowed* video hang with no
+block page.
+
+The cost is explicit and belongs in any product claim: the **YouTube native app
+is socket-only**, so it is no longer default-denied by this provider. Blocking
+the app is an application-level lever (ManagedSettings / ADR-011), not a
+content-filter one.
+
+This leaves the shared-spec divergence above unresolved: `evaluate()` still has
+no request-kind field, so playback support remains implemented outside the
+evaluator on Windows, absent on macOS, and now moot on iOS for the socket path.
+The macOS extension having `isPlaybackSupportHost` and never calling it is still
+a live bug.
 
 The per-adapter mechanics of enforcing a canonical-id decision differ:
 `NEFilterDataProvider` inspects the WebKit flow URL; the Safari/MV3 extensions

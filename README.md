@@ -33,6 +33,27 @@ Workers (or self-host it as one bundled binary).
 > and play it while every other unapproved video stays blocked — no VPN/TLS-MITM
 > on Apple, no MDM?
 
+### Answered on hardware — yes, with one limit that qualifies the claim
+
+Measured on an iPhone 16 Pro Max running iOS 27.0 (see `docs/DECISIONS.md`
+ADR-001 and the A1–A3 results in `docs/APPLE_CONTENT_FILTER_POC.md`):
+`NEFilterBrowserFlow.url` carries the **full URL including the query string**, so
+one video plays while another on the same host shows the block page — on
+unmodified iOS, no VPN, no TLS interception, no MDM. That is the design's load-
+bearing fact and it is now observed rather than inferred.
+
+**The limit, stated plainly because it changes what may honestly be promised:**
+YouTube is a single-page app. Entering a blocked video URL directly is enforced,
+but once the child is *inside* YouTube, tapping through to another video swaps it
+in over XHR with **no top-level WebKit flow** — so the filter never sees the new
+video id, and that video plays. Nothing that only sees browser flows can enforce
+per-video policy across in-app navigation.
+
+So **"your child can only watch videos you approved" is not true on iOS today**
+for a child who browses within YouTube rather than following links. It is true
+for links they are sent or type. Closing the gap needs a different lever, not a
+patch to the content filter.
+
 ## Repository layout
 
 | Path | What it is |
