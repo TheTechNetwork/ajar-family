@@ -1,0 +1,245 @@
+name: iOS — TestFlight, Ajar Parent (internal)
+
+# Archives the PARENT app and uploads it to TestFlight for internal testing.
+#
+# SECURITY NOTE: nothing here interpolates attacker-controllable input into a
+# `run:` block. The only workflow input is `confirm`, which is compared in an
+# `if:` expression and never reaches a shell; every secret and variable is
+# passed through `env:` and referenced as "$NAME".
+#
+# Deliberately a separate workflow from testflight.yml rather than a matrix over
+# both apps. The two are not the same shape: the filter app carries two
+# NetworkExtension providers, so it needs three provisioning profiles matched to
+# three targets, an App Group, and the Family Controls entitlement. The parent
+# app is one target with one profile and none of that. Expressing both in one
+# matrix means every step grows a conditional, and the interesting failures —
+# which are all in the filter app's extension signing — get harder to read.
+#
+# What it shares with testflight.yml, and must keep sharing:
+#  - the ORG-level Apple credentials (one distribution certificate for the whole
+#    team, shared with Fleetwright; two certs means each revokes the other's),
+#  - .github/scripts/select-xcode.sh, because App Store Connect refuses anything
+#    built with an SDK older than iOS 26 and refuses it at upload,
+#  - .github/scripts/asc-next-build.mjs, because a colliding build number is
+#    only discovered after a full archive and export have succeeded.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "testflight" to upload a build'
+        required: true
+        default: ''
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: inputs.confirm == 'testflight'
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      SCHEME: AjarParent
+      PROJECT_DIR: apple/AjarParent
+      BUNDLE_ID: family.ajar.parent
+      TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail with a readable list rather than a signing error 20 minutes in.
+      - name: Preflight — the account settings this cannot run without
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          P12: ${{ secrets.APPLE_DIST_P12 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DIST_P12_PASSWORD }}
+          PROFILE: ${{ secrets.APPLE_PROFILE_PARENT }}
+        run: |
+          missing=""
+          [ -n "${TEAM_ID:-}" ]      || missing="$missing APPLE_TEAM_ID(var)"
+          [ -n "${ASC_KEY_ID:-}" ]   || missing="$missing ASC_KEY_ID"
+          [ -n "${ASC_ISSUER_ID:-}" ]|| missing="$missing ASC_ISSUER_ID"
+          [ -n "${ASC_KEY_P8:-}" ]   || missing="$missing ASC_KEY_P8"
+          [ -n "${P12:-}" ]          || missing="$missing APPLE_DIST_P12"
+          [ -n "${P12_PASSWORD:-}" ] || missing="$missing APPLE_DIST_P12_PASSWORD"
+          [ -n "${PROFILE:-}" ]      || missing="$missing APPLE_PROFILE_PARENT"
+          if [ -n "$missing" ]; then
+            echo "::error::Not configured:$missing"
+            echo "ASC_* and APPLE_DIST_* are ORG secrets shared with the filter app"
+            echo "and Fleetwright — one certificate for the whole Apple team."
+            echo "APPLE_PROFILE_PARENT is repo-level: run ~/.ajar-signing/setup-ci.mjs."
+            exit 1
+          fi
+
+      - name: Select an Xcode with the iOS 26 SDK or newer
+        run: .github/scripts/select-xcode.sh
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: xcodegen generate
+
+      - name: Install the App Store Connect API key
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p ~/private_keys
+          printf '%s' "$ASC_KEY_P8" > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          chmod 600 ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+
+      - name: Import the distribution certificate
+        env:
+          P12: ${{ secrets.APPLE_DIST_P12 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DIST_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/ajar-parent-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          # `tr -d` first: a secret pasted from Windows/WSL tooling can arrive
+          # CRLF-wrapped, and BSD base64 rejects embedded CRs outright.
+          printf '%s' "$P12" | tr -d '\r\n' | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security import "$RUNNER_TEMP/dist.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security -f pkcs12
+          rm -f "$RUNNER_TEMP/dist.p12"
+          # Without this, codesign blocks on a UI prompt that never comes.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          found="$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -c "Apple Distribution" || true)"
+          if [ "$found" -eq 0 ]; then
+            echo "::error::No 'Apple Distribution' identity in the imported .p12."
+            echo "It must bundle the certificate WITH its private key. A cloud-managed"
+            echo "certificate cannot be exported this way — Apple holds that key."
+            exit 1
+          fi
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      # Matched by READING the profile, not by trusting its name.
+      - name: Install the provisioning profile
+        env:
+          PROFILE: ${{ secrets.APPLE_PROFILE_PARENT }}
+        run: |
+          set -euo pipefail
+          DEST=~/Library/MobileDevice/Provisioning\ Profiles
+          mkdir -p "$DEST"
+          raw="$RUNNER_TEMP/parent.mobileprovision"
+          printf '%s' "$PROFILE" | tr -d '\r\n' | base64 --decode > "$raw"
+          plist="$RUNNER_TEMP/parent.plist"
+          security cms -D -i "$raw" > "$plist"
+          uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$plist")"
+          name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$plist")"
+          appid="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$plist")"
+          bundle="${appid#*.}"
+          if [ "$bundle" != "$BUNDLE_ID" ]; then
+            echo "::error::APPLE_PROFILE_PARENT is a profile for '$bundle', not $BUNDLE_ID."
+            exit 1
+          fi
+          cp "$raw" "$DEST/$uuid.mobileprovision"
+          echo "AJAR_PROFILE_PARENT=$name" >> "$GITHUB_ENV"
+          echo "  $bundle -> '$name' ($uuid)"
+          rm -f "$plist"
+
+      # App Store Connect is the only source that cannot drift, because it is the
+      # same registry that rejects a duplicate.
+      - name: Work out the next build number
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          n="$(node .github/scripts/asc-next-build.mjs)"
+          echo "next build number: $n"
+          echo "BUILD_NUMBER=$n" >> "$GITHUB_ENV"
+
+      - name: Archive
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          # No masking `||` here. `set -o pipefail` plus a trailing `|| something`
+          # reports a FAILED archive as a PASSING step, because the exit code
+          # becomes the fallback's. testflight.yml shipped exactly that bug.
+          run_archive() {
+            xcodebuild archive \
+              -project AjarParent.xcodeproj \
+              -scheme "$SCHEME" \
+              -configuration Release \
+              -destination 'generic/platform=iOS' \
+              -archivePath "$RUNNER_TEMP/AjarParent.xcarchive" \
+              OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN" \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="Apple Distribution" \
+              DEVELOPMENT_TEAM="$TEAM_ID" \
+              PROVISIONING_PROFILE_SPECIFIER="$AJAR_PROFILE_PARENT" \
+              CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+          }
+          if command -v xcbeautify >/dev/null 2>&1; then
+            run_archive | xcbeautify
+          else
+            run_archive
+          fi
+
+      - name: Export the .ipa
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>uploadSymbols</key><true/>
+            <key>destination</key><string>export</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict>
+              <key>${BUNDLE_ID}</key><string>${AJAR_PROFILE_PARENT}</string>
+            </dict>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/AjarParent.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export"
+
+      - name: Upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          IPA="$(ls "$RUNNER_TEMP"/export/*.ipa | head -1)"
+          echo "uploading $(basename "$IPA")"
+          xcrun altool --upload-app -f "$IPA" -t ios \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+          echo "::notice::Uploaded. Processing in App Store Connect takes a few minutes."
+
+      - name: Keep the archive and dSYMs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-parent-archive-${{ github.run_number }}
+          path: ${{ runner.temp }}/AjarParent.xcarchive
+          retention-days: 14
+
+      # The keychain holds the distribution PRIVATE KEY. Runners are ephemeral,
+      # but always() means a failed build does not leave it for the next job.
+      - name: Remove the signing keychain
+        if: always()
+        run: |
+          if [ -n "${KEYCHAIN:-}" ] && [ -f "$KEYCHAIN" ]; then
+            security delete-keychain "$KEYCHAIN" || true
+            echo "signing keychain removed"
+          fi
