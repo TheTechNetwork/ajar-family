@@ -462,38 +462,41 @@ before Family Controls was granted looks valid right up until it fails to sign.
 A `.p12` and a `.mobileprovision` are **binary**; a GitHub secret is text. `cat`
 them and you get terminal garbage, so base64 first.
 
-**macOS** (BSD `base64` — no wrapping, and `pbcopy` avoids selecting 3 KB of text
-by hand):
+**Linux / WSL** (GNU `base64`; `-w0` gives one unwrapped line):
 
 ```sh
-base64 -i distribution.p12 | pbcopy                    # APPLE_DIST_P12
-base64 -i Ajar_Child_AppStore.mobileprovision | pbcopy # APPLE_PROFILE_APP
+base64 -w0 distribution.p12                     # APPLE_DIST_P12
+base64 -w0 Ajar_Child_AppStore.mobileprovision  # APPLE_PROFILE_APP
 ```
 
-**Linux** (GNU `base64` wraps at 76 columns by default; `-w0` gives one line):
+**macOS** (BSD `base64` — does not wrap, and `pbcopy` beats selecting 3 KB by hand):
 
 ```sh
-base64 -w0 distribution.p12
+base64 -i distribution.p12 | pbcopy
 ```
 
 Then paste into **Settings → Secrets and variables → Actions → New repository
-secret**. Wrapped or single-line both work — the workflow pipes the secret
-through `base64 --decode`, which ignores newlines (verified both ways).
+secret**.
+
+> **On WSL, avoid `| clip.exe`.** Use `-w0` and select the terminal output, or
+> write to a file under `/mnt/c/` and open it in a Windows editor. Piping base64
+> through Windows clipboard tooling can round-trip it as CRLF, and **`base64
+> --decode` rejects embedded carriage returns outright** with `invalid input` —
+> verified, along with the fact that a single trailing CRLF is harmless. The
+> workflow now strips `\r` before decoding so this cannot bite either way, but a
+> clean single line is still the thing to paste.
+>
+> Nothing about the certificate flow needs macOS: `openssl` in WSL generates the
+> CSR (§3.1) and builds the `.p12`. Only the *build* needs a Mac, and that is the
+> CI runner's job.
 
 Two things that actually go wrong here:
 
-- **Do not `cat` the `.p12`.** Besides being unreadable, it can leave the raw
-  key in scrollback and shell history.
+- **Do not `cat` the `.p12`.** Besides being unreadable, it leaves the raw key in
+  scrollback and shell history.
 - **Check you copied all of it.** A truncated secret fails at `security import`
-  with a misleading error about the password. Compare lengths:
-  `base64 -w0 distribution.p12 | wc -c` against what the secret shows.
-
-`APPLE_TEAM_ID` is a variable, not a secret — a Team ID is public, and hiding it
-only makes CI logs harder to read. It is the ONE value that legitimately differs
-between whoever is building, which is why it is the only one injected.
-
-**The bundle ids are not configuration.** They are hardcoded in
-`apple/poc-contentfilter/project.yml` — see §8.4.
+  with a misleading error about the *password*. Compare
+  `base64 -w0 distribution.p12 | wc -c` against the length GitHub reports.
 
 **Step 3 — register the bundle id and create the app record.** §4 registers the
 App ID with its entitlements; then create the App Store Connect app record for

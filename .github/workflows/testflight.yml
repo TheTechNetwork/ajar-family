@@ -113,7 +113,11 @@ jobs:
           security set-keychain-settings -lut 3600 "$KEYCHAIN"   # no auto-lock mid-build
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
 
-          printf '%s' "$P12" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          # `tr -d` first: a secret pasted from Windows/WSL tooling can arrive
+          # CRLF-wrapped, and `base64 --decode` rejects embedded CRs outright
+          # ("invalid input") — verified. GNU's -i would ignore them but means
+          # "input file" to the BSD base64 on the macOS runner, so strip instead.
+          printf '%s' "$P12" | tr -d '\r\n' | base64 --decode > "$RUNNER_TEMP/dist.p12"
           security import "$RUNNER_TEMP/dist.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" \
             -T /usr/bin/codesign -T /usr/bin/security -f pkcs12
           rm -f "$RUNNER_TEMP/dist.p12"
@@ -151,7 +155,7 @@ jobs:
           for var in PROFILE_APP PROFILE_DATA PROFILE_CONTROL; do
             eval "b64=\$$var"
             raw="$RUNNER_TEMP/$var.mobileprovision"
-            printf '%s' "$b64" | base64 --decode > "$raw"
+            printf '%s' "$b64" | tr -d '\r\n' | base64 --decode > "$raw"   # see note above
             # A .mobileprovision is CMS-signed; strip the signature to read the plist.
             plist="$RUNNER_TEMP/$var.plist"
             security cms -D -i "$raw" > "$plist"
