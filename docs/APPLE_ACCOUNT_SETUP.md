@@ -188,20 +188,33 @@ Enable exactly the capabilities listed. `<org>` is the reverse-DNS org prefix.
 | `family.ajar.child` | **Child app** (container) | **Family Controls**; **Network Extensions**; **App Groups** |
 | `family.ajar.child.FilterDataProvider` | Content-**filter data** provider (`NEFilterDataProvider`) | **Network Extensions**; **App Groups** |
 | `family.ajar.child.FilterControlProvider` | Content-**filter control** provider (`NEFilterControlProvider`) | **Network Extensions**; **App Groups** |
+| `family.ajar.parent` | **Parent app** (not built yet — `apple/parent-app/` is a stub) | **Push Notifications**; **Sign in with Apple** |
 
-These are the ids hardcoded in `apple/poc-contentfilter/project.yml` and the three
-`.entitlements` files (§8.4) — they are what `testflight.yml` signs. Register
-these three plus the App Group below, and nothing else.
+The first three are hardcoded in `apple/poc-contentfilter/project.yml` and its
+`.entitlements` files (§8.4) — they are what `testflight.yml` signs today.
+`family.ajar.parent` is registered ahead of its target existing. Register all
+four plus the App Group below.
 
-**Enable only these capabilities.** Each extra one is a claim on the App Review
-form you then have to justify, so do not pre-enable against a future need:
+**Enable all of them now.** Register every App ID below with its full capability
+set rather than adding capabilities as each target lands, so no profile has to be
+regenerated later just because a merge turned one on.
 
-| Capability | Status | Why |
+| Capability | On | Note |
 |---|---|---|
-| **Push Notifications** | ❌ **not yet** | No Apple code imports `UserNotifications` and nothing registers for remote notifications. Enable it when APNs is actually wired, not before. |
-| **`url-filter-provider`** | ❌ **not yet** | That value belongs to the deferred `NEURLFilter` layer (PoC D, §9), which lives in the separate `apple/poc-urlfilter/` scaffold that CI never builds. |
-| **Sign in with Apple** | ❌ **no** | Only required if a third-party (Google/Facebook) login is offered. Ajar uses self-contained passwords, so 4.8 does not apply. |
-| **Parent iOS App ID** | ❌ **none exists** | `apple/parent-app/` is a README stub; the parent console is the web app in `web/parent/`. There is no parent app to register. |
+| **Push Notifications** | `family.ajar.child`, `family.ajar.parent` | no Apple code registers for remote notifications yet; the entitlement is inert until it does |
+| **`url-filter-provider`** | `family.ajar.child` (add to the existing NetworkExtension array) | for the `NEURLFilter` layer in `apple/poc-urlfilter/` (§9) |
+| **Sign in with Apple** | `family.ajar.parent` | 4.8 only compels it alongside a third-party login, which Ajar does not offer |
+
+One consequence to be ready for rather than surprised by: App Review asks you to
+justify the entitlements a binary carries, so a capability enabled ahead of the
+code that uses it is a question you answer at review time. That is a conversation,
+not a rejection — and it is the trade for never regenerating a profile mid-merge.
+
+> **App IDs, not App Store Connect records.** Registering an App ID is free and
+> reversible. An App Store Connect *record* is the permanent artifact — its bundle
+> id can never be renamed or reused — so create the record for `family.ajar.child`
+> only (§8), and add `family.ajar.parent`'s record when that app can actually be
+> uploaded.
 
 ### 4.1 Every entitlement, including the scaffolds not yet merged
 
@@ -242,8 +255,9 @@ that value in its array. `FC` = `com.apple.developer.family-controls`.
 | `family.ajar.parent` | `aps-environment` (Push Notifications) | for "new access request" |
 | | *Sign in with Apple* — **only** if a third-party login is ever added (4.8) | not planned; auth is self-contained passwords |
 
-No `FC`, no `NE`: the parent device enforces nothing. Register this App ID only
-when the target exists (§8.4).
+No `FC`, no `NE`: the parent device enforces nothing. The App ID **is**
+registered up front with Push and Sign in with Apple enabled (§4); only its App
+Store Connect record waits for a binary.
 
 **D. macOS child app — `macos/safari-extension/` (loose JS, NO Xcode project)**
 
@@ -443,13 +457,36 @@ id fails immediately with a readable error instead of signing the wrong binary.
 It also prints each profile's entitlement keys, because a profile generated
 before Family Controls was granted looks valid right up until it fails to sign.
 
-Base64 both the `.p12` and each `.mobileprovision` — they are binary, and a
-GitHub secret is text:
+#### Turning the binary files into pasteable secrets
+
+A `.p12` and a `.mobileprovision` are **binary**; a GitHub secret is text. `cat`
+them and you get terminal garbage, so base64 first.
+
+**macOS** (BSD `base64` — no wrapping, and `pbcopy` avoids selecting 3 KB of text
+by hand):
 
 ```sh
-base64 -i distribution.p12                     # APPLE_DIST_P12
-base64 -i Ajar_Child_AppStore.mobileprovision  # APPLE_PROFILE_APP
+base64 -i distribution.p12 | pbcopy                    # APPLE_DIST_P12
+base64 -i Ajar_Child_AppStore.mobileprovision | pbcopy # APPLE_PROFILE_APP
 ```
+
+**Linux** (GNU `base64` wraps at 76 columns by default; `-w0` gives one line):
+
+```sh
+base64 -w0 distribution.p12
+```
+
+Then paste into **Settings → Secrets and variables → Actions → New repository
+secret**. Wrapped or single-line both work — the workflow pipes the secret
+through `base64 --decode`, which ignores newlines (verified both ways).
+
+Two things that actually go wrong here:
+
+- **Do not `cat` the `.p12`.** Besides being unreadable, it can leave the raw
+  key in scrollback and shell history.
+- **Check you copied all of it.** A truncated secret fails at `security import`
+  with a misleading error about the password. Compare lengths:
+  `base64 -w0 distribution.p12 | wc -c` against what the secret shows.
 
 `APPLE_TEAM_ID` is a variable, not a secret — a Team ID is public, and hiding it
 only makes CI logs harder to read. It is the ONE value that legitimately differs
