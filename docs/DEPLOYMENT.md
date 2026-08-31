@@ -44,6 +44,9 @@
 
 - [ ] A **Cloudflare account** and a **Workers subdomain** enabled
       (`*.workers.dev`) — Dashboard → Workers & Pages. Workers overview:
+      **Note:** once `wrangler.toml` declares `[[routes]]`, Cloudflare turns the
+      `*.workers.dev` hostname OFF — `ajar-backend.<subdomain>.workers.dev` now
+      returns 404. The alpha is reached at the two custom domains below.
       <https://developers.cloudflare.com/workers/>.
 - [ ] **`wrangler` CLI** installed (`npm i -g wrangler`, or use `npx wrangler`).
       <https://developers.cloudflare.com/workers/wrangler/>.
@@ -92,9 +95,9 @@ wrangler deploy   # uses backend/wrangler.toml → main = dist/worker.js, nodejs
 Post-deploy smoke test (no state required — safe on the in-memory store):
 
 ```
-curl https://ajar-backend.<subdomain>.workers.dev/v1/health
+curl https://api.ajar.family/v1/health
 # → {"status":"ok","version":"0.0.0-alpha"}
-curl https://ajar-backend.<subdomain>.workers.dev/v1/signing-key
+curl https://api.ajar.family/v1/signing-key
 # → {"publicKeyB64":"...","alg":"Ed25519"}
 ```
 

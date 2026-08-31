@@ -159,8 +159,25 @@ jobs:
         env:
           BASE: ${{ vars.ALPHA_BASE_URL }}
         run: |
-          if [ -z "${BASE:-}" ]; then
-            echo "::notice::Set the ALPHA_BASE_URL repository variable to smoke-test after deploy."
+          # The hostname is DERIVED from wrangler.toml's first route, and that
+          # route WINS over the ALPHA_BASE_URL variable. A hostname configured in
+          # two places drifts: when the API moved to api.ajar.family the variable
+          # still named the old host, so the deploy succeeded and the smoke test
+          # failed against a hostname that no longer served the API. The route is
+          # what the Worker was just deployed with, so it cannot be stale.
+          #
+          # Route ORDER is load-bearing here for the same reason it is inside the
+          # Worker: the FIRST route is the API. See the comment in wrangler.toml.
+          # ALPHA_BASE_URL remains the fallback for a deploy with no custom route.
+          host="$(sed -n '/^\[\[routes\]\]/,/^$/p' backend/wrangler.toml \
+                  | sed -n 's/^pattern = "\(.*\)"/\1/p' | head -1)"
+          if [ -n "$host" ]; then
+            BASE="https://$host"
+            echo "::notice::Smoke-testing $BASE (first route in wrangler.toml)."
+          elif [ -n "${BASE:-}" ]; then
+            echo "::notice::No route in wrangler.toml; using ALPHA_BASE_URL ($BASE)."
+          else
+            echo "::notice::No route and no ALPHA_BASE_URL — skipping the smoke test."
             exit 0
           fi
           for i in 1 2 3 4 5; do
