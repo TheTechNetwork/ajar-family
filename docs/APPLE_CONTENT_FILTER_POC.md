@@ -114,7 +114,11 @@ filter in Settings" is the single most important A6 result and can only be answe
 here, on hardware. (Expected elsewhere: app-delete and iCloud-signout blocked at
 least in Posture B; DNS/VPN behavior undocumented → empirical.)
 
-## Build status (verified 2026-08-27)
+## Build status (verified 2026-08-27; re-verified 2026-08-31 on Apple silicon)
+
+Re-verified on a physical Apple silicon Mac (M4 Pro, macOS 27.0) under Xcode
+27.0 (build 27A5237l), Swift 6.4, XcodeGen 2.46.0 — the 2026-08-27 run was on an
+Apple Virtual Machine. Every row below was re-measured, not carried forward.
 
 | Item | Result |
 |---|---|
@@ -124,7 +128,49 @@ least in Posture B; DNS/VPN behavior undocumented → empirical.)
 | `FilterControlProvider.appex` `NSExtensionPointIdentifier` | `com.apple.networkextension.filter-control` |
 | Both `.appex` embedded in `ParentFilterPoC.app/PlugIns/` | OK |
 | SDK API corrections needed | 3 — see ADR-011 |
+| **`PolicySelfTest.runAll()` cross-platform vectors** | **ALL PASSED** (2026-08-31) — see below |
+| Builds for the iOS Simulator SDK | OK (compiles and installs; **does not run** — see below) |
 | Code-signed / installed / launched on a device | **NO — blocked, see ADR-012** |
+
+### The shared evaluator now has a compiler behind it (2026-08-31)
+
+`Shared/` was written without a compiler, and `FilterController.runSelfTest()`
+calls `PolicySelfTest.runAll()` as its acceptance gate for canonical-JSON parity,
+FNV/Bloom parity, host normalization, the safety floor and Ed25519 snapshot
+verification. Those vectors had never been executed. They have now, and they
+**all pass**.
+
+They do not need a device, an entitlement or a signing identity — `Shared/`
+imports only Foundation, CryptoKit and dnssd, so it compiles and runs natively:
+
+```sh
+cd apple/poc-contentfilter
+swiftc -o /tmp/selftest /tmp/main.swift Shared/*.swift   # main calls PolicySelfTest.runAll()
+/tmp/selftest        # -> "SELF-TEST: ALL VECTORS PASSED", exit 0
+```
+
+This is parity evidence for the evaluator only. It says nothing about
+enforcement, which still requires hardware.
+
+### Why the Simulator cannot substitute for hardware (measured 2026-08-31)
+
+ADR-012 asserted this; it is now measured. The project **builds, installs and
+launches** on an iOS 26.5 Simulator, because the iPhoneSimulator SDK ships the
+full `NEFilter*` header set. It cannot **run**: the Simulator has no
+NetworkExtension session daemon and no FamilyControls agent. A probe app calling
+the two APIs directly on the Simulator returns:
+
+| Call | Simulator result |
+|---|---|
+| `NEFilterManager.loadFromPreferences()` | succeeds (returns an unbacked stub) |
+| `NEFilterManager.saveToPreferences()` | **`NEFilterErrorDomain` Code=6 "IPC failed"** |
+| `AuthorizationCenter.requestAuthorization(for: .child)` | **`NSCocoaErrorDomain` Code=4099** — connection to `com.apple.FamilyControlsAgent` invalidated |
+| `launchctl list` inside the Simulator, grepped for the NE daemon | no match |
+
+The `loadFromPreferences()` success is the trap: a smoke test that stops there
+reads as "the filter works". The very next call fails. **No part of A1–A6 can be
+run on a Simulator** — every one of them depends on a flow actually reaching a
+provider, and no flow ever does.
 
 Reproduce (compile check, no signing identity needed):
 

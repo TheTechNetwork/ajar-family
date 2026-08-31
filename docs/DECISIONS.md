@@ -152,13 +152,41 @@ present under corrected names. `apple/poc-contentfilter` now compiles as written
 it requires a physical iOS 26 device: the Simulator cannot run a content filter,
 `NEURLFilter`, or FamilyControls `.child`, and `.child` itself requires a real
 child Apple ID inside a Family Sharing group.
-**What is actually blocked (2026-08-27):** the development host is an Apple
-Virtual Machine (`VirtualMac2,1`) with **no paired iOS device**
+**What was blocked (2026-08-27):** the development host was an Apple Virtual
+Machine (`VirtualMac2,1`) with **no paired iOS device**
 (`xcrun devicectl list devices` → none), **zero code-signing identities**
 (`security find-identity -p codesigning` → 0), no provisioning profiles, and no
-Apple Developer team configured in Xcode. The Family Controls and
-`content-filter-provider` entitlements cannot be issued without a team, so the
-app cannot be signed, installed, or run.
+Apple Developer team configured in Xcode.
+
+**What is blocked now (2026-08-31, re-measured on a physical M4 Pro Mac).** Most
+of the 2026-08-27 blockers are gone; the ADR stays open because the ones that
+matter are not:
+
+| Was blocked | Now |
+|---|---|
+| Apple VM host | **Resolved** — physical Apple silicon Mac, macOS 27.0, Xcode 27.0 |
+| Zero signing identities | **Resolved** — 3 valid identities, incl. an Apple Distribution cert |
+| Compiler never run on `Shared/` | **Resolved** — `PolicySelfTest.runAll()` passes every cross-platform vector |
+| No paired iOS device | **STILL BLOCKED** — `devicectl list devices` returns simulators only |
+| No App IDs / App Group registered | **STILL BLOCKED** — nothing under `family.ajar.*` exists in either team |
+| Family Controls entitlement | **STILL BLOCKED** — not requested; distribution signing impossible until granted |
+
+The team question is now decided: the `family.ajar.*` identifiers belong to
+**Consultinc Group LLC, Team ID `2BPX4R682U`** (the Organization team, per
+APPLE_ACCOUNT_SETUP §1). The Individual team `2X6C7C96PZ` holds the only
+distribution certificate on the host but must **not** own these ids — the
+entitlements are org-gated and an Individual account cannot be converted.
+
+**The Simulator is not a fallback, and this is now measured rather than
+asserted.** The project builds, installs and launches on an iOS 26.5 Simulator,
+because the simulator SDK ships the full `NEFilter*` headers. It cannot run:
+`NEFilterManager.saveToPreferences()` fails with `NEFilterErrorDomain` Code=6
+("IPC failed") and `AuthorizationCenter.requestAuthorization(for: .child)` fails
+with `NSCocoaErrorDomain` Code=4099 (connection to `com.apple.FamilyControlsAgent`
+invalidated); the Simulator runs no NetworkExtension daemon at all. Note the
+trap: `loadFromPreferences()` *succeeds* against an unbacked stub, so a smoke
+test that stops one call early will report a working filter. See
+APPLE_CONTENT_FILTER_POC.md.
 **Decision:** record PoC A as **build-green / test-not-run**. The Observed
 Results table in `docs/APPLE_CONTENT_FILTER_POC.md` is deliberately left empty
 rather than filled with expected values — no number in this repo should be one

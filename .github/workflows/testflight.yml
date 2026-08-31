@@ -200,22 +200,37 @@ jobs:
       - name: Archive
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          set -o pipefail
-          xcodebuild archive \
-            -project ParentFilterPoC.xcodeproj \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/Ajar.xcarchive" \
-            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
-            AJAR_PROFILE_APP="$AJAR_PROFILE_APP" \
-            AJAR_PROFILE_DATA="$AJAR_PROFILE_DATA" \
-            AJAR_PROFILE_CONTROL="$AJAR_PROFILE_CONTROL" \
-            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
-            | xcbeautify || xcodebuild -version
+          set -euo pipefail
+          # The archive runs through a shell function so the formatter can be
+          # made optional WITHOUT repeating the invocation.
+          #
+          # It used to end `| xcbeautify || xcodebuild -version`. That reported a
+          # FAILED ARCHIVE AS A PASSING STEP: `set -o pipefail` correctly fails
+          # the pipeline, then `||` runs `xcodebuild -version`, which exits 0 and
+          # becomes the step's exit code. The build then failed later, in Export,
+          # as a confusing "archive not found". Verified: `set -o pipefail;
+          # false | cat || echo hi` exits 0. Do not reintroduce the `||`.
+          run_archive() {
+            xcodebuild archive \
+              -project ParentFilterPoC.xcodeproj \
+              -scheme "$SCHEME" \
+              -configuration Release \
+              -destination 'generic/platform=iOS' \
+              -archivePath "$RUNNER_TEMP/Ajar.xcarchive" \
+              OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN" \
+              CODE_SIGN_STYLE=Manual \
+              CODE_SIGN_IDENTITY="Apple Distribution" \
+              DEVELOPMENT_TEAM="$TEAM_ID" \
+              AJAR_PROFILE_APP="$AJAR_PROFILE_APP" \
+              AJAR_PROFILE_DATA="$AJAR_PROFILE_DATA" \
+              AJAR_PROFILE_CONTROL="$AJAR_PROFILE_CONTROL" \
+              CURRENT_PROJECT_VERSION="${{ github.run_number }}"
+          }
+          if command -v xcbeautify >/dev/null 2>&1; then
+            run_archive | xcbeautify
+          else
+            run_archive
+          fi
 
       - name: Export the .ipa
         working-directory: ${{ env.PROJECT_DIR }}
