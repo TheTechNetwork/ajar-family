@@ -32,3 +32,13 @@ windows/agent/ajar-agent.exe
 
 # workerd/miniflare local state written by the workerd live test
 .wrangler/
+
+# Signing material. A distribution private key signs releases as us, and a .p12
+# bundles it with the cert — neither is ever a repo artifact, and a distribution
+# certificate cannot be re-issued against a key you lost. Keep them in the
+# password manager, and in GitHub secrets if CI has to import one.
+*.key
+*.p12
+*.mobileprovision
+*.certSigningRequest
+*.cer

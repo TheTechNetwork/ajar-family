@@ -46,9 +46,9 @@ calendar time attached, and no amount of correct CI gets past it: development
 signing works without it, App Store and TestFlight signing do not. It is
 independent of steps 4-8, so file it first and do the rest while you wait.
 
-You do **not** create certificates or provisioning profiles anywhere in this
-list — CI mints both (§3, §5). If you find yourself in Keychain Access, stop and
-re-read §3.1.
+The **distribution certificate is created by hand** from a CSR (§3.1) — but not
+in Keychain Access, and not on a Mac: OpenSSL produces the CSR anywhere. Add it
+between steps 4 and 5. Provisioning profiles are still minted by CI (§5).
 
 ---
 
@@ -114,7 +114,9 @@ re-read §3.1.
       hardware + a signed dev build, and Xcode's *Automatically manage signing*
       creates this for you on that Mac.
 - [ ] **Apple Distribution** cert — signs **App Store / TestFlight / ad-hoc**
-      builds. **CI creates this.** Do not pre-create one (see the cap below).
+      builds. **Created manually from a CSR** — see §3.1. (This was previously
+      left to CI; automatic provisioning hit an Apple-side cap in practice, so
+      the certificate is now made by hand and handed to CI.)
 - [ ] Note: the special entitlements (Family Controls, NetworkExtension values)
       attach to **App IDs / provisioning profiles**, not to the cert itself.
 
@@ -145,17 +147,26 @@ openssl pkcs12 -export -inkey ajar-distribution.key -in distribution.pem \
   -out distribution.p12 -name "Apple Distribution"
 ```
 
-**But prefer the API-key path, and here is the concrete reason.** Apple allows a
-team **one active distribution certificate** for standard App Store distribution
-(two only for in-house enterprise distribution). If you create one by hand *and*
-CI tries to create one, you are contending for a single slot — and revoking the
-wrong one invalidates every profile built against it. The manual route also means
-a long-lived private key sitting in CI secrets and an annual rotation someone has
-to remember. `-allowProvisioningUpdates` avoids all three.
+**This is the path we are taking.** `-allowProvisioningUpdates` runs into an
+Apple-side cap on how much it will create automatically, so the certificate is
+made by hand from the CSR above and handed to CI rather than minted per run.
 
-Keep the OpenSSL recipe above for the case where you genuinely need a cert
-outside CI (a Developer ID build, or debugging a signing failure), not as the
-default.
+Three things follow from that, and they are the cost of this route — worth
+knowing rather than rediscovering:
+
+1. **Apple allows a team one active distribution certificate** for standard App
+   Store distribution (two only for in-house enterprise). Revoking the wrong one
+   invalidates every provisioning profile built against it, so check what the
+   team already holds before creating another.
+2. **The private key is now the irreplaceable artifact.** Apple stores only the
+   certificate; it cannot re-issue one against a key you no longer have. Lose it
+   and you revoke and start over. It belongs in the password manager, and in
+   GitHub secrets only as the `.p12` CI imports.
+3. **It expires annually** (§12), and unlike the automatic path nothing renews it
+   for you. That is now a calendar entry, not a non-event.
+
+The repo `.gitignore` refuses `*.key`, `*.p12`, `*.cer`, `*.certSigningRequest`
+and `*.mobileprovision` so none of this can be committed by reflex.
 
 ---
 
@@ -499,7 +510,7 @@ checklist (from the PoC-D research; see `docs/APPLE_URL_FILTER_POC.md`):
 | Organization enrollment (§1) | ✅ required | — |
 | Team + Team ID + roles (§2) | ✅ required | — |
 | **Apple Development** signing cert (§3) | ✅ only to sign from a Mac (Xcode makes it) | — |
-| Apple **Distribution** cert (§3) | — | ✅ **CI creates it** — do not pre-create (§3.1) |
+| Apple **Distribution** cert (§3) | — | ✅ created by hand from a CSR (§3.1) |
 | Child app **App ID** `family.ajar.child` (§4) | ✅ required | — |
 | The two filter-provider extension App IDs (§4) | ✅ required | — |
 | **App Group** `group.family.ajar.child` (§4) | ✅ required | — |
