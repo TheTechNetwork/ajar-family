@@ -19,17 +19,34 @@ import os.log
 /// flow to the CONTROL provider — the extension Apple does permit to do network
 /// work. See `FilterControlProvider.handleNewFlow`.
 ///
-/// UNVERIFIED: `needRules()` round-tripping to the control provider has not been
-/// exercised on a device (nothing here has been compiled). If it proves to stall
-/// flows, set `askControlProviderForUnknownHosts = false` below: the filter then
-/// degrades to "first sighting of a host uses no CNAME chain, later flows are
-/// covered", which is the behavior the browser extensions have.
+/// VERIFIED 2026-08-31, and it does stall flows — the switch below is now OFF.
+///
+/// On an iPhone 16 Pro Max (iOS 27.0) with `needRules()` enabled, pages loaded
+/// partially or not at all and showed NO block page, which is the signature of a
+/// flow that was neither allowed nor denied but simply never answered. The cause
+/// is in `FilterControlProvider`: every `needRules()` flow is answered from ONE
+/// SERIAL `DispatchQueue`, and each answer performs a synchronous CNAME walk with
+/// a 0.4 s budget. A single page fans out to dozens of hosts, so the Nth flow
+/// waits N × up-to-0.4 s while the system's own control-verdict timeout runs out
+/// underneath it. Even a safety-floor page failed this way — not because the
+/// floor was denied (it is allowed before the trust check, and was) but because
+/// its SUBRESOURCES took the `needRules()` path.
+///
+/// Degraded behaviour with the switch off: the first sighting of a host is
+/// decided with no CNAME chain, later flows to it are covered from the cache.
+/// That is exactly what the browser extensions do, so it is a posture the
+/// product already ships elsewhere rather than a new compromise.
+///
+/// Turning this back on needs the control provider fixed first — at minimum a
+/// concurrent queue, and more likely resolving CNAMEs off the flow path entirely
+/// rather than while a flow waits.
 ///
 /// Docs: https://developer.apple.com/documentation/networkextension/nefilterdataprovider
 final class FilterDataProvider: NEFilterDataProvider {
 
-    /// Kill switch for the `needRules()` path described above.
-    static let askControlProviderForUnknownHosts = true
+    /// Kill switch for the `needRules()` path described above. OFF: with it on,
+    /// browsing stalls on device (measured 2026-08-31 — see the type doc).
+    static let askControlProviderForUnknownHosts = false
 
     private let log = Logger(subsystem: "family.ajar.child", category: "data")
     private let store = PolicyStore.shared
