@@ -39,7 +39,7 @@ permissions:
 jobs:
   build:
     if: inputs.confirm == 'testflight'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       SCHEME: ParentFilterPoC
@@ -74,6 +74,38 @@ jobs:
             echo "API key is still needed — it authenticates the upload."
             exit 1
           fi
+
+      # App Store Connect REFUSES any build made with an SDK older than iOS 26,
+      # and it refuses it at upload — after a full archive and export have
+      # succeeded:
+      #   SDK version issue. This app was built with the iOS 18.5 SDK.
+      # The runner image ships several Xcodes and the default is not always the
+      # newest, so pick explicitly and fail here, loudly, rather than 15 minutes
+      # later at Apple. Note the project's deployment target is already iOS 26.0
+      # and xcodebuild still archived against the 18.5 SDK without complaint,
+      # which is precisely why this needs asserting rather than assuming.
+      - name: Select an Xcode with the iOS 26 SDK or newer
+        run: |
+          set -euo pipefail
+          best=""; best_v=0
+          for app in /Applications/Xcode*.app; do
+            [ -e "$app" ] || continue
+            v="$(/usr/bin/defaults read "$app/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo 0)"
+            major="${v%%.*}"
+            case "$major" in ''|*[!0-9]*) continue ;; esac
+            if [ "$major" -ge 26 ] && [ "$major" -gt "$best_v" ]; then best="$app"; best_v="$major"; fi
+          done
+          if [ -z "$best" ]; then
+            echo "::error::No Xcode 26+ on this runner. Available:"
+            for app in /Applications/Xcode*.app; do
+              echo "  $app $(/usr/bin/defaults read "$app/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo '?')"
+            done
+            exit 1
+          fi
+          sudo xcode-select -s "$best/Contents/Developer"
+          echo "using $best"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i "iphoneos" || true
 
       - name: Install XcodeGen
         run: brew install xcodegen
