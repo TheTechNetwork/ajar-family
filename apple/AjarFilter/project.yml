@@ -38,6 +38,12 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1,2"
+    # Defaults. CI overrides CURRENT_PROJECT_VERSION on the xcodebuild command
+    # line with the next build number App Store Connect will accept; the
+    # Info.plist entries below interpolate these rather than hardcoding, or the
+    # override silently does nothing (see the comment on CFBundleVersion).
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 
 targets:
@@ -89,6 +95,16 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: ParentFilter PoC
+        # XcodeGen writes a LITERAL CFBundleVersion of "1" when this is not set,
+        # so passing CURRENT_PROJECT_VERSION=N to xcodebuild changed a build
+        # setting nothing referenced. CI archived and exported happily and then
+        # the upload was rejected:
+        #   The bundle version must be higher than the previously uploaded
+        #   version: '1'
+        # — with the correct number sitting in a variable one layer away. These
+        # two keys must interpolate the settings, not restate their values.
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
         # Export compliance, answered ONCE here instead of per upload. Apple only
         # requires documentation for non-exempt encryption; encryption built into
         # the OS (HTTPS via URLSession, CryptoKit) is exempt, and that is all this
@@ -137,6 +153,10 @@ targets:
       path: FilterDataProvider/Info.plist
       properties:
         CFBundleDisplayName: ParentFilter Data Provider
+        # Must match the host app exactly or App Store validation refuses the
+        # bundle; same interpolation as the app for the same reason.
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.networkextension.filter-data
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FilterDataProvider
@@ -158,6 +178,10 @@ targets:
       path: FilterControlProvider/Info.plist
       properties:
         CFBundleDisplayName: ParentFilter Control Provider
+        # Must match the host app exactly or App Store validation refuses the
+        # bundle; same interpolation as the app for the same reason.
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.networkextension.filter-control
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FilterControlProvider

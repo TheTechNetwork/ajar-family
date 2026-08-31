@@ -39,7 +39,7 @@ permissions:
 jobs:
   build:
     if: inputs.confirm == 'testflight'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       SCHEME: AjarFilter
@@ -74,6 +74,53 @@ jobs:
             echo "API key is still needed — it authenticates the upload."
             exit 1
           fi
+
+      # App Store Connect REFUSES any build made with an SDK older than iOS 26,
+      # and it refuses it at upload — after a full archive and export have
+      # succeeded:
+      #   SDK version issue. This app was built with the iOS 18.5 SDK.
+      # The runner image ships several Xcodes and the default is not always the
+      # newest, so pick explicitly and fail here, loudly, rather than 15 minutes
+      # later at Apple. Note the project's deployment target is already iOS 26.0
+      # and xcodebuild still archived against the 18.5 SDK without complaint,
+      # which is precisely why this needs asserting rather than assuming.
+      - name: Select an Xcode with the iOS 26 SDK or newer
+        run: |
+          set -euo pipefail
+          # App Store Connect REFUSES any build made with an SDK older than iOS
+          # 26, and refuses it at UPLOAD — after a full archive and export have
+          # succeeded:
+          #   SDK version issue. This app was built with the iOS 18.5 SDK.
+          # The runner default is not always the newest Xcode installed, so pick
+          # explicitly and fail here rather than 15 minutes later at Apple. The
+          # project's deployment target is already iOS 26.0 and xcodebuild still
+          # archived against an 18.5 SDK without complaint, which is exactly why
+          # this is asserted rather than assumed.
+          #
+          # Sort by FULL version, not major. Comparing only the major picked
+          # whichever 26.x sorted first (26.0.1), whose iphonesimulator SDK
+          # 23A339 matched none of the runtimes actually installed — and actool
+          # then failed the archive with "No simulator runtime version from
+          # [...] available", on a DEVICE build, for an app icon.
+          best="$(for app in /Applications/Xcode*.app; do
+                    [ -e "$app" ] || continue
+                    v="$(/usr/bin/defaults read "$app/Contents/Info" CFBundleShortVersionString 2>/dev/null || true)"
+                    case "${v%%.*}" in ''|*[!0-9]*) continue ;; esac
+                    [ "${v%%.*}" -ge 26 ] && printf '%s\t%s\n' "$v" "$app"
+                  done | sort -V | tail -1 | cut -f2)"
+          if [ -z "$best" ]; then
+            echo "::error::No Xcode 26+ on this runner. Available:"
+            for app in /Applications/Xcode*.app; do
+              echo "  $app $(/usr/bin/defaults read "$app/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo '?')"
+            done
+            exit 1
+          fi
+          sudo xcode-select -s "$best/Contents/Developer"
+          echo "using $best"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -iE "iphoneos|iphonesimulator" || true
+          echo "installed simulator runtimes:"
+          xcrun simctl list runtimes 2>/dev/null | grep -i "^iOS" || echo "  (none)"
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -197,6 +244,26 @@ jobs:
             esac
           done
 
+      # `github.run_number` is a per-workflow counter that knows nothing about
+      # builds uploaded any other way, so the first CI run asked App Store
+      # Connect to accept build `1` — which a manual Xcode upload had already
+      # used — and the upload failed AFTER a full archive and export:
+      #   ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE
+      #   The bundle version must be higher than the previously uploaded version
+      # Apple is the only source that cannot drift here, because it is the same
+      # registry that rejects the duplicate.
+      - name: Work out the next build number
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          BUNDLE_ID: family.ajar.child
+        run: |
+          set -euo pipefail
+          n="$(node .github/scripts/asc-next-build.mjs)"
+          echo "next build number: $n"
+          echo "BUILD_NUMBER=$n" >> "$GITHUB_ENV"
+
       - name: Archive
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
@@ -224,7 +291,7 @@ jobs:
               AJAR_PROFILE_APP="$AJAR_PROFILE_APP" \
               AJAR_PROFILE_DATA="$AJAR_PROFILE_DATA" \
               AJAR_PROFILE_CONTROL="$AJAR_PROFILE_CONTROL" \
-              CURRENT_PROJECT_VERSION="${{ github.run_number }}"
+              CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
           }
           if command -v xcbeautify >/dev/null 2>&1; then
             run_archive | xcbeautify
