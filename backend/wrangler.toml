@@ -31,5 +31,27 @@ binding = "DB"
 database_name = "ajar-alpha"
 database_id = "df4b4ce0-0895-4b8a-864c-62a589240e25"
 
+# ---------------------------------------------------------------------------
+# CUSTOM DOMAIN for the Request-Access block page.
+#
+# iOS renders `https://blocked.ajar.family/blocked?u=<flow url>` inside the
+# content filter's remediation view when a flow is blocked, so this hostname is
+# load-bearing for the whole request flow: if it does not resolve, the block
+# page still appears but "Ask a parent" goes nowhere. That is exactly the state
+# the PoC was in while the URL pointed at the reserved `parentfilter.example`.
+#
+# `custom_domain = true` makes Wrangler create and manage the DNS record itself,
+# so there is no separate record to add by hand and no chance of the two drifting.
+# It requires the ajar.family ZONE to be in the same Cloudflare account as the
+# Worker; if it is not, `wrangler deploy` fails here with a zone-lookup error
+# rather than silently deploying without the hostname.
+#
+# The hostname takes ALL paths, not just /blocked, so the full API is reachable
+# here too. The app's `BackendClient.baseURL` can therefore point at the same
+# origin, which keeps a child device talking to one host instead of two.
+[[routes]]
+pattern = "blocked.ajar.family"
+custom_domain = true
+
 [observability]
 enabled = true
