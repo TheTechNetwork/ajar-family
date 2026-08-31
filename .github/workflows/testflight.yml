@@ -197,6 +197,26 @@ jobs:
             esac
           done
 
+      # `github.run_number` is a per-workflow counter that knows nothing about
+      # builds uploaded any other way, so the first CI run asked App Store
+      # Connect to accept build `1` — which a manual Xcode upload had already
+      # used — and the upload failed AFTER a full archive and export:
+      #   ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE
+      #   The bundle version must be higher than the previously uploaded version
+      # Apple is the only source that cannot drift here, because it is the same
+      # registry that rejects the duplicate.
+      - name: Work out the next build number
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          BUNDLE_ID: family.ajar.child
+        run: |
+          set -euo pipefail
+          n="$(node .github/scripts/asc-next-build.mjs)"
+          echo "next build number: $n"
+          echo "BUILD_NUMBER=$n" >> "$GITHUB_ENV"
+
       - name: Archive
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
@@ -224,7 +244,7 @@ jobs:
               AJAR_PROFILE_APP="$AJAR_PROFILE_APP" \
               AJAR_PROFILE_DATA="$AJAR_PROFILE_DATA" \
               AJAR_PROFILE_CONTROL="$AJAR_PROFILE_CONTROL" \
-              CURRENT_PROJECT_VERSION="${{ github.run_number }}"
+              CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
           }
           if command -v xcbeautify >/dev/null 2>&1; then
             run_archive | xcbeautify
