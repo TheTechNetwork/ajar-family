@@ -1,0 +1,138 @@
+# XcodeGen definition for PoC A (docs/APPLE_CONTENT_FILTER_POC.md).
+#
+#   brew install xcodegen && xcodegen generate
+#
+# Signing: pass your team on the command line or set it in Xcode, e.g.
+#   xcodebuild -project ParentFilterPoC.xcodeproj -scheme ParentFilterPoC \
+#     -destination 'generic/platform=iOS' DEVELOPMENT_TEAM=ABCDE12345 build
+# The Family Controls + Network Extension entitlements require a real team;
+# a compile/link-only check can use CODE_SIGNING_ALLOWED=NO.
+
+name: ParentFilterPoC
+options:
+  bundleIdPrefix: family.ajar
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    # Supplied at build time (xcodebuild DEVELOPMENT_TEAM=... or Xcode UI).
+    DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+
+targets:
+
+  ParentFilterPoC:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: Shared          # compiled into every target (no embedded framework)
+    dependencies:
+      - target: FilterDataProvider
+      - target: FilterControlProvider
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.child
+        CODE_SIGN_ENTITLEMENTS: App/ParentFilterPoC.entitlements
+        # Manual signing in CI (docs/APPLE_ACCOUNT_SETUP.md §3.1, §5). Each
+        # target reads a DIFFERENT variable because a build setting passed on
+        # the xcodebuild command line applies to every target at once — one
+        # shared name would sign all three with the app's profile. Empty under
+        # local automatic signing, where Xcode ignores it.
+        PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_APP)
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        # App Store validation refuses an upload without an icon, with two
+        # separate errors: "Missing required icon files" and "Missing Info.plist
+        # CFBundleIconName". Naming the icon set here fixes BOTH — the asset
+        # catalog compiler emits the icon assets and writes CFBundleIconName into
+        # the built Info.plist, which is not a key you add by hand.
+        # A single 1024x1024 opaque PNG is sufficient on modern Xcode; an icon
+        # with an alpha channel is rejected, so App/Assets.xcassets holds a
+        # flattened one.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: ParentFilter PoC
+        # Export compliance, answered ONCE here instead of per upload. Apple only
+        # requires documentation for non-exempt encryption; encryption built into
+        # the OS (HTTPS via URLSession, CryptoKit) is exempt, and that is all this
+        # app uses — TLS to the backend plus Ed25519 snapshot verification through
+        # CryptoKit. Without this key every single TestFlight upload parks in App
+        # Store Connect waiting for a human to answer the encryption questions,
+        # which is exactly the manual gate CI exists to remove.
+        # Re-confirm this if a third-party crypto library is ever linked.
+        # https://developer.apple.com/documentation/bundleresources/information-property-list/itsappusesnonexemptencryption
+        ITSAppUsesNonExemptEncryption: false
+        # How the Request-Access block page hands back to the app. The page is
+        # served over https (NEFilterProvider requires an http/https remediation
+        # URL, so the block page itself CANNOT be a custom scheme), and its
+        # button links to ajar://request?u=… — the app then files the request
+        # with its device token. Universal Links would avoid the scheme entirely
+        # and are the right end state, but they need an apple-app-site-association
+        # on blocked.ajar.family plus the Associated Domains capability; this
+        # works today and does not gate the flow on DNS.
+        CFBundleURLTypes:
+          - CFBundleURLName: family.ajar.child
+            CFBundleURLSchemes:
+              - ajar
+        UIApplicationSupportsIndirectInputEvents: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+
+  # Content filter DATA provider — sees every flow, returns allow/drop/remediate.
+  FilterDataProvider:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: FilterDataProvider
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.child.FilterDataProvider
+        CODE_SIGN_ENTITLEMENTS: FilterDataProvider/FilterDataProvider.entitlements
+        PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_DATA)
+    info:
+      path: FilterDataProvider/Info.plist
+      properties:
+        CFBundleDisplayName: ParentFilter Data Provider
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.networkextension.filter-data
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FilterDataProvider
+
+  # Content filter CONTROL provider — owns remediationMap + notifyRulesChanged().
+  FilterControlProvider:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: FilterControlProvider
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.child.FilterControlProvider
+        CODE_SIGN_ENTITLEMENTS: FilterControlProvider/FilterControlProvider.entitlements
+        PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_CONTROL)
+    info:
+      path: FilterControlProvider/Info.plist
+      properties:
+        CFBundleDisplayName: ParentFilter Control Provider
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.networkextension.filter-control
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FilterControlProvider
+
+schemes:
+  ParentFilterPoC:
+    build:
+      targets:
+        ParentFilterPoC: all
+    run:
+      config: Debug

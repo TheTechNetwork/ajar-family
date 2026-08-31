@@ -1,0 +1,203 @@
+name: Deploy backend (Cloudflare Workers)
+
+# Deploys the Ajar backend Worker. The design goal is that a deployment needs
+# NOBODY at a terminal: GitHub is the single place both the deploy credentials
+# and the Worker's runtime secrets are managed, and the workflow pushes the
+# latter into Cloudflare on every deploy.
+#
+# workflow_dispatch is deliberately included so an alpha can be shipped from a
+# feature branch WITHOUT merging its pull request — merging is a review
+# decision, not a deployment mechanism, and conflating the two is how unfinished
+# work gets merged just to get it deployed.
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'shared/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/deploy.yml'
+      - '!**/*.md'
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm shipping this ref'
+        required: true
+        default: ''
+
+# One deploy per ref. Not keyed by SHA: when two commits land close together the
+# NEWEST is the one that should ship, so an older pending run is dropped. A
+# cancelled pull-request check is waste; a cancelled deploy is a thing that did
+# not ship while reporting nothing wrong — hence cancel-in-progress on PRs only.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Needs no Cloudflare account. --dry-run performs the whole bundle, which is
+  # the real portability test: the Worker imports @ajar/shared, and if anything
+  # in that shared code starts pulling in a node: builtin the compat flags do
+  # not allow, the bundle fails HERE with the offending import named, rather
+  # than at deploy time or, worse, at runtime in front of a family.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - name: Bundle the Worker without deploying it
+        working-directory: backend
+        run: npx wrangler deploy --dry-run --outdir /tmp/worker-build
+
+      # The Worker RUNNING in workerd, with a real local D1 — not just parsing.
+      # Everything else runs in Node, where the store is node:sqlite, the crypto
+      # is Node's and there is no CPU budget; the deployment shares none of that.
+      # This drives the real product flow (register, enrol, ask, approve, re-sync)
+      # against the runtime it ships to, which is the only place the D1 adapter,
+      # 210k-iteration PBKDF2 and workerd's Ed25519 are exercised at all.
+      - name: Run the Worker in workerd and drive it
+        working-directory: backend
+        run: npm run test:workerd
+
+  deploy:
+    needs: check
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'workflow_dispatch' || inputs.confirm == 'deploy')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+
+      # A step's own `env:` is NOT visible to that step's own `if:` — the guard
+      # has to be a separate step that writes an output.
+      - name: Check the account is configured
+        id: creds
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::notice::CLOUDFLARE_API_TOKEN is not set — built but not deployed. See docs/DEPLOYMENT.md."
+            echo "have=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Runtime secrets BEFORE the deploy, so a first-ever deploy comes up
+      # already configured instead of serving a window of 500s. The backend
+      # refuses to run on Workers without AUTH_SECRET, by design: a parental
+      # control with a guessable token secret is worse than one that is down.
+      - name: Sync the Worker's runtime secrets
+        if: steps.creds.outputs.have == 'true'
+        working-directory: backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          SIGNING_PUBLIC_KEY_B64: ${{ secrets.SIGNING_PUBLIC_KEY_B64 }}
+          SIGNING_PRIVATE_KEY_B64: ${{ secrets.SIGNING_PRIVATE_KEY_B64 }}
+          # Optional. Without mail, password reset and approval notifications
+          # are generated but never delivered.
+          MAIL_ENDPOINT: ${{ secrets.MAIL_ENDPOINT }}
+          MAIL_TOKEN: ${{ secrets.MAIL_TOKEN }}
+          MAIL_FROM: ${{ vars.MAIL_FROM }}
+          PASSWORD_RESET_URL: ${{ vars.PASSWORD_RESET_URL }}
+          ALLOWED_ORIGIN: ${{ vars.ALLOWED_ORIGIN }}
+          # Ops-only: gates the GLOBAL category dataset import. Unset = the
+          # endpoint is disabled, which is the correct default.
+          CATEGORY_ADMIN_TOKEN: ${{ secrets.CATEGORY_ADMIN_TOKEN }}
+        run: |
+          set -u
+          missing=""
+          for name in AUTH_SECRET SIGNING_PUBLIC_KEY_B64 SIGNING_PRIVATE_KEY_B64 \
+                      MAIL_ENDPOINT MAIL_TOKEN MAIL_FROM PASSWORD_RESET_URL \
+                      ALLOWED_ORIGIN CATEGORY_ADMIN_TOKEN; do
+            value="$(printenv "$name" || true)"
+            if [ -z "$value" ]; then missing="$missing $name"; continue; fi
+            # printf, not echo: a key or token can contain backslashes that some
+            # shells' echo would interpret.
+            printf '%s' "$value" | npx wrangler secret put "$name"
+            echo "synced $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::Not set as repository secrets, so left as they are in Cloudflare:$missing"
+            echo "The Worker returns 500 to everything until AUTH_SECRET exists (deliberate)."
+            echo "Without SIGNING_* it mints a NEW keypair per isolate, so every device's cached"
+            echo "policy fails signature verification and enforcement stops. Set them."
+          fi
+
+      - name: Deploy
+        if: steps.creds.outputs.have == 'true'
+        working-directory: backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy
+
+      # Prove the thing that is actually deployed answers, rather than trusting
+      # that a successful upload means a working service.
+      - name: Smoke-test the deployment
+        if: steps.creds.outputs.have == 'true'
+        env:
+          BASE: ${{ vars.ALPHA_BASE_URL }}
+        run: |
+          # The hostname is DERIVED from wrangler.toml's first route, and that
+          # route WINS over the ALPHA_BASE_URL variable. A hostname configured in
+          # two places drifts: when the API moved to api.ajar.family the variable
+          # still named the old host, so the deploy succeeded and the smoke test
+          # failed against a hostname that no longer served the API. The route is
+          # what the Worker was just deployed with, so it cannot be stale.
+          #
+          # Route ORDER is load-bearing here for the same reason it is inside the
+          # Worker: the FIRST route is the API. See the comment in wrangler.toml.
+          # ALPHA_BASE_URL remains the fallback for a deploy with no custom route.
+          host="$(sed -n '/^\[\[routes\]\]/,/^$/p' backend/wrangler.toml \
+                  | sed -n 's/^pattern = "\(.*\)"/\1/p' | head -1)"
+          if [ -n "$host" ]; then
+            BASE="https://$host"
+            echo "::notice::Smoke-testing $BASE (first route in wrangler.toml)."
+          elif [ -n "${BASE:-}" ]; then
+            echo "::notice::No route in wrangler.toml; using ALPHA_BASE_URL ($BASE)."
+          else
+            echo "::notice::No route and no ALPHA_BASE_URL — skipping the smoke test."
+            exit 0
+          fi
+          for i in 1 2 3 4 5; do
+            code="$(curl -sS -o /tmp/health -w '%{http_code}' "$BASE/v1/health" || true)"
+            if [ "$code" = "200" ]; then
+              echo "health: $(cat /tmp/health)"
+              # A signing key must be SERVED, or devices cannot verify policy at
+              # all. This used to be `curl ... | head -c 200`, which CLAIMED to
+              # check that and did not: head exits 0 whatever curl does, and the
+              # pipeline takes head's status. Same masked-failure shape as the
+              # archive step in testflight.yml. Assert the response instead.
+              key="$(curl -sS --fail "$BASE/v1/signing-key" || true)"
+              case "$key" in
+                *publicKey*) echo "signing key served: $(printf '%s' "$key" | head -c 120)" ;;
+                *) echo "::error::/v1/signing-key did not return a public key: ${key:-<no response>}"
+                   exit 1 ;;
+              esac
+              exit 0
+            fi
+            echo "attempt $i: HTTP $code — retrying"; sleep 5
+          done
+          echo "::error::Deployed Worker did not return a healthy /v1/health"
+          exit 1

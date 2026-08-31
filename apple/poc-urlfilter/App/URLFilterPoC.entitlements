@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  App target entitlements for PoC D (NEURLFilter Bloom+PIR blocklist).
+
+  The NetworkExtension entitlement takes the new value `url-filter-provider`
+  (iOS/macOS 26). TN3134 lists NO supervision restriction for URL-filter
+  providers, so the capability is enableable in Xcode for development-signed
+  builds; the OHTTP relay / PIR server must be validated by Apple (CloudKit
+  Console -> Identity & Trust) only for NON-development distribution.
+  Development-signed builds skip the relay. See docs/APPLE_URL_FILTER_POC.md.
+
+  NOTE: unlike PoC A, this PoC does NOT require the FamilyControls entitlement
+  to load the URL filter. Whether `.child` is nonetheless needed to LOCK the
+  URL-filter Settings toggle against a child is an open item (see doc "Key
+  unresolved").
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.developer.networking.networkextension</key>
+    <array>
+        <string>url-filter-provider</string>
+    </array>
+</dict>
+</plist>

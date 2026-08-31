@@ -1,0 +1,83 @@
+name: Bootstrap Worker secrets
+
+# ONE-TIME (per environment) setup so a deployment never needs a human at a
+# terminal. Generates AUTH_SECRET and the Ed25519 policy-signing keypair INSIDE
+# the runner and writes them straight into Cloudflare with `wrangler secret put`.
+#
+# The private key is therefore never pasted into GitHub, never shown on anyone's
+# screen, and never lands in a transcript or a chat log — it exists only in
+# Cloudflare's secret store and in the memory of one ephemeral runner.
+#
+# REFUSES TO OVERWRITE. The signing key is the trust anchor for every enrolled
+# device: rotating it invalidates every cached policy snapshot at once, so
+# enforcement stops until each device re-syncs. Replacing one is a deliberate
+# act, so it requires rotate=true AND typing the environment name.
+
+on:
+  workflow_dispatch:
+    inputs:
+      rotate:
+        description: 'DANGER: replace secrets that already exist (breaks every enrolled device until it re-syncs)'
+        type: boolean
+        default: false
+      confirm_rotate:
+        description: 'If rotating, type the worker name (ajar-backend) to confirm'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+
+      - name: Refuse an unconfirmed rotation
+        if: inputs.rotate && inputs.confirm_rotate != 'ajar-backend'
+        run: |
+          echo "::error::rotate=true requires confirm_rotate to be exactly 'ajar-backend'."
+          echo "Rotating SIGNING_* stops enforcement on every enrolled device until it re-syncs."
+          exit 1
+
+      - name: Generate and install the Worker's secrets
+        working-directory: backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ROTATE: ${{ inputs.rotate }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not set."; exit 1
+          fi
+
+          existing="$(npx wrangler secret list --format json 2>/dev/null || echo '[]')"
+          have() { echo "$existing" | grep -q "\"$1\""; }
+
+          # Generated once, into shell variables. Never echoed, never written to
+          # a file, never added to the step summary.
+          eval "$(node scripts/gen-keys.mjs --env)"
+
+          put_if_absent() {
+            local name="$1" value="$2"
+            if have "$name" && [ "$ROTATE" != "true" ]; then
+              echo "$name already exists — left alone (pass rotate=true to replace)."
+              return
+            fi
+            printf '%s' "$value" | npx wrangler secret put "$name"
+            echo "set $name"
+          }
+
+          put_if_absent AUTH_SECRET "$AUTH_SECRET"
+          put_if_absent SIGNING_PUBLIC_KEY_B64 "$SIGNING_PUBLIC_KEY_B64"
+          put_if_absent SIGNING_PRIVATE_KEY_B64 "$SIGNING_PRIVATE_KEY_B64"
+
+          echo "::notice::Secrets are in Cloudflare. Run the Deploy workflow next."

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#F6F4EE" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#12211D" media="(prefers-color-scheme: dark)" />
+  <title>ajar — parent console</title>
+  <!-- Design tokens live in one place (see the header of tokens.css). -->
+  <link rel="stylesheet" href="tokens.css" />
+  <style>
+    /* Console-specific layout only. Every colour, size, space and radius below
+       is a token from tokens.css — no literals, so dark mode works by itself. */
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--line);
+      padding: var(--s-3) var(--s-4);
+      display: flex; gap: var(--s-2) var(--s-3); align-items: center; flex-wrap: wrap;
+    }
+    header .wordmark {
+      font-size: var(--t-lg); font-weight: var(--w-bold); letter-spacing: -.02em;
+      color: var(--accent-ink); margin: 0; flex: 0 0 auto;
+    }
+    header .who {
+      margin-left: auto; color: var(--muted); font-size: var(--t-sm);
+      min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    main { max-width: 52rem; margin: var(--s-5) auto; padding: 0 var(--s-4); }
+
+    .row { display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: flex-end; }
+    .row > * { flex: 1 1 12rem; min-width: 0; }
+    .row > .shrink { flex: 0 0 auto; }
+    .actions { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-top: var(--s-3);
+               align-items: center; }
+    .field { margin-bottom: var(--s-3); }
+
+    /* --- the job: asks --------------------------------------------------- */
+    .cardhead { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap;
+                margin-bottom: var(--s-3); }
+    .cardhead h2 { margin: 0; }
+    .reqlist { list-style: none; margin: 0; padding: 0; }
+    .req { border: 1px solid var(--line); border-radius: var(--r-md);
+           padding: var(--s-3); margin-bottom: var(--s-3); background: var(--surface); }
+    .req .who-asked { font-size: var(--t-sm); font-weight: var(--w-semi);
+                      color: var(--accent-ink); margin: 0 0 var(--s-1); }
+    .req .t { font-size: var(--t-lg); font-weight: var(--w-semi);
+              line-height: var(--lh-tight); margin: 0 0 var(--s-1); overflow-wrap: anywhere; }
+    .req .meta { color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
+    .req .quote { color: var(--ink-2); font-size: var(--t-sm); margin: var(--s-1) 0 0; }
+    .req[data-busy="1"] { opacity: .55; pointer-events: none; }
+    .change { margin-top: var(--s-3); padding-top: var(--s-3);
+              border-top: 1px dashed var(--line); }
+    .change fieldset { border: 0; padding: 0; margin: var(--s-3) 0 0; }
+    .change legend { padding: 0; font-size: var(--t-sm); font-weight: var(--w-semi);
+                     color: var(--ink-2); margin-bottom: var(--s-1); }
+    .grid { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+    .grid > button { flex: 1 1 6.5rem; }
+
+    /* --- standing rules -------------------------------------------------- */
+    .rules { list-style: none; margin: 0; padding: 0; }
+    .rules li { display: flex; gap: var(--s-3); align-items: center; flex-wrap: wrap;
+                padding: var(--s-2) 0; border-bottom: 1px solid var(--line); }
+    .rules li:last-child { border-bottom: 0; }
+    .rules .grow { flex: 1 1 12rem; min-width: 0; }
+    .rules .rt { font-weight: var(--w-semi); overflow-wrap: anywhere; }
+    .tag { display: inline-block; font-size: var(--t-xs); font-weight: var(--w-bold);
+           letter-spacing: .04em; text-transform: uppercase; border-radius: var(--r-full);
+           padding: 0 var(--s-2); border: 1px solid currentColor; }
+    .tag-open   { color: var(--accent-ink); }
+    .tag-closed { color: var(--err); }
+
+    /* --- children -------------------------------------------------------- */
+    .kids { list-style: none; margin: 0 0 var(--s-3); padding: 0; }
+    .kids li { display: flex; gap: var(--s-3); align-items: center; flex-wrap: wrap;
+               padding: var(--s-2) 0; }
+    .kids .grow { flex: 1 1 10rem; min-width: 0; }
+
+    details.card > summary { font-size: var(--t-lg); font-weight: var(--w-semi);
+                             color: var(--ink); min-height: var(--tap); }
+    .empty { color: var(--muted); padding: var(--s-5) var(--s-3); text-align: left; }
+
+    /* --- toast: hidden means untappable (opacity:0 still hit-tests) ------- */
+    .toast {
+      position: fixed; bottom: var(--s-4); left: 50%; transform: translateX(-50%);
+      max-width: calc(100vw - 2rem);
+      display: flex; align-items: center; gap: var(--s-3);
+      background: var(--ink); color: var(--bg);
+      padding: var(--s-2) var(--s-3) var(--s-2) var(--s-4);
+      border-radius: var(--r-md); box-shadow: var(--shadow-2);
+      opacity: 0; visibility: hidden; pointer-events: none;
+      transition: opacity var(--dur) var(--ease), visibility var(--dur);
+    }
+    .toast.is-shown { opacity: .98; visibility: visible; pointer-events: auto; }
+    .toast .msg { font-size: var(--t-sm); font-weight: var(--w-semi); }
+    /* The toast paints on --ink, so its controls invert: --bg text and border
+       read 14.71:1 (light) / 14.52:1 (dark) against that ground. The focus
+       tokens swap too, or the outer ring would be the same colour as the toast. */
+    .toast button { background: transparent; color: var(--bg);
+                    border-color: var(--bg); min-height: var(--tap); }
+    .toast button:hover { background: var(--bg); color: var(--ink); }
+    .toast button:focus-visible { --focus: var(--bg); --focus-halo: var(--ink); }
+
+    .hide { display: none !important; }
+    .errline { color: var(--err); font-size: var(--t-sm); margin-top: var(--s-2);
+               min-height: 1.25rem; }
+    .live { font-size: var(--t-sm); font-weight: var(--w-semi); }
+    .live-ok  { color: var(--accent-ink); }
+    .live-off { color: var(--warn); }
+  </style>
+</head>
+<body>
+  <!-- Two live regions: polite for progress, assertive for things that block. -->
+  <div id="sr" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div id="srAlert" class="sr-only" role="alert" aria-atomic="true"></div>
+
+  <header>
+    <p class="wordmark">ajar</p>
+    <span class="who" id="who"></span>
+    <button id="signout" class="btn-ghost hide">Sign out</button>
+  </header>
+
+  <main>
+    <!-- ================= Sign in ================= -->
+    <section class="card" id="authCard" aria-labelledby="authH">
+      <h2 id="authH">Welcome back</h2>
+      <form id="authForm" novalidate>
+        <div class="row">
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" type="email" inputmode="email" autocomplete="username"
+                   autocapitalize="off" autocorrect="off" placeholder="you@example.com" />
+          </div>
+          <div class="field hide" id="nameField">
+            <label for="name">Your name</label>
+            <input id="name" type="text" autocomplete="name" placeholder="Alex Parker" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" type="password" autocomplete="current-password"
+                 aria-describedby="pwHelp" />
+          <p class="help" id="pwHelp">At least 8 characters.</p>
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn-primary" id="btnLogin">Log in</button>
+          <button type="button" class="btn-ghost" id="btnMode">Create an account</button>
+        </div>
+      </form>
+      <p class="errline" id="authErr"></p>
+    </section>
+
+    <!-- ================= 1. THE JOB: asks ================= -->
+    <section class="card hide" id="requestsCard" aria-labelledby="asksH">
+      <div class="cardhead">
+        <h2 id="asksH">Waiting on you</h2>
+        <span class="pill" id="reqCount" aria-hidden="true">0</span>
+        <span class="sr-only" id="reqCountSr"></span>
+        <span class="live" id="liveDot"></span>
+      </div>
+      <ul class="reqlist" id="requests" aria-busy="true">
+        <li class="skeleton" aria-hidden="true"></li>
+        <li class="skeleton" aria-hidden="true"></li>
+      </ul>
+    </section>
+
+    <!-- ================= 2. Standing decisions ================= -->
+    <section class="card hide" id="rulesCard" aria-labelledby="rulesH">
+      <div class="cardhead">
+        <h2 id="rulesH">What you've already decided</h2>
+        <button class="btn-ghost" id="btnRefreshRules">Refresh</button>
+      </div>
+      <ul class="rules" id="rules"></ul>
+      <p class="help">
+        Only standing decisions show here — a "yes" with a time on it runs out by
+        itself and isn't listed.
+      </p>
+    </section>
+
+    <!-- ================= 3. Setup, collapsed ================= -->
+    <details class="card hide" id="familyCard">
+      <summary>Family &amp; devices</summary>
+
+      <div id="familyPick" role="group" aria-label="Choose a family"></div>
+
+      <div class="row" style="margin-top:var(--s-3)">
+        <div class="field">
+          <label for="familyName">New family name</label>
+          <input id="familyName" type="text" autocomplete="off" placeholder="The Parkers" />
+        </div>
+        <div class="shrink"><button class="btn-primary" id="btnCreateFamily">Create</button></div>
+      </div>
+
+      <div id="childrenBox" class="hide">
+        <h3 id="kidsH">Kids</h3>
+        <ul class="kids" id="children" aria-labelledby="kidsH"></ul>
+        <div class="row">
+          <div class="field">
+            <label for="childName">Add a kid — a first name is fine</label>
+            <input id="childName" type="text" autocomplete="off" placeholder="Jane" />
+          </div>
+          <div class="shrink"><button id="btnAddChild">Add</button></div>
+        </div>
+
+        <div id="enrollBox" class="hide" style="margin-top:var(--s-4)">
+          <h3 id="enrollH">Setup code</h3>
+          <p class="help" id="enrollHelp">
+            Type this into ajar on the kid's computer — open the extension's
+            Setup page and enter it there. Eight characters, no <code>I</code>,
+            <code>O</code>, <code>L</code>, <code>0</code> or <code>1</code>.
+          </p>
+          <p>
+            <span class="code" id="enrollCode" tabindex="-1"
+                  aria-describedby="enrollHelp">––––––––</span>
+          </p>
+          <p class="muted" id="enrollMeta"></p>
+        </div>
+      </div>
+    </details>
+  </main>
+
+  <div class="toast" id="toast">
+    <span class="msg" id="toastMsg"></span>
+    <button type="button" class="hide" id="toastUndo">Undo</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

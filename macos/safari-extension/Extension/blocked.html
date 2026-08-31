@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- The <title> is the first thing a screen reader speaks and the text in the
+       Safari tab. "Access blocked" was a verdict; this is the next action. -->
+  <title>Ask to unlock — ajar</title>
+  <!--
+    blocked.html — the ask screen for the macOS Safari Web Extension.
+
+    background.js redirects a blocked YouTube navigation here with:
+        blocked.html?u=<encoded original URL>&k=<canonical policy key>
+
+    Self-contained: all CSS/JS inline, no external assets (Safari extension
+    pages load under a strict context). This gates ONE resource; Safari itself
+    is untouched.
+  -->
+  <style>
+/* ---------------------------------------------------------------------------
+   INLINE COPY of web/parent/tokens.css. Safari Web Extension pages can only
+   load CSS from inside the bundle and this repo has no build step, so the token
+   block is duplicated verbatim in all four extension surfaces. Edit tokens.css
+   first, then re-paste here. Measured ratios are in docs/BRAND.md.
+   --------------------------------------------------------------------------- */
+/* =============================================================================
+   ajar — design tokens + primitives.  CANONICAL SOURCE.
+
+   Five surfaces share this sheet:
+     web/parent/index.html                     (links this file)
+     windows/extension/blocked.html            (inline copy)
+     windows/extension/options.html            (inline copy)
+     macos/safari-extension/Extension/blocked.html   (inline copy)
+     macos/safari-extension/Extension/options.html   (inline copy)
+
+   The four extension surfaces MUST inline a byte-identical copy of the
+   `:root` / dark-mode / primitives blocks below: MV3 and Safari Web Extension
+   pages can only load assets from inside their own bundle, and this repo has
+   no build step to copy one in. If you change a token here, change it in all
+   four — or just run `node web/parent/sync-tokens.mjs`, which re-pastes them,
+   and `--check` in CI, which fails if any copy has drifted. Each inline copy
+   carries a pointer back to this file.
+
+   CONTRAST. Every colour pair a surface actually renders was computed with the
+   WCAG relative-luminance formula, not eyeballed. Text pairs clear 4.5:1
+   (SC 1.4.3); UI boundaries and focus indicators clear 3:1 (SC 1.4.11).
+   The measured numbers live in docs/BRAND.md. Do not add a token without one.
+   ========================================================================== */
+
+:root {
+  color-scheme: light dark;
+
+  /* ---- Colour: light (Warm Paper ground, docs/BRAND.md §7) ---------------- */
+  --bg:            #F6F4EE;   /* Warm Paper */
+  --surface:       #FFFFFF;   /* cards */
+  --surface-2:     #EFEDE4;   /* wells, secondary fills, skeletons */
+  --line:          #E3E1D8;   /* DECORATIVE dividers only (1.31:1 — exempt) */
+  --field-line:    #767468;   /* FUNCTIONAL borders: 4.70:1 on --surface */
+
+  --ink:           #12241F;   /* Deep Pine — 16.18:1 on white, 14.71:1 on bg */
+  --ink-2:         #3E4F49;   /* secondary text — 8.68:1 on white */
+  --muted:         #5C6B64;   /* tertiary — 5.61:1 white, 4.78:1 on surface-2 */
+
+  --accent:        #18A08C;   /* Ajar Teal — DECORATIVE fills/borders only */
+  --accent-strong: #0d6d5e;   /* teal that carries white text — 6.24:1 */
+  --accent-ink:    #0b6355;   /* teal text on light surfaces — 7.17:1 */
+  --accent-wash:   #E7F4F1;   /* chips, code block */
+  --on-accent:     #FFFFFF;   /* ink ON --accent-strong */
+
+  --yes:           #FF8A5B;   /* Sunrise Coral — the "yes" action, fill only */
+  --yes-ink:       #12241F;   /* ink ON coral — 6.96:1 */
+  --yes-strong:    #E4703F;   /* hover/active coral — ink on it 5.15:1 */
+
+  --warn:          #7d5307;   /* "waiting / asked" — 6.75:1 on white */
+  --warn-wash:     #FBF1DE;
+  --err:           #8C4636;   /* 6.90:1 on white. Never alarm-red (BRAND §7) */
+  --err-wash:      #FAEDE9;
+  --ok:            #14602f;   /* "done" — 6.75:1 on --ok-wash */
+  --ok-wash:       #EAF3EC;
+
+  /* Two-tone focus indicator. A single dark ring measures only 2.59:1 against
+     the teal primary button, so the ring is painted as: 2px halo in the surface
+     colour (the INNER band, sitting on the control) then 3px in --focus (the
+     OUTER band, sitting on the page).
+
+     Perceptibility is carried by the OUTER band against the page ground —
+     14.71:1 light, 16.65:1 dark — which is the pair SC 1.4.11 / 2.4.13 turns on.
+     The halo is a spacer that keeps the dark band off a coloured fill; it is the
+     surface colour, so on a plain card it is 1.00:1 and invisible by design.
+
+     Against coloured fills the halo lands at 3.26:1 (light teal), 2.32:1 (light
+     coral), 6.02:1 and 6.44:1 (dark). An earlier version of this comment claimed
+     "both bands stay ≥3:1 against whatever they touch, on every fill, in both
+     themes" — that was false, and it was false in the specific way this palette
+     has been wrong before: it quoted the flattering pairs (teal in light, coral
+     in dark) and skipped light-mode coral. Every ratio here is now computed by
+     web/parent/check-contrast.mjs, which runs in CI. */
+  --focus:         #12241F;
+  --focus-halo:    #FFFFFF;
+
+  --shadow-1: 0 1px 2px rgba(18,36,31,.06), 0 1px 3px rgba(18,36,31,.05);
+  --shadow-2: 0 4px 16px rgba(18,36,31,.10);
+
+  /* ---- Type: base 16, ~1.125 steps (UX_PRINCIPLES §8 floor) -------------- */
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --t-xs:   0.75rem;   /* 12 — footnote only, never a control label */
+  --t-sm:   0.875rem;  /* 14 — metadata, helper text */
+  --t-base: 1rem;      /* 16 — body, inputs, button labels (floor) */
+  --t-lg:   1.125rem;  /* 18 — the ask title: loudest thing on a card */
+  --t-xl:   1.375rem;  /* 22 — screen headings, block-screen h1 */
+  --t-2xl:  1.75rem;   /* 28 — the setup code, and nothing else */
+  --lh-tight: 1.25;
+  --lh:       1.5;
+  --w-regular: 400; --w-medium: 500; --w-semi: 600; --w-bold: 700;
+
+  /* ---- Space: 4px base --------------------------------------------------- */
+  --s-1: 0.25rem; --s-2: 0.5rem; --s-3: 0.75rem; --s-4: 1rem;
+  --s-5: 1.5rem;  --s-6: 2rem;   --s-7: 3rem;
+
+  /* ---- Radius ------------------------------------------------------------ */
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-xl: 20px; --r-full: 999px;
+
+  /* ---- Controls (44px floor: WCAG 2.5.8 is 24, we hold ourselves to 44) --- */
+  --tap: 44px;
+  --tap-lg: 52px;
+
+  /* ---- Motion ------------------------------------------------------------ */
+  --ease: cubic-bezier(.2,.7,.3,1);
+  --dur-fast: 120ms; --dur: 200ms;
+}
+
+/* ---- Colour: dark. Redefine ONLY tokens; never a bare colour elsewhere. --- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:            #12211D;
+    --surface:       #1A2A26;
+    --surface-2:     #223531;
+    --line:          #2B3A35;
+    --field-line:    #7b8d87;   /* 4.28:1 on --surface */
+
+    --ink:           #EAF1EE;   /* 13.05:1 on --surface */
+    --ink-2:         #C3D2CC;   /* 9.56:1 */
+    --muted:         #9FB1AA;   /* 6.66:1 on --surface, 5.76:1 on --surface-2 */
+
+    --accent:        #35B7A2;
+    --accent-strong: #35B7A2;   /* dark ink rides on it */
+    --accent-ink:    #5FD3BE;   /* teal text on dark — 8.23:1 */
+    --accent-wash:   #1F322D;
+    --on-accent:     #0B1512;   /* 7.47:1 on --accent-strong */
+
+    --yes:           #FF8A5B;
+    --yes-ink:       #2A1208;   /* 7.61:1 on coral */
+    --yes-strong:    #FFA37C;
+
+    --warn:          #E0B25A;   /* 7.62:1 on --surface */
+    --warn-wash:     #2E2716;
+    --err:           #f0a08c;   /* 7.21:1 on --surface */
+    --err-wash:      #2E1E19;
+    --ok:            #7BD69B;
+    --ok-wash:       #16301F;
+
+    --focus:         #FFFFFF;   /* 14.97:1 on --surface */
+    --focus-halo:    #1A2A26;   /* 6.02:1 vs accent, 6.44:1 vs coral */
+
+    --shadow-1: 0 1px 2px rgba(0,0,0,.4);
+    --shadow-2: 0 4px 16px rgba(0,0,0,.5);
+  }
+}
+/* An explicit toggle must beat the media query in both directions. */
+:root[data-theme="dark"] {
+  --bg: #12211D; --surface: #1A2A26; --surface-2: #223531;
+  --line: #2B3A35; --field-line: #7b8d87;
+  --ink: #EAF1EE; --ink-2: #C3D2CC; --muted: #9FB1AA;
+  --accent: #35B7A2; --accent-strong: #35B7A2; --accent-ink: #5FD3BE;
+  --accent-wash: #1F322D; --on-accent: #0B1512;
+  --yes: #FF8A5B; --yes-ink: #2A1208; --yes-strong: #FFA37C;
+  --warn: #E0B25A; --warn-wash: #2E2716; --err: #f0a08c; --err-wash: #2E1E19;
+  --ok: #7BD69B; --ok-wash: #16301F;
+  --focus: #FFFFFF; --focus-halo: #1A2A26;
+  --shadow-1: 0 1px 2px rgba(0,0,0,.4); --shadow-2: 0 4px 16px rgba(0,0,0,.5);
+}
+
+/* ============================ primitives ================================= */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: var(--w-regular) var(--t-base)/var(--lh) var(--font);
+  -webkit-text-size-adjust: 100%;
+  text-align: left;               /* never justified (BDA guidance) */
+}
+
+h1 { font-size: var(--t-xl); line-height: var(--lh-tight); font-weight: var(--w-bold);
+     margin: 0 0 var(--s-2); letter-spacing: -.011em; }
+h2 { font-size: var(--t-lg); line-height: var(--lh-tight); font-weight: var(--w-semi);
+     margin: 0 0 var(--s-3); }
+h3 { font-size: var(--t-base); line-height: var(--lh-tight); font-weight: var(--w-semi);
+     margin: 0 0 var(--s-2); }
+
+.card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: var(--s-4); margin-bottom: var(--s-4);
+  box-shadow: var(--shadow-1);
+}
+
+/* ---- Buttons: one base, four intents, five states ----------------------- */
+button, .btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2);
+  min-height: var(--tap); padding: var(--s-2) var(--s-4);
+  font: var(--w-semi) var(--t-base)/1.2 var(--font);
+  border: 1px solid var(--field-line); border-radius: var(--r-md);
+  background: var(--surface-2); color: var(--ink);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+button:hover, .btn:hover   { background: var(--line); }
+button:active, .btn:active { transform: translateY(1px); }
+button[disabled], button[aria-disabled="true"],
+.btn[disabled], .btn[aria-disabled="true"] {
+  opacity: .55; cursor: not-allowed; transform: none;
+}
+button[data-busy], .btn[data-busy] { position: relative; color: transparent; pointer-events: none; }
+button[data-busy]::after, .btn[data-busy]::after {
+  content: ""; position: absolute; top: 50%; left: 50%; width: 18px; height: 18px;
+  margin: -9px 0 0 -9px; border: 2px solid var(--ink); border-top-color: transparent;
+  border-radius: 50%; animation: ajar-spin .7s linear infinite;
+}
+@keyframes ajar-spin { to { transform: rotate(360deg); } }
+
+/* The one "open it" action. Coral is the yes (BRAND §7).
+   The coral fill is only 2.32:1 against a white card, so a transparent border
+   would leave the most important control in the product without a perceivable
+   boundary (SC 1.4.11). The --yes-ink border reads 6.96:1 against the coral and
+   16.18:1 against the card, so the edge holds on both sides. */
+.btn-yes { background: var(--yes); color: var(--yes-ink); border-color: var(--yes-ink);
+           min-height: var(--tap-lg); font-size: var(--t-lg); font-weight: var(--w-bold);
+           padding-inline: var(--s-5); }
+.btn-yes:hover { background: var(--yes-strong); }
+/* Teal for non-"yes" primaries: sign in, connect, create. */
+.btn-primary { background: var(--accent-strong); color: var(--on-accent); border-color: transparent; }
+.btn-primary:hover { background: var(--accent-ink); color: var(--on-accent); }
+/* Quiet tertiary — still a full 44px target. */
+.btn-ghost { background: transparent; color: var(--accent-ink); border-color: transparent;
+             text-decoration: underline; text-underline-offset: 3px; padding-inline: var(--s-2); }
+.btn-ghost:hover { background: var(--accent-wash); }
+/* Destructive never looks like the fast path. */
+.btn-danger { background: transparent; color: var(--err); border-color: var(--field-line); }
+.btn-danger:hover { background: var(--err-wash); }
+
+/* ---- Focus: two-tone, so the ring survives on saturated fills ------------ */
+:where(button, a[href], input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid transparent;      /* keeps a ring under forced-colors */
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--focus-halo), 0 0 0 5px var(--focus);
+  border-radius: var(--r-md);
+}
+
+/* ---- Fields ------------------------------------------------------------- */
+input, select, textarea {
+  width: 100%; min-height: var(--tap); padding: var(--s-2) var(--s-3);
+  font: var(--w-regular) var(--t-base)/var(--lh) var(--font);
+  color: var(--ink); background: var(--surface);
+  border: 1px solid var(--field-line); border-radius: var(--r-md);
+}
+textarea { resize: vertical; }
+label { display: block; font-size: var(--t-sm); font-weight: var(--w-semi);
+        color: var(--ink-2); margin: 0 0 var(--s-1); }
+[aria-invalid="true"] { border-color: var(--err); border-width: 2px; }
+.help { font-size: var(--t-sm); color: var(--muted); margin: var(--s-1) 0 0; }
+
+/* ---- Disclosure: a <summary> is a control, so it gets a control's size --- */
+summary { min-height: var(--tap); display: flex; align-items: center; gap: var(--s-2);
+          cursor: pointer; font-size: var(--t-sm); color: var(--ink-2);
+          font-weight: var(--w-semi); }
+summary::-webkit-details-marker { display: none; }
+summary::before { content: "▸"; display: inline-block; transition: transform var(--dur-fast) var(--ease); }
+details[open] > summary::before { transform: rotate(90deg); }
+
+/* ---- Status: always an icon or word too, never colour alone (SC 1.4.1) --- */
+.status { display: inline-flex; align-items: flex-start; gap: var(--s-2);
+          font-size: var(--t-sm); font-weight: var(--w-semi); min-height: 20px; }
+.status-wait { color: var(--warn); }   /* "waiting on a parent" is amber, not green */
+.status-done { color: var(--accent-ink); }
+.status-err  { color: var(--err); }
+.status-info { color: var(--muted); }  /* "not this time" — an answer, not a fault */
+
+.pill { display: inline-block; font-size: var(--t-sm); font-weight: var(--w-semi);
+        background: var(--accent-wash); color: var(--accent-ink);
+        border: 1px solid var(--accent-ink);
+        padding: 0 var(--s-2); border-radius: var(--r-full); }
+
+.code { font: var(--w-bold) var(--t-2xl)/1.1 var(--font-mono); letter-spacing: .18em;
+        background: var(--accent-wash); color: var(--accent-ink);
+        border: 1px solid var(--accent-ink);
+        padding: var(--s-3) var(--s-4); border-radius: var(--r-md); display: inline-block; }
+
+.muted { color: var(--muted); font-size: var(--t-sm); }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+           overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+.skeleton { height: 84px; border-radius: var(--r-md); margin-bottom: var(--s-3);
+            background: linear-gradient(90deg, var(--surface-2) 25%, var(--line) 37%, var(--surface-2) 63%);
+            background-size: 400% 100%; animation: ajar-sk 1.4s ease infinite; }
+@keyframes ajar-sk { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}
+/* ---- block screen layout ------------------------------------------------- */
+html { height: 100%; }
+body {
+  /* `min-height` (not `height`) plus `safe center`: `height:100%` +
+     `align-items:center` overflows an over-tall card equally at BOTH ends, and
+     the top overflow of a flex container cannot be scrolled back — at 200%
+     zoom the heading was unreachable (SC 1.4.4 / 1.4.10). */
+  min-height: 100%;
+  display: flex; align-items: safe center; justify-content: center;
+  padding: var(--s-5);
+}
+.card { max-width: 520px; width: 100%; padding: var(--s-6); margin: auto; }
+.badge { display: block; font-size: var(--t-base); font-weight: var(--w-bold);
+         color: var(--accent-ink); letter-spacing: -.02em; margin-bottom: var(--s-3); }
+p { color: var(--ink-2); margin: 0 0 var(--s-4); }
+.resource { background: var(--accent-wash); border: 1px solid var(--accent-ink);
+            border-radius: var(--r-md); padding: var(--s-3);
+            margin: var(--s-2) 0 var(--s-4); overflow-wrap: anywhere; }
+.resource .key { font-size: var(--t-lg); font-weight: var(--w-semi); color: var(--ink); }
+.resource .url { color: var(--ink-2); font-size: var(--t-sm);
+                 font-family: var(--font-mono); margin: var(--s-2) 0 0; }
+.asked-note { margin: 0 0 var(--s-4); }
+.row { display: flex; gap: var(--s-3); flex-wrap: wrap; margin-top: var(--s-4); }
+.row > button { flex: 1 1 10rem; }
+.status { margin-top: var(--s-4); }
+footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
+.hide { display: none !important; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <span class="badge">ajar</span>
+
+    <h1 id="head">This one's closed right now</h1>
+    <p id="lede">Send it over and a parent gets it on their phone. Most asks come back in a couple of minutes.</p>
+
+    <div class="resource">
+      <div class="key" id="humanLine">A YouTube video</div>
+      <details>
+        <summary>Details</summary>
+        <p class="url" id="urlLine">…</p>
+      </details>
+    </div>
+
+    <div id="askBox">
+      <label for="reason">Add a note if you want — like "it's for homework"</label>
+      <textarea id="reason" rows="2" placeholder="A quick note for your parent"></textarea>
+    </div>
+
+    <p class="asked-note muted hide" id="askedNote"></p>
+
+    <!-- Primary first, matching the Windows screen: same product, same muscle
+         memory, same tab order (SC 3.2.3 / 3.2.4). -->
+    <div class="row">
+      <button type="button" class="btn-primary" id="requestBtn">Ask to unlock</button>
+      <button type="button" id="backBtn">Not now</button>
+      <button type="button" class="btn-yes hide" id="openBtn">Open it</button>
+    </div>
+
+    <div class="status" id="status" role="status" aria-live="polite" aria-atomic="true"></div>
+
+    <footer>
+      Only pages you ask about are shared with your parent — the rest of your
+      browsing isn't sent. Everything else in Safari still works.
+    </footer>
+  </main>
+
+  <script>
+    /**
+     * FOUR HONEST STATES: asking / asked (with how long ago) / approved / declined,
+     * plus a non-terminal "couldn't send" that always offers a retry.
+     *
+     * This screen does NOT claim the page opens by itself — nothing in
+     * background.js re-navigates a parked tab when a new snapshot lands. When the
+     * answer arrives we show a real "Open it" button instead of a promise.
+     *
+     * The snapshot matching is DISPLAY ONLY and deliberately narrower than the
+     * enforcement matcher: explicit rules on this exact target, nothing else.
+     * When it cannot tell, the screen stays on "waiting" rather than guessing.
+     */
+    const ext = globalThis.browser ?? globalThis.chrome;
+    const SNAP_KEY = "devicePolicySnapshot";
+    const ASKS_KEY = "ajarAsks";
+
+    const params = new URLSearchParams(location.search);
+    const originalUrl = params.get("u") || "";
+    const canonicalKey = params.get("k") || "";
+    const askKey = canonicalKey || (originalUrl ? `URL:${originalUrl}` : "");
+
+    const $ = (id) => document.getElementById(id);
+    const statusEl = $("status");
+    const requestBtn = $("requestBtn");
+    const backBtn = $("backBtn");
+    const openBtn = $("openBtn");
+    const reasonEl = $("reason");
+
+    // Human label is the hero; the raw key/URL live behind Details (UX §4).
+    const NOUN = {
+      YOUTUBE_VIDEO: "A YouTube video",
+      YOUTUBE_CHANNEL: "A YouTube channel",
+      YOUTUBE_PLAYLIST: "A YouTube playlist",
+    };
+    $("humanLine").textContent =
+      NOUN[(canonicalKey.split(":")[0] || "").toUpperCase()] || "This video";
+    $("urlLine").textContent = originalUrl || "(no URL)";
+
+    // Windows guards this; macOS used to call history.back() bare, which is a
+    // silent no-op when the block page is the tab's first entry.
+    backBtn.addEventListener("click", () => {
+      if (history.length > 1) history.back(); else window.close();
+    });
+
+    /** Icon + word + colour class — never colour alone (SC 1.4.1). */
+    function setStatus(msg, kind) {
+      statusEl.textContent = msg;
+      statusEl.className = kind ? `status status-${kind}` : "status";
+    }
+
+    async function readAsks() {
+      try { return (await ext.storage.local.get(ASKS_KEY))[ASKS_KEY] || {}; }
+      catch { return {}; }
+    }
+    async function recordAsk() {
+      if (!askKey) return;
+      const asks = await readAsks();
+      asks[askKey] = { at: new Date().toISOString(), url: originalUrl };
+      const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+      for (const k of Object.keys(asks)) {
+        if (Date.parse(asks[k] && asks[k].at || "") < cutoff) delete asks[k];
+      }
+      try { await ext.storage.local.set({ [ASKS_KEY]: asks }); } catch { /* best effort */ }
+    }
+    async function readSnapshot() {
+      try { return (await ext.storage.local.get(SNAP_KEY))[SNAP_KEY] || null; }
+      catch { return null; }
+    }
+
+    function ago(iso) {
+      const s = (Date.now() - Date.parse(iso)) / 1000;
+      if (!Number.isFinite(s) || s < 45) return "just now";
+      if (s < 3600) return `${Math.round(s / 60)} min ago`;
+      if (s < 86400) return `${Math.round(s / 3600)} hours ago`;
+      return "a while back";
+    }
+
+    function youTubeIdFrom(url) {
+      try {
+        const u = new URL(url);
+        const h = u.hostname.replace(/^www\./, "");
+        if (h === "youtu.be") return u.pathname.slice(1).split("/")[0] || null;
+        if (!h.endsWith("youtube.com")) return null;
+        if (u.pathname === "/watch") return u.searchParams.get("v");
+        const m = u.pathname.match(/^\/(?:shorts|embed|v)\/([^/?#]+)/);
+        return m ? m[1] : null;
+      } catch { return null; }
+    }
+    function hostFrom(url) {
+      try { return new URL(url).hostname.replace(/^www\./, "").toLowerCase(); }
+      catch { return ""; }
+    }
+    function ruleHitsThisPage(rule) {
+      const value = String(rule.value == null ? "" : rule.value);
+      switch (rule.target) {
+        case "URL":
+          return !!originalUrl && value === originalUrl;
+        case "YOUTUBE_VIDEO": {
+          const id = youTubeIdFrom(originalUrl) ||
+            (canonicalKey.startsWith("YOUTUBE_VIDEO:") ? canonicalKey.slice(14) : null);
+          return !!id && value === id;
+        }
+        case "DOMAIN": {
+          const host = hostFrom(originalUrl);
+          const v = value.replace(/^www\./, "").toLowerCase();
+          return !!host && (host === v || host.endsWith(`.${v}`));
+        }
+        default:
+          return false; // channel/playlist/category need the real matcher
+      }
+    }
+    function answerIn(snapshot, askedMs) {
+      if (!snapshot) return null;
+      const nowMs = Date.now();
+      for (const t of (snapshot.temporaryRules || [])) {
+        if (Date.parse(t.expiresAt) <= nowMs) continue;
+        if (ruleHitsThisPage(t)) return t.action === "ALLOW" ? "approved" : "declined";
+      }
+      for (const r of (snapshot.rules || [])) {
+        if (!ruleHitsThisPage(r)) continue;
+        if (r.action === "ALLOW") return "approved";
+        // A standing BLOCK older than the ask is why the page was closed at all;
+        // only one created after the ask is an ANSWER to it.
+        if (Date.parse(r.createdAt) >= askedMs - 2000) return "declined";
+      }
+      return null;
+    }
+
+    // `disabled` drops a focused button out of the a11y tree and orphans focus
+    // on <body>; `aria-disabled` + a guard behaves the same and keeps the
+    // keyboard where the child left it (SC 2.4.3).
+    let mode = "idle";
+    let askedAtIso = null;
+    let askedAtMs = 0;
+
+    function showAsking() {
+      mode = "asking";
+      requestBtn.setAttribute("aria-disabled", "true");
+      requestBtn.dataset.busy = "1";
+      setStatus("Sending…", "info");
+    }
+    function showAsked(atIso) {
+      mode = "asked";
+      askedAtIso = atIso;
+      askedAtMs = Date.parse(atIso) || Date.now();
+      delete requestBtn.dataset.busy;
+      requestBtn.setAttribute("aria-disabled", "true");
+      requestBtn.textContent = "Asked";
+      openBtn.classList.add("hide");
+      $("askBox").classList.add("hide");
+      $("askedNote").classList.remove("hide");
+      $("askedNote").textContent =
+        `You asked ${ago(atIso)}. Nothing else to do — you can leave this page open or come back to it.`;
+      setStatus("✓ Sent. Waiting on a parent.", "wait");
+    }
+    function showApproved() {
+      if (mode === "approved") return;
+      mode = "approved";
+      delete requestBtn.dataset.busy;
+      requestBtn.classList.add("hide");
+      $("askBox").classList.add("hide");
+      $("askedNote").classList.add("hide");
+      openBtn.classList.remove("hide");
+      $("head").textContent = "You're in";
+      $("lede").textContent = "A parent said yes. It may close again later on its own.";
+      setStatus("✓ Open. Press Open it to go there.", "done");
+      openBtn.focus();
+    }
+    function showDeclined() {
+      if (mode === "declined") return;
+      mode = "declined";
+      delete requestBtn.dataset.busy;
+      requestBtn.removeAttribute("aria-disabled");
+      requestBtn.textContent = "Ask again";
+      requestBtn.classList.remove("btn-primary");
+      openBtn.classList.add("hide");
+      $("askBox").classList.remove("hide");
+      $("askedNote").classList.add("hide");
+      $("head").textContent = "Not this one";
+      $("lede").textContent =
+        "A parent said not this time. You can ask again with a note, or go ask them in person.";
+      // An answer, not a fault — muted, never the error colour.
+      setStatus("Answered — not this one.", "info");
+    }
+    function showSendFailed() {
+      mode = "idle";
+      delete requestBtn.dataset.busy;
+      requestBtn.removeAttribute("aria-disabled");
+      requestBtn.textContent = "Try again";
+      $("askBox").classList.remove("hide");
+      $("askedNote").classList.add("hide");
+      setStatus("⚠ Couldn't send. Check the wi-fi, then press Try again.", "err");
+      requestBtn.focus();
+    }
+
+    openBtn.addEventListener("click", () => {
+      if (originalUrl) location.replace(originalUrl);
+    });
+
+    requestBtn.addEventListener("click", async () => {
+      if (requestBtn.getAttribute("aria-disabled") === "true") return;
+      showAsking();
+
+      // Hand the blocked canonical id to the background worker, which forwards
+      // it to the native messaging host / child agent, which posts the
+      // AccessRequest to the backend. This keeps the request on the trusted,
+      // signed channel rather than the page making its own call. There is no
+      // fallback POST: the old one fired at a non-existent host on every ask and
+      // could only add latency to the failure path.
+      let delivered = false;
+      try {
+        if (ext && ext.runtime && ext.runtime.sendMessage) {
+          const res = await ext.runtime.sendMessage({
+            type: "REQUEST_ACCESS",
+            key: canonicalKey,
+            url: originalUrl,
+            reason: reasonEl.value.trim(),
+          });
+          delivered = !!(res && res.ok);
+        }
+      } catch (e) {
+        console.warn("[ajar] background message failed:", e);
+      }
+
+      if (delivered) {
+        await recordAsk();
+        showAsked(new Date().toISOString());
+      } else {
+        showSendFailed();
+      }
+    });
+
+    async function refreshFromSnapshot() {
+      if (mode === "approved" || mode === "declined") return;
+      const answer = answerIn(await readSnapshot(), askedAtMs || Date.now());
+      if (answer === "approved") showApproved();
+      else if (answer === "declined" && askedAtMs) showDeclined();
+    }
+
+    (async function boot() {
+      const asks = await readAsks();
+      const prior = askKey ? asks[askKey] : null;
+      if (prior && prior.at) showAsked(prior.at);
+      await refreshFromSnapshot();
+
+      try {
+        ext.storage.onChanged.addListener((changes, area) => {
+          if (area === "local" && changes[SNAP_KEY]) refreshFromSnapshot();
+        });
+      } catch { /* no storage events here; the poll below still runs */ }
+
+      setInterval(() => {
+        if (mode === "asked" && askedAtIso) {
+          $("askedNote").textContent =
+            `You asked ${ago(askedAtIso)}. Nothing else to do — you can leave this page open or come back to it.`;
+        }
+        refreshFromSnapshot();
+      }, 20000);
+    })();
+  </script>
+</body>
+</html>

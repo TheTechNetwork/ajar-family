@@ -1,0 +1,7 @@
+{
+  "chromeExtensionId": "REPLACE_WITH_CHROME_WEB_STORE_ID",
+  "edgeExtensionId": "REPLACE_WITH_EDGE_ADDONS_ID",
+  "backendUrl": "http://localhost:8787",
+  "reapplyMinutes": 5,
+  "antiBypass": true
+}

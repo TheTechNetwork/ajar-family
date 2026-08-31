@@ -1,0 +1,35 @@
+{
+  "name": "@ajar/shared",
+  "version": "0.0.0-alpha",
+  "description": "Platform-agnostic source of truth: policy model + YouTube canonicalization",
+  "type": "module",
+  "exports": {
+    "./policy": {
+      "types": "./dist/policy/policy-model.d.ts",
+      "default": "./dist/policy/policy-model.js"
+    },
+    "./youtube": {
+      "types": "./dist/youtube/youtube-normalize.d.ts",
+      "default": "./dist/youtube/youtube-normalize.js"
+    },
+    "./categories": {
+      "types": "./dist/categories/index.d.ts",
+      "default": "./dist/categories/index.js"
+    },
+    "./safety": {
+      "types": "./dist/safety/safety-floor.d.ts",
+      "default": "./dist/safety/safety-floor.js"
+    },
+    "./net": {
+      "types": "./dist/net/cname.d.ts",
+      "default": "./dist/net/cname.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test 'dist/**/*.test.js'"
+  },
+  "files": [
+    "dist"
+  ]
+}

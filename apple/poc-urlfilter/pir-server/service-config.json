@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "PIRService configuration for the NEURLFilter blocklist PoC (PoC D).",
+    "EXAMPLE ONLY — dev tokens, single shard, not production. Consumed by",
+    "PIRService (github.com/apple/pir-service-example). The `usecases[].name`",
+    "MUST equal the app's NEURLFilter use case name: <app bundle id>.url.filtering.",
+    "`fileStem` matches url-config.json outputs (url-SHARD_ID.bin, etc.)."
+  ],
+  "users": [
+    {
+      "tier": "tier1",
+      "tokens": ["DEV-POC-TOKEN"]
+    }
+  ],
+  "usecases": [
+    {
+      "fileStem": "url",
+      "shardCount": 1,
+      "name": "com.example.URLFilterPoC.url.filtering"
+    }
+  ]
+}

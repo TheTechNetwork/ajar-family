@@ -1,0 +1,64 @@
+{
+  "manifest_version": 3,
+  "name": "Ajar (PoC C)",
+  "version": "0.1.0",
+  "description": "Ajar — per-video YouTube approvals. Policy-installed; enforces the shared policy model with full-URL blocking webRequest.",
+
+  "//policy_install_note": "webRequestBlocking is honored ONLY because this extension is force-installed by enterprise policy (ExtensionInstallForcelist). Chrome's MV3 migration guide states policy-installed extensions keep the blocking form of webRequest: https://developer.chrome.com/docs/extensions/develop/migrate/blocking-web-requests . A store-installed MV3 extension could not use webRequestBlocking and would be limited to declarativeNetRequest. See windows/extension/README.md.",
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+
+  "//options_note": "Dev/browser-testable enrollment: point the extension at the backend and redeem a one-time code. In production on Windows the LocalSystem service is the policy source and this page is unnecessary.",
+
+  "permissions": [
+    "tabs",
+    "webRequest",
+    "webRequestBlocking",
+    "declarativeNetRequest",
+    "webNavigation",
+    "storage",
+    "nativeMessaging"
+  ],
+
+  "//permissions_note": {
+    "tabs": "Re-check already-open tabs when policy changes: reopen a page the parent has just approved, and catch anything the MV3 cold-start window let slip.",
+    "webRequest": "Observe network requests (URLs) to evaluate against policy.",
+    "webRequestBlocking": "Synchronous onBeforeRequest so we can cancel/redirect a disallowed navigation BEFORE it loads. Available because policy-installed (see policy_install_note). This is the per-URL decision path.",
+    "declarativeNetRequest": "Static/dynamic rules for coarse host-level blocks (e.g. unsupported YouTube-adjacent hosts) that don't need per-request JS. Complements, does not replace, the blocking webRequest per-video path. DNR dynamic-rule limits: 30,000 rules total, 5,000 'unsafe' (redirect/modifyHeaders) — https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest .",
+    "webNavigation": "Catch YouTube SPA route changes (onHistoryStateUpdated) where the video changes via history.pushState with no full document navigation — these never hit onBeforeRequest as a top-level nav.",
+    "storage": "Cache the last signed policy snapshot pushed from the native host so evaluation works between native-host round-trips.",
+    "nativeMessaging": "Connect to the LocalSystem service's native-messaging host to receive signed policy snapshots and to post AccessRequests from the block page."
+  },
+
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "*://youtu.be/*",
+    "*://*.youtube-nocookie.com/*",
+    "*://youtubekids.com/*",
+    "*://*.googlevideo.com/*",
+    "*://*.ytimg.com/*",
+    "*://*.ggpht.com/*",
+    "<all_urls>"
+  ],
+
+  "//host_permissions_note": "YouTube hosts are listed explicitly because YouTube is the first-class content type this PoC gates per-video (watch pages, shorts, embeds, short links, nocookie, kids) plus the playback-support hosts an approved video needs. <all_urls> is REQUIRED and justified: the shared policy model is not YouTube-only — it evaluates DOMAIN / URL / URL_PATTERN / CATEGORY rules and supports a default-deny web posture (DefaultPolicy.webDefault in shared/policy/policy-model.ts). To enforce exact-URL and domain rules on arbitrary sites, and to run onBeforeRequest across all navigations, the extension must observe all URLs. It inspects URLs to make allow/block decisions; it does not exfiltrate browsing history (privacy posture: ARCHITECTURE.md §10).",
+
+  "web_accessible_resources": [
+    {
+      "resources": ["blocked.html"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+
+  "//web_accessible_resources_note": "blocked.html must be web-accessible so onBeforeRequest can redirect a blocked navigation to chrome-extension://<id>/blocked.html?u=<enc>. Redirect to a web_accessible_resource extension page is supported for blocked navigations.",
+
+  "minimum_chrome_version": "117"
+}

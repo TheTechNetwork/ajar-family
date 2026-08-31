@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  App target entitlements for PoC A. The Family Controls entitlement requires
+  Apple's distribution approval for release, but development-signed builds work
+  for on-device testing. See docs/APPLE_CONTENT_FILTER_POC.md prerequisites.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.developer.family-controls</key>
+    <true/>
+    <key>com.apple.developer.networking.networkextension</key>
+    <array>
+        <string>content-filter-provider</string>
+    </array>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.family.ajar.child</string>
+    </array>
+</dict>
+</plist>

@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install (workspaces)
+        run: npm ci
+
+      - name: Build (shared → backend)
+        run: npm run build
+
+      - name: Test (shared + backend)
+        run: npm test
+
+      - name: Typecheck shared spec (strict)
+        run: npx tsc -p shared/tsconfig.json --noEmit
+
+      # The Windows + macOS extensions hand-mirror the shared evaluator. Each
+      # implementation's own tests can pass while the platforms silently disagree
+      # about what is blocked, so run ONE corpus against all of them.
+      - name: Conformance (shared spec vs. platform mirrors)
+        run: npm run conformance
+
+      # MV3/Safari pages cannot load CSS from outside their bundle and there is no
+      # build step, so the design tokens are genuinely duplicated into four inline
+      # copies. Duplication nothing checks is how a palette drifts back into a
+      # contrast failure.
+      - name: Design tokens are in sync across surfaces
+        run: node web/parent/sync-tokens.mjs --check
+
+      # sync-tokens only proves the four copies MATCH — it never checked that any
+      # of them is readable. The ratios in tokens.css and docs/BRAND.md were
+      # hand-written comments, and one was already wrong by 6x (a focus ring
+      # documented at 15.91:1 whose load-bearing pair was 2.59:1). Recompute them.
+      - name: Contrast ratios are computed, not claimed
+        run: node web/parent/check-contrast.mjs
+
+      # The OpenAPI document is the client contract; fail if the committed file
+      # drifts from the one the code generates.
+      - name: OpenAPI is in sync
+        run: |
+          npm run openapi --workspace @ajar/backend
+          git diff --exit-code backend/openapi.json
+
+  # The Windows service is Go, so `npm test` above never touches it. Until now it
+  # was compiled ONLY by release.yml at tag time — meaning a broken build landed
+  # on a branch silently and surfaced when cutting a release, which is the worst
+  # moment to discover it. Cross-compile it here on every push instead.
+  #
+  # Every file in windows/agent is `//go:build windows`, so GOOS must be set even
+  # to vet. Tests would need a windows runner to EXECUTE (cross-compiled test
+  # binaries can't run on Linux); there are none yet, so this job proves the
+  # agent compiles and vets, not that it behaves.
+  windows-agent:
+    runs-on: ubuntu-latest
+    env:
+      GOOS: windows
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: windows/agent/go.sum
+
+      - name: gofmt
+        working-directory: windows/agent
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would rewrite these files:"; echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: windows/agent
+        run: go vet ./...
+
+      # Both shipped arches, matching release.yml — an arm64-only break (rare but
+      # real: syscall and registry surfaces differ) must not reach a tag.
+      - name: Build (amd64 + arm64)
+        working-directory: windows/agent
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            echo "building windows/$arch"
+            GOARCH=$arch go build -trimpath -ldflags "-s -w" -o /dev/null .
+          done

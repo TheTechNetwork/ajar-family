@@ -1,0 +1,145 @@
+name: Release
+
+# Publishes prebuilt, self-contained binaries so a family installs Ajar with NO
+# Node or Go toolchain on the box (see docs/INSTALL.md):
+#   - ajar-agent.exe        Windows service (Go, static, amd64 + arm64)
+#   - ajar-backend[.exe]      backend API + parent console as one SEA binary
+#                             (win / mac / linux), zipped with the web/ console
+#
+# Trigger by pushing a tag like v0.1.0-alpha, or run manually from the Actions tab.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the GitHub Release and upload assets
+
+jobs:
+  # ---- Windows service (Go), cross-compiled from Linux to both arches --------
+  windows-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: windows/agent/go.sum
+      - name: Cross-compile ajar-agent.exe (amd64 + arm64)
+        working-directory: windows/agent
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            echo "building windows/$arch"
+            GOOS=windows GOARCH=$arch CGO_ENABLED=0 \
+              go build -trimpath -ldflags "-s -w" \
+              -o "../../out/ajar-agent-windows-$arch.exe" .
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-agent
+          path: out/*.exe
+
+  # ---- Backend single-executable (SEA), one per OS runner --------------------
+  backend-sea:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: ajar-backend-linux-x64
+            bin: ajar-backend
+          - os: macos-latest
+            asset: ajar-backend-macos-arm64
+            bin: ajar-backend
+          - os: windows-latest
+            asset: ajar-backend-windows-x64
+            bin: ajar-backend.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Install (workspaces)
+        run: npm ci
+      - name: Build (shared -> backend)
+        run: npm run build
+      - name: Build SEA binary
+        working-directory: backend
+        run: node scripts/build-sea.mjs "dist/${{ matrix.bin }}"
+      # Package the binary next to the parent console + install docs into a zip.
+      # The binary auto-discovers ./web/parent (resolveUiDir in node-server.ts).
+      - name: Stage release folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="stage/${{ matrix.asset }}"
+          mkdir -p "$stage/web"
+          cp "backend/dist/${{ matrix.bin }}" "$stage/"
+          cp -r web/parent "$stage/web/parent"
+          cp docs/INSTALL.md "$stage/README.txt" 2>/dev/null || true
+      - name: Zip (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p out
+          ( cd "stage/${{ matrix.asset }}" && zip -r "../../out/${{ matrix.asset }}.zip" . )
+      - name: Zip (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Compress-Archive -Path "stage/${{ matrix.asset }}/*" -DestinationPath "out/${{ matrix.asset }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: out/*.zip
+
+  # ---- Collect every artifact and attach to the GitHub Release ---------------
+  publish:
+    needs: [windows-agent, backend-sea]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name '*.zip' -o -name '*.exe' \) -exec cp {} release/ \;
+          ls -la release
+
+      # docs/INSTALL.md tells a parent to download an .exe and run it ELEVATED as
+      # a LocalSystem service. Publishing that with no way to check what they got
+      # is asking them to trust the network. Until the binaries are code-signed
+      # (which needs a certificate we do not have yet), a checksum file is the
+      # minimum honest thing to ship — and the install docs can point at it.
+      - name: Checksums
+        working-directory: release
+        run: |
+          sha256sum * > SHA256SUMS
+          echo "--- SHA256SUMS ---"; cat SHA256SUMS
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          body: |
+            Ajar — prebuilt binaries. No Node or Go toolchain needed on the box.
+
+            **Verify what you downloaded** against `SHA256SUMS` before running it
+            elevated: `sha256sum -c SHA256SUMS` (Linux/macOS) or
+            `Get-FileHash .\ajar-agent-windows-amd64.exe -Algorithm SHA256` (Windows).
+            These binaries are NOT code-signed yet, so Windows SmartScreen will
+            warn — the checksum is how you tell a real build from a substituted one.
+
+            - `ajar-agent-windows-{amd64,arm64}.exe` — Windows service. Install
+              elevated: `ajar-agent-windows-amd64.exe install`.
+            - `ajar-backend-{linux,macos,windows}-*.zip` — self-hostable backend
+              (API + parent console in one binary). Unzip and run the binary; it
+              serves the console at `/`.
+
+            See docs/INSTALL.md for step-by-step setup.
