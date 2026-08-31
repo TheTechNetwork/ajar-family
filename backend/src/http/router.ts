@@ -96,8 +96,23 @@ export class Router {
         return await r.handler(req);
       } catch (e) {
         const anyE = e as { code?: string; message?: string };
-        const status = codeToStatus(anyE.code);
-        return err(status, anyE.message ?? "error", anyE.code);
+        // A DomainError is a DELIBERATE refusal: its code is one we publish and
+        // its message is written to be read by a parent. Anything else is a bug
+        // in this server, and NEITHER its message nor a 4xx belongs in the reply.
+        //
+        // This used to echo `e.message` whatever `e` was. A malformed approval
+        // duration therefore returned "Cannot destructure property 'expiresAt'
+        // of 'durationToExpiry(...)' as it is undefined" to a parent — an
+        // internal TypeError shown to a user. Worse, `codeToStatus(undefined)`
+        // falls through to 400, so every server bug was reported as a CLIENT
+        // error: a 500 never appeared, and nothing alerting on 5xx could see it.
+        if (anyE.code !== undefined && CLIENT_FACING_CODES.has(anyE.code)) {
+          return err(codeToStatus(anyE.code), anyE.message ?? "error", anyE.code);
+        }
+        // Server-side only: the detail stays in the logs, where it is useful and
+        // not disclosed. Method and path only — never headers or the body.
+        console.error(`[router] unhandled error ${req.method} ${req.path}`, e);
+        return err(500, "internal error", "INTERNAL");
       }
     }
     return err(404, "not found", "NOT_FOUND");
@@ -118,6 +133,13 @@ function match(routeParts: string[], reqParts: string[]): Record<string, string>
   }
   return params;
 }
+
+/** Codes a handler may deliberately surface to a client. Anything outside this
+ *  set is treated as a bug and answered with a generic 500 — see the catch in
+ *  `handle`. Keep in step with `DomainError`'s codes. */
+const CLIENT_FACING_CODES = new Set([
+  "BAD_REQUEST", "UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND", "CONFLICT", "GONE",
+]);
 
 function codeToStatus(code?: string): number {
   switch (code) {
