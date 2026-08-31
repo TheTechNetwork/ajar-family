@@ -48,6 +48,27 @@ final class FilterDataProvider: NEFilterDataProvider {
     /// browsing stalls on device (measured 2026-08-31 — see the type doc).
     static let askControlProviderForUnknownHosts = false
 
+    /// EXPERIMENT for A1/A2 (2026-08-31). Not a settled decision — see ADR-001.
+    ///
+    /// A socket flow carries a hostname and nothing else, so it can NEVER carry a
+    /// YouTube video id. Applying `youTubeDefault: BLOCK` to it therefore blocks
+    /// `www.youtube.com` at the connection level regardless of any per-video
+    /// ALLOW rule: on device, the allowed video's page returned no block page
+    /// (its BROWSER flow was correctly allowed by id) and then hung, because the
+    /// page's own API calls were socket flows that got dropped.
+    ///
+    /// With this false, the YouTube default is enforced on the browser flow —
+    /// where the video id actually is — and socket flows to YouTube hosts fall
+    /// through to `webDefault`.
+    ///
+    /// THE COST, which is why this is a decision and not a fix: the YouTube
+    /// NATIVE APP does not produce WebKit browser flows. It is socket-only, so it
+    /// stops being default-denied and becomes unfiltered by this provider. Choose
+    /// deliberately: "allow-one-video works in Safari" and "the YouTube app is
+    /// default-denied" cannot both be true through this mechanism alone. Blocking
+    /// the app itself is a separate control (ManagedSettings application policy).
+    static let applyYouTubeDefaultToSocketFlows = false
+
     private let log = Logger(subsystem: "family.ajar.child", category: "data")
     private let store = PolicyStore.shared
     private let cnameCache = CnameChainCache.shared
@@ -140,6 +161,16 @@ final class FilterDataProvider: NEFilterDataProvider {
            decision.reason != "safety-floor",
            !host.isEmpty {
             return .needRules()
+        }
+
+        // See `applyYouTubeDefaultToSocketFlows`. Only the DEFAULT is bypassed:
+        // an explicit BLOCK rule carries a different reason and still drops, so
+        // "block this video" and "block youtube.com" both keep working.
+        if !remediable,
+           !Self.applyYouTubeDefaultToSocketFlows,
+           decision.action == .block,
+           decision.reason == "default:youtube" {
+            return .allow()
         }
 
         switch decision.action {

@@ -23,21 +23,63 @@ override) and has **no remediation/Request-Access UX**. The classic
 `.child`. `NEURLFilter` is relegated to the supplementary blocklist layer.
 **Consequences:** iOS requires a genuine child Apple ID in Family Sharing; the
 `.individual` posture is explicitly not marketed as parental control.
-**Evidence:** _partial — compile-time only; the runtime claim is still unproven._
-On 2026-08-27 the PoC A scaffold was assembled into a real Xcode project
-(`apple/poc-contentfilter/project.yml`, XcodeGen 2.46.0) and **builds clean for
-`arm64` device** against the iPhoneOS SDK shipped with Xcode 27.0, deployment
-target iOS 26.0 (app + filter-data `.appex` + filter-control `.appex`, App Group
-`group.com.example.parentfilterpoc`). That confirms the API surface the decision
-rests on *exists and type-checks* — `NEFilterDataProvider.handleNewFlow`,
-`NEFilterBrowserFlow`, `NEFilterNewFlowVerdict.remediateVerdict(...)`,
-`NEFilterControlProvider.remediationMap` / `notifyRulesChanged()`,
-`NEFilterManager` + `NEFilterProviderConfiguration.filterBrowsers`, and
-`AuthorizationCenter.shared.requestAuthorization(for: .child)`.
-It does **not** confirm any behavioural claim. Tests A1–A6 have **not been run**:
-no iOS device and no signing identity were available (see ADR-012). The
-propagation number, the A6 tamper findings, and the §0 workflow all remain
-**unproven**. Do not treat this ADR as Accepted.
+**Evidence:** _runtime, on hardware, 2026-08-31._ Tests A1-A3 were run on an
+iPhone 16 Pro Max (iOS 27.0) with a development-signed build (team
+`2BPX4R682U`, App Group `group.family.ajar.child`). **The central claim holds,
+with one qualification that matters.**
+
+Confirmed:
+
+- **Per-video enforcement on the same host works.** `watch?v=9bZkp7q19f0` shows
+  the block page; `watch?v=dQw4w9WgXcQ` plays. Same host, opposite verdicts, on
+  unmodified iOS with no VPN and no TLS interception.
+- **`NEFilterBrowserFlow.url` carries the full URL including the query string.**
+  This is the load-bearing fact the whole design rests on, and it is now
+  observed rather than inferred: the ALLOW rule matched by video id, and the
+  system's own block page rendered the complete
+  `https://www.youtube.com/watch?v=9bZkp7q19f0`.
+- **The remediation block page renders** with a working Request Access link
+  (A3). The round trip back into the app was not exercised.
+- **Socket flows expose a hostname and nothing else**, as the scaffold assumed.
+
+**The qualification — per-video control applies only to top-level navigation.**
+YouTube is a single-page app. Entering a blocked URL directly is enforced, but
+once the child is *inside* YouTube, tapping through to another video swaps it in
+over XHR — socket flows, no new WebKit top-level flow — so the filter never sees
+the new video id and **other videos play**. Observed directly. This is a property
+of the mechanism, not a defect in the scaffold: nothing that only sees browser
+flows can enforce per-video policy across in-app navigation. Any product claim
+of the form "your child can only watch videos you approved" is **false on iOS
+today** for a child who browses within YouTube rather than following links.
+Resolving it needs a different lever — blocking the YouTube web app outright and
+approving videos through an owned surface, or app-level policy — and that
+belongs in a follow-up ADR before anything ships.
+
+A second decision falls out of the same experiment. `youTubeDefault: BLOCK`
+cannot be applied to socket flows: they carry no video id, so enforcing it there
+made `www.youtube.com` unreachable at connection level and an ALLOWED video
+would not stream — it returned no block page and hung. The provider now enforces
+the YouTube default on the browser flow only
+(`applyYouTubeDefaultToSocketFlows = false`). The cost is explicit: the YouTube
+**native app** is socket-only, so it is no longer default-denied by this
+provider and must be controlled separately.
+
+**Status stays Proposed, not Accepted.** A4 (propagation timing), A5 (temporary
+approval and expiry) and A6 (tamper resistance) have still not been run, and the
+`.child` posture itself was never exercised — see below.
+
+**Unexpected, and worth its own investigation:** all of the above was measured
+with FamilyControls authorization **`Not Determined`**.
+`requestAuthorization(for: .child)` fails on this device because the Apple
+Account signed into it is an adult one, yet `NEFilterManager` still enabled and
+the filter still enforced. So on iOS 27, holding the
+`com.apple.developer.family-controls` **entitlement** was sufficient to run a
+content filter; obtaining `.child` **authorization** was not required for
+enforcement. This contradicts the reading of TN3134 that this ADR was built on
+("under FamilyControls `.child`, sees the full URL"). It does NOT make `.child`
+unnecessary — the tamper-resistance the product depends on (A6) is exactly what
+`.child` is for — but the dependency is narrower than assumed and should be
+re-derived rather than carried forward.
 
 ### ADR-002 — `NEURLFilter` is a supplementary large-scale blocklist, not the core
 **Status:** Proposed (confirm in PoC D)
@@ -147,7 +189,21 @@ bearing for the remediation ("Request Access") design, not cosmetic.
 present under corrected names. `apple/poc-contentfilter` now compiles as written.
 
 ### ADR-012 — PoC A is build-verified but **not** hardware-verified
-**Status:** Open blocker (not a decision — a gap that must be closed)
+**Status:** PARTIALLY CLOSED 2026-08-31 — A1-A3 ran on hardware; A4-A6 have not.
+Still open, and still not a decision.
+
+**Closed on 2026-08-31:** the app is development-signed, installed and enforcing
+on an iPhone 16 Pro Max (iOS 27.0). A1, A2 and A3 produced real results — see
+the Observed Results table in APPLE_CONTENT_FILTER_POC.md and the rewritten
+Evidence in ADR-001. Two defects and one design limit were found by running it
+that no amount of reading had surfaced: the extensions fail-closed on every flow
+because the unsigned-development gate is a per-process static, `needRules()`
+stalls browsing from a serial queue doing synchronous DNS, and per-video control
+does not survive YouTube's in-app navigation.
+
+**Still open:** A4 (propagation), A5 (temporary approval and expiry) and A6
+(tamper resistance) have not run. A6 in particular needs the `.child` posture,
+which needs a child or teen Apple Account — see below.
 **Context:** PoC A is the load-bearing proof for the whole iOS story. Executing
 it requires a physical iOS 26 device: the Simulator cannot run a content filter,
 `NEURLFilter`, or FamilyControls `.child`, and `.child` itself requires a real

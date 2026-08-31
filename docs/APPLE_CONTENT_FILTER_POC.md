@@ -183,27 +183,68 @@ xcodebuild -project ParentFilterPoC.xcodeproj -scheme ParentFilterPoC \
 For a real device build, drop `CODE_SIGNING_ALLOWED=NO` and pass
 `DEVELOPMENT_TEAM=<your team id>`.
 
-## Observed Results (NOT YET RUN — requires hardware, see ADR-012)
+## Observed Results (A1-A3 RUN 2026-08-31; A4-A6 not run)
+
+Device: iPhone 16 Pro Max, iOS 27.0 (24A5418b), Developer Mode on.
+Build: development-signed, team `2BPX4R682U`, App Group `group.family.ajar.child`.
+FamilyControls authorization: **Not Determined** — see the note below, it matters.
 
 | Test | Expected | Observed | Pass/Fail | Notes |
 |---|---|---|---|---|
-| A1 block BLOCKED_VIDEO (all URL forms) | Block page | | | |
-| A1 allow ALLOWED_VIDEO plays + streams | Plays | | | |
-| A2 full URL+query visible (Safari) | Full URL | | | |
-| A2 bare URLSession exposure | (hostname only?) | | | |
-| A3 remediation page + Request Access | Renders, round-trips | | | |
-| A4 add-allow propagation time | ≤ few seconds | | | ___ s |
-| A4 remove-allow propagation time | ≤ few seconds | | | ___ s |
-| A5 temp grant plays then auto-expires | Blocks at expiry | | | |
-| A5 offline expiry (airplane mode) | Blocks at expiry | | | |
-| A5 clock tamper (detection only, ADR-009) | No extension | | | |
-| A5 clock tamper (`requireAutomaticDateAndTime`, ADR-014) | Cannot change clock | | | prevention |
-| A6 app delete — Posture A (`.child` alone) | ? | | | inherent? |
-| A6 app delete — Posture B (`denyAppRemoval`) | Blocked | | | asserted |
-| A6 iCloud sign-out — Posture A | ? | | | inherent? |
-| A6 iCloud sign-out — Posture B (`lockAccounts`) | Blocked | | | asserted |
-| A6 disable filter in Settings (either posture) | ? | | | **key unknown — no ManagedSettings key locks it (ADR-014)** |
-| A6 DNS/VPN/profile bypass | ? | | | **key unknown** |
+| A1 block BLOCKED_VIDEO (all URL forms) | Block page | Block page on direct top-level load | **PASS (direct nav only)** | not enforced on in-app navigation — see A1-bypass |
+| A1 allow ALLOWED_VIDEO plays + streams | Plays | Plays | **PASS** | only after `applyYouTubeDefaultToSocketFlows = false` |
+| **A1-bypass in-app navigation (new)** | — | Other videos play once inside YouTube | **FAIL** | SPA swaps video over XHR; no top-level flow, so no video id |
+| A2 full URL+query visible (Safari) | Full URL | Full URL incl. `?v=` query | **PASS** | block page rendered the complete URL; ALLOW matched by id |
+| A2 bare URLSession exposure | (hostname only?) | hostname only | **CONFIRMED** | socket flows carry `remoteHostname` and nothing more |
+| A3 remediation page + Request Access | Renders, round-trips | Renders, with Request Access link | **PARTIAL** | render confirmed; round trip back into the app NOT exercised |
+| A4 add-allow propagation time | ≤ few seconds | | not run | |
+| A4 remove-allow propagation time | ≤ few seconds | | not run | |
+| A5 temp grant plays then auto-expires | Blocks at expiry | | not run | |
+| A5 offline expiry (airplane mode) | Blocks at expiry | | not run | |
+| A5 clock tamper (detection only, ADR-009) | No extension | | not run | |
+| A5 clock tamper (`requireAutomaticDateAndTime`, ADR-014) | Cannot change clock | | not run | |
+| A6 app delete — Posture A (`.child` alone) | ? | | not run | needs `.child`; blocked on account |
+| A6 app delete — Posture B (`denyAppRemoval`) | Blocked | | not run | needs `.child` |
+| A6 iCloud sign-out — Posture A | ? | | not run | needs `.child` |
+| A6 iCloud sign-out — Posture B (`lockAccounts`) | Blocked | | not run | needs `.child` |
+| A6 disable filter in Settings (either posture) | ? | | not run | **still the key unknown (ADR-014)** |
+| A6 DNS/VPN/profile bypass | ? | | not run | **key unknown** |
+
+### Three findings that were not on the test list
+
+**1. The filter enforced with FamilyControls authorization `Not Determined`.**
+`requestAuthorization(for: .child)` fails on this device (`invalidAccountType` —
+the Apple Account signed in is an adult one), yet `NEFilterManager` enabled and
+every verdict above was produced anyway. On iOS 27 the
+`com.apple.developer.family-controls` **entitlement** was enough to run a content
+filter; `.child` **authorization** was not required for enforcement. `.child` is
+still what A6 tamper-resistance depends on, but the dependency is narrower than
+ADR-001 assumed.
+
+**2. Applying `youTubeDefault` to socket flows makes YouTube unreachable.** A
+socket flow has no video id, so the YouTube default blocked `www.youtube.com` at
+connection level: the ALLOWED video returned no block page (its browser flow was
+correctly allowed) and then hung, because the page's own API calls were dropped.
+The default is now enforced on browser flows only. Cost: the YouTube **native
+app** is socket-only and is no longer default-denied by this provider.
+
+**3. `needRules()` stalls browsing.** With
+`askControlProviderForUnknownHosts = true`, pages loaded partially or not at all
+with no block page. Every such flow is answered from one **serial** queue doing a
+synchronous CNAME walk with a 0.4 s budget, so the Nth host on a page waits
+N x 0.4 s while the system's control-verdict timeout expires. Even a safety-floor
+page failed — not because the floor was denied, but because its subresources took
+that path. The switch is now off. Re-enabling it needs at minimum a concurrent
+queue, and more likely CNAME resolution moved off the flow path entirely.
+
+### What the extensions can and cannot write
+
+`PolicyStore.recordsDiagnostics` states that the `NEFilterDataProvider` sandbox
+forbids disk writes. Measured: **the data provider's writes to the App Group
+never appeared** — `Shared/FlowLog.swift` recorded nothing across several
+browsing runs — while `cname_chain_cache_v1`, written by the **control**
+provider, did appear. The asymmetry is real: treat the App Group as read-only
+from the data provider and write from the control provider or the app.
 
 ## Success criterion
 
