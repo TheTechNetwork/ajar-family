@@ -167,9 +167,35 @@ matter are not:
 | Apple VM host | **Resolved** — physical Apple silicon Mac, macOS 27.0, Xcode 27.0 |
 | Zero signing identities | **Resolved** — 3 valid identities, incl. an Apple Distribution cert |
 | Compiler never run on `Shared/` | **Resolved** — `PolicySelfTest.runAll()` passes every cross-platform vector |
-| No paired iOS device | **STILL BLOCKED** — `devicectl list devices` returns simulators only |
-| No App IDs / App Group registered | **STILL BLOCKED** — nothing under `family.ajar.*` exists in either team |
-| Family Controls entitlement | **STILL BLOCKED** — not requested; distribution signing impossible until granted |
+| No paired iOS device | **Resolved** — iPhone 16 Pro Max, iOS 27.0, Developer Mode on |
+| No App IDs / App Group registered | **Resolved** — all three App IDs + the App Group exist in `2BPX4R682U` |
+| Family Controls entitlement (development) | **Resolved** — see below; granted without Apple review |
+| Family Controls entitlement (distribution) | **STILL BLOCKED** — not requested; TestFlight impossible until granted |
+| **A child/teen Apple ID on the test device** | **STILL BLOCKED — the new critical path** (see below) |
+
+**The app is signed, installed and running on hardware (2026-08-31).** Xcode
+automatic signing against team `2BPX4R682U` registered the device, created all
+three App IDs and the `group.family.ajar.child` App Group, and minted three
+development profiles. `xcodebuild -allowProvisioningUpdates` from the command
+line will NOT do this — it silently falls back to a cached wildcard profile and
+emits no authentication diagnostic; the portal writes only happen through the
+Xcode GUI (or an App Store Connect API key).
+
+**`com.apple.developer.family-controls` is available for DEVELOPMENT without
+Apple's review.** Confirmed by reading the minted profile, which carries
+`com.apple.developer.family-controls => true` plus
+`com.apple.developer.family-controls.app-and-website-usage`. This is direct
+evidence for the split the runbook and the TestFlight workflow both assert:
+development signing needs no entitlement request, distribution does.
+
+**What actually blocks A1–A6 now is the test account, not the toolchain.**
+`AuthorizationCenter.requestAuthorization(for: .child)` fails on a device signed
+in with an ADULT Apple ID — Family Controls is available only to child and teen
+iCloud accounts (`FamilyControlsError.invalidAccountType`). The prerequisite in
+APPLE_CONTENT_FILTER_POC.md was written as an assumption; it is now a measured
+hard requirement. Since an unsupervised device grants the content filter only to
+a Family-Controls-authorized app (TN3134), this gates the whole matrix, not just
+the A6 tamper tests.
 
 The team question is now decided: the `family.ajar.*` identifiers belong to
 **Consultinc Group LLC, Team ID `2BPX4R682U`** (the Organization team, per
