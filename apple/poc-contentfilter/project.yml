@@ -44,6 +44,16 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: ParentFilter PoC
+        # Export compliance, answered ONCE here instead of per upload. Apple only
+        # requires documentation for non-exempt encryption; encryption built into
+        # the OS (HTTPS via URLSession, CryptoKit) is exempt, and that is all this
+        # app uses — TLS to the backend plus Ed25519 snapshot verification through
+        # CryptoKit. Without this key every single TestFlight upload parks in App
+        # Store Connect waiting for a human to answer the encryption questions,
+        # which is exactly the manual gate CI exists to remove.
+        # Re-confirm this if a third-party crypto library is ever linked.
+        # https://developer.apple.com/documentation/bundleresources/information-property-list/itsappusesnonexemptencryption
+        ITSAppUsesNonExemptEncryption: false
         UIApplicationSupportsIndirectInputEvents: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
