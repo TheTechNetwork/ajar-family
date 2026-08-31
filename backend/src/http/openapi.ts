@@ -323,6 +323,12 @@ export const openapiDocument = {
       get: { tags: ["system"], summary: "Policy-signing public key", security: [],
         responses: { "200": { description: "Public key", content: json({ type: "object", properties: { publicKeyB64: { type: "string" }, alg: { const: "Ed25519" } } }) } } },
     },
+    "/blocked": {
+      get: { tags: ["system"], summary: "Request-Access block page (HTML, rendered by the iOS content filter)", security: [],
+        parameters: [{ name: "u", in: "query", required: false, schema: { type: "string" },
+                       description: "The blocked flow URL, substituted by NEFilterProvider. Non-http(s) values are ignored." }],
+        responses: { "200": { description: "HTML page", content: { "text/html": { schema: { type: "string" } } } } } },
+    },
     "/openapi.json": {
       get: { tags: ["system"], summary: "This OpenAPI document", security: [],
         responses: { "200": { description: "OpenAPI 3.1 document", content: json({ type: "object", additionalProperties: true }) } } },

@@ -4,6 +4,8 @@ import SwiftUI
 /// the experiments in docs/APPLE_CONTENT_FILTER_POC.md on a device.
 struct ContentView: View {
     @StateObject private var controller = FilterController()
+    @State private var baseURL = ""
+    @State private var enrollCode = ""
 
     var body: some View {
         NavigationStack {
@@ -55,6 +57,40 @@ struct ContentView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 #endif
+                Section("5 · Backend (the real, signed path)") {
+                    TextField("https://backend.example", text: $baseURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    Button("Save backend URL") { controller.setBaseURL(baseURL) }
+
+                    if controller.isEnrolled {
+                        Label("Enrolled", systemImage: "checkmark.seal").foregroundStyle(.green)
+                        Text("Policy version: \(controller.policyVersion.map(String.init) ?? "none")")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Button("Sync policy now") { Task { await controller.syncPolicy() } }
+                        Button("Wait for a parent's decision (long poll)") {
+                            Task { await controller.waitForPolicyChange() }
+                        }
+                        Button("Sign this device out", role: .destructive) { controller.signOutDevice() }
+                    } else {
+                        TextField("Enrollment code", text: $enrollCode)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Button("Enroll this device") {
+                            Task { await controller.enroll(code: enrollCode, displayName: "PoC device") }
+                        }
+                    }
+
+                    if let status = controller.backendStatus {
+                        Text(status).font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if let req = controller.lastRequest {
+                        Text("Last request: \(req)").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Text("Enrolling installs the backend's signing key, which is what moves this device off the local unsigned policy onto verified snapshots.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 Section("Try in Safari") {
                     Label("ALLOWED: youtube.com/watch?v=\(FilterController.allowedVideo)", systemImage: "checkmark.circle")
                     Label("BLOCKED: youtube.com/watch?v=\(FilterController.blockedVideo)", systemImage: "xmark.octagon")
@@ -95,6 +131,12 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("ParentFilter PoC")
+            // The Request-Access hand-off from the block page: the page is https
+            // (NEFilterProvider requires it), its button is ajar://request?u=…,
+            // and the request is filed HERE because only the app holds the
+            // device token. See FilterController.handleIncoming.
+            .onOpenURL { url in Task { await controller.handleIncoming(url: url) } }
+            .onAppear { if baseURL.isEmpty { baseURL = controller.baseURLString } }
         }
     }
 }

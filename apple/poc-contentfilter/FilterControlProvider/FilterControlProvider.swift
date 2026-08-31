@@ -15,6 +15,19 @@ final class FilterControlProvider: NEFilterControlProvider {
     /// browsing, so the walk is cut off and whatever was learned is used.
     static let cnameBudget: TimeInterval = 0.4
 
+    /// Where the Request-Access block page lives.
+    ///
+    /// Read from the App Group so a development build can point at a local
+    /// Worker, with the production host as the fallback. `remediationMap` is
+    /// built once in `startFilter`, so changing this takes effect when the
+    /// filter is next started — not mid-session.
+    static var blockPageBase: String {
+        let configured = UserDefaults(suiteName: PolicyStore.defaultAppGroup)?
+            .string(forKey: "block_page_base")
+        if let configured, !configured.isEmpty { return configured }
+        return "https://blocked.ajar.family/blocked"
+    }
+
     private let log = Logger(subsystem: "family.ajar.child", category: "control")
     private let store = PolicyStore.shared
     private let cache = CnameChainCache.shared
@@ -38,7 +51,19 @@ final class FilterControlProvider: NEFilterControlProvider {
             NEFilterProviderRemediationMapRemediationURLs: [
                 // The block page. Query params carry the blocked flow URL so the
                 // app can normalize it to a canonical YouTube id (test A3).
-                "requestAccess": "https://parentfilter.example/blocked?u=\(NEFilterProviderRemediationURLFlowURL)" as NSString
+                //
+                // This host MUST stay reachable or Request Access is a dead
+                // button: it is fetched by Safari while a filter is actively
+                // blocking, so it has to survive the policy that caused the
+                // block. `webDefault: ALLOW` covers it today; if a family is
+                // ever moved to default-deny web, this host needs an explicit
+                // allow or the child cannot ask for anything.
+                //
+                // It was `parentfilter.example` — a reserved placeholder domain
+                // that does not resolve — so the page rendered, the button
+                // appeared, and tapping it went nowhere. That is why A3 was only
+                // ever recorded as a partial pass.
+                "requestAccess": "\(Self.blockPageBase)?u=\(NEFilterProviderRemediationURLFlowURL)" as NSString
             ],
             NEFilterProviderRemediationMapRemediationButtonTexts: [
                 "requestAccessButton": "Request Access" as NSString

@@ -168,6 +168,116 @@ final class FilterController: ObservableObject {
     }
     #endif
 
+    // MARK: - Backend (the real path, not the DEBUG seeding above)
+
+    private let backend = BackendClient()
+
+    @Published var isEnrolled = BackendClient().isEnrolled
+    @Published var backendStatus: String?
+    /// Set when a Request-Access deep link arrives, so the UI can show what was
+    /// asked for rather than silently posting.
+    @Published var lastRequest: String?
+
+    var baseURLString: String { BackendClient.baseURL?.absoluteString ?? "" }
+    var policyVersion: Int? { store.current()?.version }
+
+    func setBaseURL(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        BackendClient.baseURL = trimmed.isEmpty ? nil : URL(string: trimmed)
+        backendStatus = trimmed.isEmpty ? "Backend URL cleared." : "Backend URL set."
+    }
+
+    /// Redeem a parent-issued enrollment code. On success the device holds a
+    /// token AND the backend's signing key, which is what lets it move off the
+    /// DEBUG unsigned path onto verified snapshots.
+    func enroll(code: String, displayName: String) async {
+        do {
+            let device = try await backend.enroll(
+                code: code.trimmingCharacters(in: .whitespacesAndNewlines), displayName: displayName)
+            isEnrolled = true
+            backendStatus = "Enrolled as \(device.id) (child \(device.childId))."
+            await syncPolicy()
+        } catch {
+            backendStatus = nil
+            lastError = "Enroll failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Pull and install the signed policy. This is the path that replaces the
+    /// DEBUG seeding: `PolicyStore.install` verifies the Ed25519 signature and
+    /// refuses anything that does not check out, so a snapshot that arrives
+    /// here and installs is one the extensions will also trust.
+    func syncPolicy() async {
+        do {
+            let changed = try await backend.syncPolicy()
+            backendStatus = changed
+                ? "Installed policy v\(store.current()?.version ?? -1)."
+                : "Already up to date (v\(store.current()?.version ?? -1))."
+            reloadExtensionRules()
+        } catch {
+            lastError = "Policy sync failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Long-poll for a parent's decision. This is the A4 fast path: the backend
+    /// parks the request until something is decided, so an approval lands on the
+    /// child's device in seconds without polling in a loop.
+    func waitForPolicyChange() async {
+        do {
+            let changed = try await backend.waitForPolicyChange()
+            if changed {
+                backendStatus = "Policy changed → v\(store.current()?.version ?? -1)."
+                reloadExtensionRules()
+            } else {
+                backendStatus = "No change before the timeout."
+            }
+        } catch {
+            lastError = "Policy wait failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Handle `ajar://request?u=<blocked url>` from the block page.
+    ///
+    /// The canonical id is computed HERE rather than by the page, so the app's
+    /// normalization stays the single definition of "this video": a request for
+    /// `watch?v=X&t=90` and one for `youtu.be/X` must reach the parent as one
+    /// item, not two.
+    func handleIncoming(url: URL) async {
+        guard url.scheme == "ajar", url.host == "request" else { return }
+        guard let blocked = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "u" })?.value, !blocked.isEmpty else {
+            lastError = "That link carried no address to request."
+            return
+        }
+
+        let yt = YouTube.normalize(blocked)
+        let targetType: String, targetValue: String
+        if let videoId = yt.videoId {
+            targetType = "YOUTUBE_VIDEO"; targetValue = videoId
+        } else {
+            // The exact URL, not the domain: approving a blocked page should not
+            // silently open the whole site.
+            targetType = "URL"; targetValue = blocked
+        }
+
+        lastRequest = "\(targetType) \(targetValue)"
+        do {
+            try await backend.createRequest(targetType: targetType, targetValue: targetValue, url: blocked)
+            backendStatus = "Request sent — waiting for a parent."
+            // Park on the long poll so an approval applies without the child
+            // having to reopen the app.
+            await waitForPolicyChange()
+        } catch {
+            lastError = "Request failed: \(error.localizedDescription)"
+        }
+    }
+
+    func signOutDevice() {
+        backend.signOut()
+        isEnrolled = false
+        backendStatus = "Device credentials cleared."
+    }
+
     /// Ping the control provider so it calls notifyRulesChanged() (seconds-level
     /// propagation). Reloading the manager triggers the control provider start.
     private func reloadExtensionRules() {

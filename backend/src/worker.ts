@@ -91,9 +91,12 @@ export default {
       json: async () => (rawBody ? JSON.parse(rawBody) : {}),
     };
     const r = await (await getRouter(env)).handle(req);
-    return new Response(JSON.stringify(r.body), {
+    // A handler that set its own content-type (the HTML block page) has already
+    // produced a string body; everything else is JSON-encoded as before.
+    const raw = typeof r.body === "string" && r.headers?.["content-type"] !== undefined;
+    return new Response(raw ? (r.body as string) : JSON.stringify(r.body), {
       status: r.status,
-      headers: { "content-type": "application/json", ...CORS },
+      headers: { "content-type": "application/json", ...(r.headers ?? {}), ...CORS },
     });
   },
 };

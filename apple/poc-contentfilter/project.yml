@@ -60,6 +60,18 @@ targets:
         # Re-confirm this if a third-party crypto library is ever linked.
         # https://developer.apple.com/documentation/bundleresources/information-property-list/itsappusesnonexemptencryption
         ITSAppUsesNonExemptEncryption: false
+        # How the Request-Access block page hands back to the app. The page is
+        # served over https (NEFilterProvider requires an http/https remediation
+        # URL, so the block page itself CANNOT be a custom scheme), and its
+        # button links to ajar://request?u=… — the app then files the request
+        # with its device token. Universal Links would avoid the scheme entirely
+        # and are the right end state, but they need an apple-app-site-association
+        # on blocked.ajar.family plus the Associated Domains capability; this
+        # works today and does not gate the flow on DNS.
+        CFBundleURLTypes:
+          - CFBundleURLName: family.ajar.child
+            CFBundleURLSchemes:
+              - ajar
         UIApplicationSupportsIndirectInputEvents: true
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:

@@ -14,6 +14,13 @@ export interface HttpRequest {
 export interface HttpResponse {
   status: number;
   body: unknown;
+  /**
+   * Extra response headers. Set a non-JSON `content-type` here and the transport
+   * adapters send `body` verbatim instead of JSON-encoding it — which is how the
+   * one HTML route in this API (the Request-Access block page) is served without
+   * giving every JSON route a second code path.
+   */
+  headers?: Record<string, string>;
 }
 
 export type Handler = (req: HttpRequest) => Promise<HttpResponse>;
@@ -21,6 +28,9 @@ export type Handler = (req: HttpRequest) => Promise<HttpResponse>;
 interface Route { method: string; parts: string[]; handler: Handler }
 
 export const ok = (body: unknown, status = 200): HttpResponse => ({ status, body });
+/** An HTML page. `markup` is sent as-is — callers must escape interpolations. */
+export const html = (markup: string, status = 200): HttpResponse =>
+  ({ status, body: markup, headers: { "content-type": "text/html; charset=utf-8" } });
 export const err = (status: number, message: string, code?: string): HttpResponse =>
   ({ status, body: { error: message, code } });
 

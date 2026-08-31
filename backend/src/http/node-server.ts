@@ -75,8 +75,11 @@ function routeApi(nreq: IncomingMessage, nres: ServerResponse, router: Router) {
       json: async () => (rawBody ? JSON.parse(rawBody) : {}),
     };
     const res = await router.handle(req);
-    nres.writeHead(res.status, { "content-type": "application/json", ...CORS_HEADERS });
-    nres.end(JSON.stringify(res.body));
+    const raw = typeof res.body === "string" && res.headers?.["content-type"] !== undefined;
+    nres.writeHead(res.status, {
+      "content-type": "application/json", ...(res.headers ?? {}), ...CORS_HEADERS,
+    });
+    nres.end(raw ? (res.body as string) : JSON.stringify(res.body));
   });
 }
 

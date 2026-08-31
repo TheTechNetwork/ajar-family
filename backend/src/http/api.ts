@@ -4,7 +4,7 @@
  * in with Apple / passkeys + refresh rotation without changing these routes.
  */
 import type { App } from "../app.js";
-import { Router, ok, err, type HttpRequest, type HttpResponse } from "./router.js";
+import { Router, ok, err, html, type HttpRequest, type HttpResponse } from "./router.js";
 import { issueToken, verifyToken, type Principal } from "../auth/tokens.js";
 import { openapiDocument } from "./openapi.js";
 import { RateLimiter, clientKey } from "./rate-limit.js";
@@ -65,6 +65,13 @@ const DEVICE_TOKEN_TTL = 60 * 60 * 24 * 30;
 const issueDeviceToken = (app: App, d: { id: string; familyId: string; childId: string }) =>
   issueToken(app.authSecret, { kind: "device", deviceId: d.id, familyId: d.familyId, childId: d.childId }, DEVICE_TOKEN_TTL);
 
+
+/** Minimal HTML escaping for the one page this API serves. */
+function escapeHtml(v: string): string {
+  return v.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}
+
 export function buildRouter(app: App): Router {
   const r = new Router();
 
@@ -81,6 +88,60 @@ export function buildRouter(app: App): Router {
 
   r.get("/v1/health", async () => ok({ status: "ok", version: "0.0.0-alpha" }));
   r.get("/v1/signing-key", async () => ok({ publicKeyB64: app.signingPublicKeyB64, alg: "Ed25519" }));
+
+  /**
+   * The Request-Access block page (iOS content-filter remediation target).
+   *
+   * When the data provider returns `.remediateVerdict`, iOS renders THIS page
+   * inside Safari with `?u=<the blocked flow URL>`. It is deliberately:
+   *
+   *  - **unauthenticated** — it is fetched by a browser that holds no device
+   *    token, while a filter is actively blocking traffic;
+   *  - **dependency-free** — no scripts and no external assets, because some of
+   *    those fetches would themselves be filtered, and a block page that cannot
+   *    render is a child who cannot ask;
+   *  - **not where the request is filed.** The button hands off to the app via
+   *    `ajar://`, and the APP calls POST /v1/requests with its device token.
+   *    A page that could file requests on its own would be an unauthenticated
+   *    write endpoint reachable by anyone who guesses the URL.
+   *
+   * The canonical id is computed on the device rather than here, so the app's
+   * normalization stays the single source of truth for what "this video" means.
+   */
+  r.get("/blocked", async (req) => {
+    const target = (req.query.get("u") ?? "").slice(0, 2048);
+    // Only ever emit an http(s) target. Without this the `u` parameter is a
+    // reflected redirect into any scheme the browser will honour.
+    const safe = /^https?:\/\//i.test(target) ? target : "";
+    const shown = escapeHtml(safe);
+    const deepLink = safe ? `ajar://request?u=${encodeURIComponent(safe)}` : "";
+
+    return html(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Blocked</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         font:-apple-system-body, system-ui, sans-serif; background:#F6F4EE; color:#12241F; padding:24px; }
+  @media (prefers-color-scheme: dark) { body { background:#12241F; color:#F6F4EE; } }
+  .card { max-width:32rem; width:100%; text-align:center; }
+  h1 { font-size:1.4rem; margin:0 0 .5rem; }
+  p { color:#3E4F49; line-height:1.5; margin:0 0 1rem; }
+  @media (prefers-color-scheme: dark) { p { color:#C9D3CF; } }
+  .url { font:0.8rem ui-monospace, monospace; word-break:break-all; background:#EFEDE4;
+         border:1px solid #767468; border-radius:8px; padding:.6rem .75rem; margin-bottom:1.5rem; }
+  @media (prefers-color-scheme: dark) { .url { background:#1B2E28; border-color:#5C6B64; } }
+  a.btn { display:inline-block; background:#0d6d5e; color:#fff; text-decoration:none;
+          padding:.8rem 1.4rem; border-radius:999px; font-weight:600; }
+</style></head>
+<body><div class="card">
+  <h1>This page is blocked</h1>
+  ${safe ? `<p>You can ask a parent to allow it.</p><div class="url">${shown}</div>
+  <a class="btn" href="${escapeHtml(deepLink)}">Ask a parent</a>`
+         : `<p>No address was supplied, so there is nothing to request.</p>`}
+</div></body></html>`);
+  });
   // Machine-readable API contract (the source of truth clients integrate against).
   r.get("/openapi.json", async () => ok(openapiDocument));
 
