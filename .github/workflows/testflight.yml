@@ -61,10 +61,17 @@ jobs:
           [ -n "${{ secrets.ASC_KEY_ID }}" ]     || missing="$missing ASC_KEY_ID(secret)"
           [ -n "${{ secrets.ASC_ISSUER_ID }}" ]  || missing="$missing ASC_ISSUER_ID(secret)"
           [ -n "${{ secrets.ASC_KEY_P8 }}" ]     || missing="$missing ASC_KEY_P8(secret)"
+          [ -n "${{ secrets.APPLE_DIST_P12 }}" ]          || missing="$missing APPLE_DIST_P12(secret)"
+          [ -n "${{ secrets.APPLE_DIST_P12_PASSWORD }}" ] || missing="$missing APPLE_DIST_P12_PASSWORD(secret)"
+          [ -n "${{ secrets.APPLE_PROFILE_APP }}" ]       || missing="$missing APPLE_PROFILE_APP(secret)"
+          [ -n "${{ secrets.APPLE_PROFILE_DATA }}" ]      || missing="$missing APPLE_PROFILE_DATA(secret)"
+          [ -n "${{ secrets.APPLE_PROFILE_CONTROL }}" ]   || missing="$missing APPLE_PROFILE_CONTROL(secret)"
           if [ -n "$missing" ]; then
             echo "::error::Not configured:$missing"
-            echo "See docs/APPLE_ACCOUNT_SETUP.md. The App Store Connect API key needs the"
-            echo "App Manager role so xcodebuild -allowProvisioningUpdates can mint profiles."
+            echo "See docs/APPLE_ACCOUNT_SETUP.md §3.1 and §5. Signing is MANUAL: the"
+            echo "distribution certificate (.p12) and one provisioning profile per target"
+            echo "are created by hand and supplied as base64 secrets. The App Store Connect"
+            echo "API key is still needed — it authenticates the upload."
             exit 1
           fi
 
@@ -88,11 +95,106 @@ jobs:
           printf '%s' "$ASC_KEY_P8" > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
           chmod 600 ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
 
+      # ---- Manual signing -----------------------------------------------
+      # -allowProvisioningUpdates hits an Apple-side cap on how much it will
+      # create automatically, so the certificate and every profile are made by
+      # hand (docs/APPLE_ACCOUNT_SETUP.md §3.1) and imported here.
+      - name: Import the distribution certificate
+        env:
+          P12: ${{ secrets.APPLE_DIST_P12 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DIST_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # A dedicated keychain, deleted in the cleanup step below, so the
+          # private key never lingers on a runner or leaks into another job.
+          KEYCHAIN="$RUNNER_TEMP/ajar-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"   # no auto-lock mid-build
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          printf '%s' "$P12" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security import "$RUNNER_TEMP/dist.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security -f pkcs12
+          rm -f "$RUNNER_TEMP/dist.p12"
+          # Without this, codesign blocks on a UI prompt that never comes and the
+          # job hangs until the timeout rather than failing.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+          found="$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -c "Apple Distribution" || true)"
+          if [ "$found" -eq 0 ]; then
+            echo "::error::No 'Apple Distribution' identity in the imported .p12."
+            echo "The .p12 must bundle the certificate WITH its private key — see §3.1."
+            exit 1
+          fi
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      # Profiles are matched to targets by READING them, not by naming
+      # convention: a profile named wrongly in the portal would otherwise sign
+      # the wrong target and only surface as a confusing rejection at upload.
+      - name: Install provisioning profiles and map them to targets
+        env:
+          PROFILE_APP: ${{ secrets.APPLE_PROFILE_APP }}
+          PROFILE_DATA: ${{ secrets.APPLE_PROFILE_DATA }}
+          PROFILE_CONTROL: ${{ secrets.APPLE_PROFILE_CONTROL }}
+        run: |
+          set -euo pipefail
+          DEST=~/Library/MobileDevice/Provisioning\ Profiles
+          mkdir -p "$DEST"
+          seen=""
+
+          # A `case` rather than an associative array: macOS ships bash 3.2, which
+          # has no `declare -A`, and this must not depend on which bash the runner
+          # happens to resolve first.
+          for var in PROFILE_APP PROFILE_DATA PROFILE_CONTROL; do
+            eval "b64=\$$var"
+            raw="$RUNNER_TEMP/$var.mobileprovision"
+            printf '%s' "$b64" | base64 --decode > "$raw"
+            # A .mobileprovision is CMS-signed; strip the signature to read the plist.
+            plist="$RUNNER_TEMP/$var.plist"
+            security cms -D -i "$raw" > "$plist"
+
+            uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$plist")"
+            name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$plist")"
+            # application-identifier is "<TEAMID>.<bundle id>" — drop the team prefix.
+            appid="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$plist")"
+            bundle="${appid#*.}"
+
+            case "$bundle" in
+              family.ajar.child)                      target=AJAR_PROFILE_APP ;;
+              family.ajar.child.FilterDataProvider)   target=AJAR_PROFILE_DATA ;;
+              family.ajar.child.FilterControlProvider) target=AJAR_PROFILE_CONTROL ;;
+              *)
+                echo "::error::$var is a profile for '$bundle', which is not a target of this app."
+                echo "Expected family.ajar.child, .FilterDataProvider or .FilterControlProvider."
+                exit 1 ;;
+            esac
+
+            cp "$raw" "$DEST/$uuid.mobileprovision"
+            echo "$target=$name" >> "$GITHUB_ENV"
+            seen="$seen $target"
+            echo "  $bundle -> '$name' ($uuid)"
+
+            # Surface what the profile actually carries. A profile generated
+            # before Family Controls was granted looks valid and then fails to
+            # sign; seeing the keys here beats decoding it after the failure.
+            echo "    entitlement keys:"
+            /usr/libexec/PlistBuddy -c 'Print :Entitlements' "$plist" \
+              | sed -n 's/^        \([a-zA-Z][a-zA-Z0-9.-]*\) =.*/      - \1/p' || true
+            rm -f "$plist"
+          done
+
+          for want in AJAR_PROFILE_APP AJAR_PROFILE_DATA AJAR_PROFILE_CONTROL; do
+            case "$seen" in
+              *"$want"*) ;;
+              *) echo "::error::No profile supplied for $want"; exit 1 ;;
+            esac
+          done
+
       - name: Archive
         working-directory: ${{ env.PROJECT_DIR }}
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
           set -o pipefail
           xcodebuild archive \
@@ -101,17 +203,20 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/Ajar.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
+            AJAR_PROFILE_APP="$AJAR_PROFILE_APP" \
+            AJAR_PROFILE_DATA="$AJAR_PROFILE_DATA" \
+            AJAR_PROFILE_CONTROL="$AJAR_PROFILE_CONTROL" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
             | xcbeautify || xcodebuild -version
 
       - name: Export the .ipa
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
+          set -euo pipefail
           cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -120,16 +225,19 @@ jobs:
             <key>teamID</key><string>${TEAM_ID}</string>
             <key>uploadSymbols</key><true/>
             <key>destination</key><string>export</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict>
+              <key>family.ajar.child</key><string>${AJAR_PROFILE_APP}</string>
+              <key>family.ajar.child.FilterDataProvider</key><string>${AJAR_PROFILE_DATA}</string>
+              <key>family.ajar.child.FilterControlProvider</key><string>${AJAR_PROFILE_CONTROL}</string>
+            </dict>
           </dict></plist>
           PLIST
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/Ajar.xcarchive" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
-            -exportPath "$RUNNER_TEMP/export" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
-            -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
-            -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}"
+            -exportPath "$RUNNER_TEMP/export"
 
       - name: Upload to TestFlight
         env:
@@ -151,3 +259,14 @@ jobs:
           name: ios-archive-${{ github.run_number }}
           path: ${{ runner.temp }}/Ajar.xcarchive
           retention-days: 14
+
+      # The signing keychain holds the distribution PRIVATE KEY. Runners are
+      # ephemeral, but `always()` means a failed build does not leave it behind
+      # for whatever runs next on a self-hosted runner.
+      - name: Remove the signing keychain
+        if: always()
+        run: |
+          if [ -n "${KEYCHAIN:-}" ] && [ -f "$KEYCHAIN" ]; then
+            security delete-keychain "$KEYCHAIN" || true
+            echo "signing keychain removed"
+          fi

@@ -39,6 +39,12 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: family.ajar.child
         CODE_SIGN_ENTITLEMENTS: App/ParentFilterPoC.entitlements
+        # Manual signing in CI (docs/APPLE_ACCOUNT_SETUP.md §3.1, §5). Each
+        # target reads a DIFFERENT variable because a build setting passed on
+        # the xcodebuild command line applies to every target at once — one
+        # shared name would sign all three with the app's profile. Empty under
+        # local automatic signing, where Xcode ignores it.
+        PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_APP)
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
     info:
       path: App/Info.plist
@@ -73,6 +79,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: family.ajar.child.FilterDataProvider
         CODE_SIGN_ENTITLEMENTS: FilterDataProvider/FilterDataProvider.entitlements
+        PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_DATA)
     info:
       path: FilterDataProvider/Info.plist
       properties:
@@ -92,6 +99,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: family.ajar.child.FilterControlProvider
         CODE_SIGN_ENTITLEMENTS: FilterControlProvider/FilterControlProvider.entitlements
+        PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_CONTROL)
     info:
       path: FilterControlProvider/Info.plist
       properties:

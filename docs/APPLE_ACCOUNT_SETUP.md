@@ -203,6 +203,94 @@ form you then have to justify, so do not pre-enable against a future need:
 | **Sign in with Apple** | ❌ **no** | Only required if a third-party (Google/Facebook) login is offered. Ajar uses self-contained passwords, so 4.8 does not apply. |
 | **Parent iOS App ID** | ❌ **none exists** | `apple/parent-app/` is a README stub; the parent console is the web app in `web/parent/`. There is no parent app to register. |
 
+### 4.1 Every entitlement, including the scaffolds not yet merged
+
+The table above is what exists and signs **today**. This is the full inventory
+for the surfaces already scaffolded in the repo, so a provisioning profile is
+never regenerated just because a merge added a capability. Enable a capability
+on the App ID only when its target actually merges — a profile carrying an
+entitlement the binary does not use is a review question you have to answer.
+
+**Legend:** `NE[...]` = `com.apple.developer.networking.networkextension` with
+that value in its array. `FC` = `com.apple.developer.family-controls`.
+`AG` = `com.apple.security.application-groups`.
+
+**A. iOS child app — `apple/poc-contentfilter/` (MERGED, signs today)**
+
+| Target | Entitlements | Verified |
+|---|---|---|
+| `family.ajar.child` | `FC`, `NE[content-filter-provider]`, `AG` | ✅ in repo |
+| `…child.FilterDataProvider` | `NE[content-filter-provider]`, `AG` | ✅ in repo |
+| `…child.FilterControlProvider` | `NE[content-filter-provider]`, `AG` | ✅ in repo |
+
+**B. `NEURLFilter` category blocklist — `apple/poc-urlfilter/` (PoC D, NOT merged)**
+
+| Target | Entitlements | Note |
+|---|---|---|
+| host app | `NE[url-filter-provider]` **added to the existing array**, so the child app ends up with *both* values | the entitlement is one key; the array carries both |
+| `…child.URLFilterControlProvider` | `NE[url-filter-provider]`, **`AG`** | an **ExtensionKit** extension (`EXExtensionPointIdentifier`), not a classic `.appex` |
+
+> ⚠️ The scaffold's `.entitlements` today declares `NE[url-filter-provider]` and
+> **no App Group**. That is fine in isolation but will not survive merging: the
+> control provider has to read the prefilter the app builds. Add `AG` when it
+> merges. Also note this target does **not** need `FC` — PoC D loads without it.
+
+**C. Parent iOS app — `apple/parent-app/` (README stub, NOT built)**
+
+| Target | Entitlements | Note |
+|---|---|---|
+| `family.ajar.parent` | `aps-environment` (Push Notifications) | for "new access request" |
+| | *Sign in with Apple* — **only** if a third-party login is ever added (4.8) | not planned; auth is self-contained passwords |
+
+No `FC`, no `NE`: the parent device enforces nothing. Register this App ID only
+when the target exists (§8.4).
+
+**D. macOS child app — `macos/safari-extension/` (loose JS, NO Xcode project)**
+
+A Safari Web Extension cannot ship standalone; it lives in a container app.
+
+| Target | Entitlements | Note |
+|---|---|---|
+| container app | `com.apple.security.app-sandbox`, `com.apple.security.network.client`, `AG` | the product surface + onboarding |
+| Safari Web Extension | `com.apple.security.app-sandbox`, `AG` | `SafariWebExtensionHandler` bridges JS ↔ native |
+| native messaging host | `AG` (sandbox if bundled) | delivers signed snapshots (ARCHITECTURE §8) |
+
+**E. macOS native filter layer (ARCHITECTURE §"macOS", NOT built)**
+
+| Target | Entitlements | Note |
+|---|---|---|
+| container app that installs it | **`com.apple.developer.system-extension.install`** | this key goes on the INSTALLING app, not the extension |
+| `NEFilterDataProvider` system extension | `NE[content-filter-provider]`, `AG` | socket/hostname enforcement + `disableEncryptedDNSSettings` |
+
+> **This is the one fork worth deciding early.** A NetworkExtension *system*
+> extension distributed outside the App Store needs **Developer ID signing plus
+> notarization**, which is a different distribution channel from everything else
+> here — not TestFlight. Shipping the macOS filter through the App Store instead
+> means the app-extension flavor and different constraints. ARCHITECTURE §"macOS
+> tamper model" already assumes a notarized system extension and a standard
+> (non-admin) account (ADR-006). Confirm the channel before building the target,
+> because it changes the signing pipeline, not just an entitlement.
+
+**F. Conditional — not needed yet**
+
+| Entitlement | When it becomes needed |
+|---|---|
+| `keychain-access-groups` | if the device keypair moves from the App Group into the Keychain, shared app ↔ extension. `Shared/PolicyStore.swift` flags this as a hardening TODO; the App Group alone covers today's storage. |
+| `com.apple.developer.usernotifications.communication` | not applicable — no communication notifications |
+| `com.apple.developer.applesignin` | only alongside a third-party login (§4, 4.8) |
+
+**What this means for manual provisioning profiles.** Each profile is generated
+from an App ID **after** its capabilities are enabled, and it bakes them in — so
+the order is: enable capability → regenerate profile → rebuild. Adding an
+entitlement to a `.entitlements` file without regenerating the profile produces a
+signing failure that names the entitlement, which is the good case; the bad case
+is a profile that silently carries more than the binary uses.
+
+**And the gate that outranks all of it:** an App Store profile cannot carry
+`FC` until the **Family Controls distribution entitlement** is granted (§6). Every
+row above marked `FC` is blocked on that human review, no matter how correct the
+capability checkboxes are.
+
 **App Group (register once, share across app + all extensions):**
 
 - [ ] Register App Group **`group.family.ajar.child`** under Identifiers →
@@ -230,9 +318,11 @@ force SIWA. Enable it on a parent App ID only if/when a parent iOS app exists AN
 
 ## 5. Provisioning profiles
 
-> Like the certificates in §3, **CI creates these**. `-allowProvisioningUpdates`
-> mints and renews the App Store profiles for the app and both extensions on
-> every run. Nothing here is a manual step unless you are signing from a Mac.
+> **Created by hand, like the certificate (§3.1).** Three App Store profiles —
+> one per target — supplied to CI as base64 secrets (§8.1). Generate each AFTER
+> its App ID's capabilities are enabled (§4.1): a profile bakes in the
+> entitlements present at generation time, so enabling a capability later means
+> regenerating the profile, not just editing the `.entitlements` file.
 
 - [ ] **Development** profiles — created by Xcode's *Automatically manage
       signing* when you sign a PoC build on a Mac, covering the app and both
@@ -337,7 +427,29 @@ passwords and Fastlane Match; it both mints signing profiles and uploads).
 | `ASC_KEY_ID` | secret | the 10-char Key ID |
 | `ASC_ISSUER_ID` | secret | the Issuer UUID |
 | `ASC_KEY_P8` | secret | **the whole `.p8` file contents**, including the `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` lines |
+| `APPLE_DIST_P12` | secret | the distribution `.p12` (§3.1), **base64**: `base64 -i distribution.p12 \| pbcopy` |
+| `APPLE_DIST_P12_PASSWORD` | secret | the passphrase set at `openssl pkcs12 -export` |
+| `APPLE_PROFILE_APP` | secret | App Store profile for `family.ajar.child`, **base64** |
+| `APPLE_PROFILE_DATA` | secret | profile for `…child.FilterDataProvider`, **base64** |
+| `APPLE_PROFILE_CONTROL` | secret | profile for `…child.FilterControlProvider`, **base64** |
 | `APPLE_TEAM_ID` | **variable** | the 10-char Team ID (§2) |
+
+Signing is **manual** (§3.1): the workflow imports the certificate into a
+throwaway keychain and installs the three profiles, rather than letting Xcode
+mint them. It matches each profile to its target by **reading the
+`application-identifier` inside the profile**, not by name — so a profile named
+anything you like still lands on the right target, and one for the wrong bundle
+id fails immediately with a readable error instead of signing the wrong binary.
+It also prints each profile's entitlement keys, because a profile generated
+before Family Controls was granted looks valid right up until it fails to sign.
+
+Base64 both the `.p12` and each `.mobileprovision` — they are binary, and a
+GitHub secret is text:
+
+```sh
+base64 -i distribution.p12                     # APPLE_DIST_P12
+base64 -i Ajar_Child_AppStore.mobileprovision  # APPLE_PROFILE_APP
+```
 
 `APPLE_TEAM_ID` is a variable, not a secret — a Team ID is public, and hiding it
 only makes CI logs harder to read. It is the ONE value that legitimately differs
@@ -538,7 +650,10 @@ Cloudflare/signing secrets live in `docs/DEPLOYMENT.md`.
 | `APNS_TOPIC_CHILD` | bundle id `family.ajar.child` (§4) | APNs topic for child "sync now" pushes (unused until APNs is wired) |
 | `ASC_KEY_ID` | App Store Connect API **Key ID** (§8.1) | `testflight.yml` — signing + upload |
 | `ASC_ISSUER_ID` | App Store Connect API **Issuer UUID** (§8.1) | `testflight.yml` — signing + upload |
-| `ASC_KEY_P8` | the App Store Connect **`.p8`** contents (§8.1) | `testflight.yml` — signing + upload |
+| `ASC_KEY_P8` | the App Store Connect **`.p8`** contents (§8.1) | `testflight.yml` — upload |
+| `APPLE_DIST_P12` | distribution cert + private key, base64 (§3.1) | `testflight.yml` — signing |
+| `APPLE_DIST_P12_PASSWORD` | its export passphrase | `testflight.yml` — signing |
+| `APPLE_PROFILE_APP` / `_DATA` / `_CONTROL` | the three App Store profiles, base64 (§5) | `testflight.yml` — signing |
 
 GitHub **variables** (not secrets — both are public values):
 
