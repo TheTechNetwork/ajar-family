@@ -87,14 +87,27 @@ jobs:
       - name: Select an Xcode with the iOS 26 SDK or newer
         run: |
           set -euo pipefail
-          best=""; best_v=0
-          for app in /Applications/Xcode*.app; do
-            [ -e "$app" ] || continue
-            v="$(/usr/bin/defaults read "$app/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo 0)"
-            major="${v%%.*}"
-            case "$major" in ''|*[!0-9]*) continue ;; esac
-            if [ "$major" -ge 26 ] && [ "$major" -gt "$best_v" ]; then best="$app"; best_v="$major"; fi
-          done
+          # App Store Connect REFUSES any build made with an SDK older than iOS
+          # 26, and refuses it at UPLOAD — after a full archive and export have
+          # succeeded:
+          #   SDK version issue. This app was built with the iOS 18.5 SDK.
+          # The runner default is not always the newest Xcode installed, so pick
+          # explicitly and fail here rather than 15 minutes later at Apple. The
+          # project's deployment target is already iOS 26.0 and xcodebuild still
+          # archived against an 18.5 SDK without complaint, which is exactly why
+          # this is asserted rather than assumed.
+          #
+          # Sort by FULL version, not major. Comparing only the major picked
+          # whichever 26.x sorted first (26.0.1), whose iphonesimulator SDK
+          # 23A339 matched none of the runtimes actually installed — and actool
+          # then failed the archive with "No simulator runtime version from
+          # [...] available", on a DEVICE build, for an app icon.
+          best="$(for app in /Applications/Xcode*.app; do
+                    [ -e "$app" ] || continue
+                    v="$(/usr/bin/defaults read "$app/Contents/Info" CFBundleShortVersionString 2>/dev/null || true)"
+                    case "${v%%.*}" in ''|*[!0-9]*) continue ;; esac
+                    [ "${v%%.*}" -ge 26 ] && printf '%s\t%s\n' "$v" "$app"
+                  done | sort -V | tail -1 | cut -f2)"
           if [ -z "$best" ]; then
             echo "::error::No Xcode 26+ on this runner. Available:"
             for app in /Applications/Xcode*.app; do
@@ -105,7 +118,9 @@ jobs:
           sudo xcode-select -s "$best/Contents/Developer"
           echo "using $best"
           xcodebuild -version
-          xcodebuild -showsdks | grep -i "iphoneos" || true
+          xcodebuild -showsdks | grep -iE "iphoneos|iphonesimulator" || true
+          echo "installed simulator runtimes:"
+          xcrun simctl list runtimes 2>/dev/null | grep -i "^iOS" || echo "  (none)"
 
       - name: Install XcodeGen
         run: brew install xcodegen
