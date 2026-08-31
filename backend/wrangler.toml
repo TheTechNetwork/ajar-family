@@ -46,9 +46,28 @@ database_id = "df4b4ce0-0895-4b8a-864c-62a589240e25"
 # Worker; if it is not, `wrangler deploy` fails here with a zone-lookup error
 # rather than silently deploying without the hostname.
 #
-# The hostname takes ALL paths, not just /blocked, so the full API is reachable
-# here too. The app's `BackendClient.baseURL` can therefore point at the same
-# origin, which keeps a child device talking to one host instead of two.
+# The two hostnames are deliberately NOT interchangeable. A custom domain would
+# otherwise take every path on both, leaving the auth and policy surface
+# answering on the one origin that is permanently pinned into shipped iOS builds
+# and fetched unauthenticated while a filter is blocking. worker.ts refuses
+# everything but /blocked on `blocked.*`; the API lives on `api.*`, which is
+# where BackendClient.baseURL points.
+#
+# ORDER MATTERS, and not only cosmetically. `wrangler dev` / `unstable_dev`
+# simulates the FIRST route's hostname inside the Worker, so whichever pattern
+# leads is the host that local runs and the workerd test suite see. The API has
+# to lead, or every local request arrives as `blocked.*` and is refused by the
+# single-purpose guard in worker.ts — which is exactly what happened when this
+# list was the other way round.
+[[routes]]
+pattern = "api.ajar.family"
+custom_domain = true
+
+# `blocked` has ONE job and the Worker enforces it: every path other than
+# /blocked is refused on this hostname (see worker.ts). It is baked into shipped
+# builds through `remediationMap`, so it is the hardest hostname in the system to
+# ever change — keeping it single-purpose is what stops the API's surface from
+# being pinned to it by accident.
 [[routes]]
 pattern = "blocked.ajar.family"
 custom_domain = true

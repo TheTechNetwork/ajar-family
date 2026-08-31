@@ -28,14 +28,16 @@ final class BackendClient {
 
     // MARK: - Configuration
 
-    /// Where the backend lives. Stored in the App Group so it survives a
-    /// relaunch and can be pointed at a local Worker during development.
-    /// Defaults to the same origin as the block page. The Worker's custom domain
-    /// takes every path, not just `/blocked`, so one hostname serves both — which
-    /// means a child device talks to a single origin and a fresh install needs no
-    /// typing before it can enrol. Overridable for local Worker development.
-    static let defaultBaseURL = URL(string: "https://blocked.ajar.family")!
+    /// The API host. Deliberately NOT `blocked.ajar.family`: that hostname has a
+    /// single designated purpose (serving the block page) and refuses every other
+    /// path, because it is pinned into shipped builds through the filter's
+    /// `remediationMap` and is fetched unauthenticated while a filter is
+    /// actively blocking.
+    static let defaultBaseURL = URL(string: "https://api.ajar.family")!
 
+    /// Where the backend lives. Stored in the App Group so it survives a relaunch
+    /// and can be pointed at a local Worker during development; storing an empty
+    /// string clears it back to unconfigured.
     static var baseURL: URL? {
         get {
             guard let s = defaults?.string(forKey: baseURLKey) else { return defaultBaseURL }

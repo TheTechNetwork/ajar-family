@@ -77,6 +77,21 @@ export default {
     }
 
     const url = new URL(request.url);
+
+    // Host-based surface split. `blocked.*` exists to serve ONE page: iOS bakes
+    // that hostname into shipped builds via the content filter's
+    // `remediationMap`, which makes it the hardest hostname here to ever change,
+    // and it is fetched by an unauthenticated browser while a filter is actively
+    // blocking traffic. Refusing every other path on it keeps the auth and
+    // policy surface off the one origin that is both permanently pinned and
+    // reachable in that state — rather than relying on nobody noticing the API
+    // answers there too. The API lives on `api.*`.
+    if (url.hostname.startsWith("blocked.") && url.pathname !== "/blocked") {
+      return new Response(
+        JSON.stringify({ error: "this host serves the block page only", code: "NOT_FOUND" }),
+        { status: 404, headers: { "content-type": "application/json", ...CORS } });
+    }
+
     const headers: Record<string, string> = {};
     request.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
     let rawBody = "";
