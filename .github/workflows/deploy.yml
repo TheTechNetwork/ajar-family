@@ -167,8 +167,17 @@ jobs:
             code="$(curl -sS -o /tmp/health -w '%{http_code}' "$BASE/v1/health" || true)"
             if [ "$code" = "200" ]; then
               echo "health: $(cat /tmp/health)"
-              # A signing key must be SERVED and STABLE, or devices cannot verify policy.
-              curl -sS "$BASE/v1/signing-key" | head -c 200; echo
+              # A signing key must be SERVED, or devices cannot verify policy at
+              # all. This used to be `curl ... | head -c 200`, which CLAIMED to
+              # check that and did not: head exits 0 whatever curl does, and the
+              # pipeline takes head's status. Same masked-failure shape as the
+              # archive step in testflight.yml. Assert the response instead.
+              key="$(curl -sS --fail "$BASE/v1/signing-key" || true)"
+              case "$key" in
+                *publicKey*) echo "signing key served: $(printf '%s' "$key" | head -c 120)" ;;
+                *) echo "::error::/v1/signing-key did not return a public key: ${key:-<no response>}"
+                   exit 1 ;;
+              esac
               exit 0
             fi
             echo "attempt $i: HTTP $code — retrying"; sleep 5
