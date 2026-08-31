@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { App } from "../app.js";
-import { durationToExpiry } from "./services.js";
+import { DomainError, durationToExpiry } from "./services.js";
 import { endOfLocalDayMs, isValidTimeZone, timeZoneOffsetMs } from "./time.js";
 
 const LA = "America/Los_Angeles";   // UTC-7 in July (PDT)
@@ -122,4 +122,35 @@ test("an approval for a Californian child ends at their local midnight end-to-en
   // And it is genuinely in the future for the child (the UTC-midnight bug could
   // produce an expiry that had already passed for a UTC+10 family).
   assert.ok(Date.parse(grant.expiresAt) > Date.now());
+});
+
+/**
+ * `duration` is untrusted JSON from a parent client, and TypeScript's
+ * exhaustiveness checking stops at the HTTP boundary. A malformed value used to
+ * fall through the switch, return undefined, and blow up in the CALLER's
+ * destructure with "Cannot destructure property 'expiresAt' ... as it is
+ * undefined" — an internal TypeError shown to a parent for what is just a bad
+ * request. Found by sending `"duration":"FOREVER"` to the live deployment.
+ */
+test("durationToExpiry rejects malformed durations as BAD_REQUEST, not TypeError", () => {
+  for (const bad of ["FOREVER", null, undefined, {}, { kind: "NOPE" }]) {
+    assert.throws(
+      () => durationToExpiry(bad as never),
+      (e: unknown) => e instanceof DomainError && (e as DomainError).code === "BAD_REQUEST",
+      `expected a BAD_REQUEST DomainError for ${JSON.stringify(bad)}`,
+    );
+  }
+});
+
+test("durationToExpiry rejects a MINUTES value that is not a positive number", () => {
+  // NaN/Infinity would reach `new Date(...)` and throw RangeError on
+  // toISOString(); a negative would mint a grant that expired before it began.
+  for (const minutes of [0, -5, Number.NaN, Number.POSITIVE_INFINITY, "10"]) {
+    assert.throws(
+      () => durationToExpiry({ kind: "MINUTES", minutes } as never),
+      (e: unknown) => e instanceof DomainError && (e as DomainError).code === "BAD_REQUEST",
+      `expected a BAD_REQUEST DomainError for minutes=${String(minutes)}`,
+    );
+  }
+  assert.ok(durationToExpiry({ kind: "MINUTES", minutes: 30 }).expiresAt);
 });

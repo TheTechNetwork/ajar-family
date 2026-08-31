@@ -666,12 +666,32 @@ export const ONCE_GRANT_TTL_MS = 5 * 60_000;
 export function durationToExpiry(
   d: ApprovalDuration, timeZone = "UTC", from = Date.now(),
 ): { expiresAt?: string; standing: boolean } {
-  switch (d.kind) {
+  switch (d?.kind) {
     case "ALWAYS": return { standing: true };
     // Backstop only: a ONCE grant normally ends when the device reports it used.
     case "ONCE": return { expiresAt: new Date(from + ONCE_GRANT_TTL_MS).toISOString(), standing: false };
-    case "MINUTES": return { expiresAt: new Date(from + d.minutes * 60_000).toISOString(), standing: false };
+    case "MINUTES": {
+      // Validated, not trusted: `minutes` arrives as JSON from a parent client.
+      // NaN or Infinity would produce an Invalid Date whose toISOString() throws,
+      // and a negative value would mint a grant that expired before it existed.
+      if (typeof d.minutes !== "number" || !Number.isFinite(d.minutes) || d.minutes <= 0) {
+        throw new DomainError("approval duration MINUTES needs a positive number of minutes", "BAD_REQUEST");
+      }
+      return { expiresAt: new Date(from + d.minutes * 60_000).toISOString(), standing: false };
+    }
     case "UNTIL_END_OF_DAY": return { expiresAt: endOfLocalDayIso(from, timeZone), standing: false };
+    default:
+      // TypeScript's exhaustiveness check does not reach the HTTP boundary: the
+      // body is untrusted JSON. Without this the switch fell through returning
+      // undefined, and the caller's `const { expiresAt, standing } = ...`
+      // destructure threw a TypeError that surfaced to the parent as
+      // "Cannot destructure property 'expiresAt' of ... as it is undefined" —
+      // an internal message for what is simply a malformed request. Observed
+      // against the live deployment by sending `"duration":"FOREVER"` (a bare
+      // string where the API takes `{ kind }`).
+      throw new DomainError(
+        `unknown approval duration: ${JSON.stringify((d as { kind?: unknown } | undefined)?.kind ?? d)}`,
+        "BAD_REQUEST");
   }
 }
 
