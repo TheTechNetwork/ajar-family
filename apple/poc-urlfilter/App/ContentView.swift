@@ -6,7 +6,7 @@ import SwiftUI
 /// docs/APPLE_URL_FILTER_POC.md on a device.
 ///
 /// Reminder: this is the SUPPLEMENTARY blocklist layer. Per-video approval is
-/// PoC A (apple/poc-contentfilter/).
+/// PoC A (apple/AjarFilter/).
 struct ContentView: View {
     @StateObject private var controller = URLFilterController()
 

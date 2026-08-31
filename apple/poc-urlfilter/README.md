@@ -3,7 +3,7 @@
 On-device-runnable proof for `docs/APPLE_URL_FILTER_POC.md`. This is the
 **SUPPLEMENTARY large-scale blocklist** layer (adult / malware / known-proxy /
 category domains and specific bad videos) — it is **NOT** the per-video-approval
-engine. Per-video approval is **PoC A** (`apple/poc-contentfilter/`,
+engine. Per-video approval is **PoC A** (`apple/AjarFilter/`,
 `NEFilterDataProvider` + FamilyControls `.child`). `NEURLFilter` is blocklist-only
 and cannot express "default-deny host X except URL Y" (ARCHITECTURE.md §3.1,
 ADR-002).
@@ -109,7 +109,7 @@ an unresolved item flagged in the doc and in `build_bloom.py`.
 
 > **Not the same Bloom filter as PoC A.** This one is Apple's `NEURLFilter`
 > prefilter format (FNV-1a + Murmur3, `bloom.bin` + `bloom.meta.json`, bundled as
-> a resource). The *category* filters in `apple/poc-contentfilter/` are the
+> a resource). The *category* filters in `apple/AjarFilter/` are the
 > cross-platform format defined by `shared/categories/bloom.ts` (FNV-1a with two
 > seeds, enhanced double hashing, base64 bit array inside a signed JSON asset).
 > Different hashes, different layout, different purpose — do not reuse either

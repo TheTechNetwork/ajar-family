@@ -7,8 +7,8 @@
 > unsupervised consumer iPhone, no VPN, no TLS interception, no MDM**?
 >
 > **Status (2026-08-27): BUILD-GREEN, TESTS NOT RUN.**
-> `apple/poc-contentfilter/project.yml` (XcodeGen) now produces a real
-> `ParentFilterPoC.xcodeproj` whose three targets — app, filter-**data** `.appex`,
+> `apple/AjarFilter/project.yml` (XcodeGen) now produces a real
+> `AjarFilter.xcodeproj` whose three targets — app, filter-**data** `.appex`,
 > filter-**control** `.appex` — compile and link clean for `arm64` device against
 > the Xcode 27.0 iPhoneOS SDK at deployment target iOS 26.0. Three SDK API
 > corrections were required; see ADR-011.
@@ -122,11 +122,11 @@ Apple Virtual Machine. Every row below was re-measured, not carried forward.
 
 | Item | Result |
 |---|---|
-| `xcodegen generate` → `ParentFilterPoC.xcodeproj` | OK (XcodeGen 2.46.0) |
+| `xcodegen generate` → `AjarFilter.xcodeproj` | OK (XcodeGen 2.46.0) |
 | App + 2 extensions compile/link, `-destination generic/platform=iOS` | **BUILD SUCCEEDED**, arm64, 0 warnings |
 | `FilterDataProvider.appex` `NSExtensionPointIdentifier` | `com.apple.networkextension.filter-data` |
 | `FilterControlProvider.appex` `NSExtensionPointIdentifier` | `com.apple.networkextension.filter-control` |
-| Both `.appex` embedded in `ParentFilterPoC.app/PlugIns/` | OK |
+| Both `.appex` embedded in `AjarFilter.app/PlugIns/` | OK |
 | SDK API corrections needed | 3 — see ADR-011 |
 | **`PolicySelfTest.runAll()` cross-platform vectors** | **ALL PASSED** (2026-08-31) — see below |
 | Builds for the iOS Simulator SDK | OK (compiles and installs; **does not run** — see below) |
@@ -144,7 +144,7 @@ They do not need a device, an entitlement or a signing identity — `Shared/`
 imports only Foundation, CryptoKit and dnssd, so it compiles and runs natively:
 
 ```sh
-cd apple/poc-contentfilter
+cd apple/AjarFilter
 swiftc -o /tmp/selftest /tmp/main.swift Shared/*.swift   # main calls PolicySelfTest.runAll()
 /tmp/selftest        # -> "SELF-TEST: ALL VECTORS PASSED", exit 0
 ```
@@ -175,8 +175,8 @@ provider, and no flow ever does.
 Reproduce (compile check, no signing identity needed):
 
 ```sh
-cd apple/poc-contentfilter && xcodegen generate
-xcodebuild -project ParentFilterPoC.xcodeproj -scheme ParentFilterPoC \
+cd apple/AjarFilter && xcodegen generate
+xcodebuild -project AjarFilter.xcodeproj -scheme AjarFilter \
   -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO clean build
 ```
 
@@ -186,7 +186,7 @@ For a real device build, drop `CODE_SIGNING_ALLOWED=NO` and pass
 ## Observed Results (A1-A3 RUN 2026-08-31; A4-A6 not run)
 
 Device: iPhone 16 Pro Max, iOS 27.0 (24A5418b), Developer Mode on.
-Build: development-signed, team `2BPX4R682U`, App Group `group.family.ajar.child`.
+Build: development-signed, team `2BPX4R682U`, App Group `group.family.ajar.filter`.
 FamilyControls authorization: **Not Determined** — see the note below, it matters.
 
 | Test | Expected | Observed | Pass/Fail | Notes |
@@ -256,7 +256,7 @@ stays blocked → auto-expiry. Record the propagation number and the A6 findings
 
 ## Scaffold map
 
-`apple/poc-contentfilter/` — see its `README.md`:
+`apple/AjarFilter/` — see its `README.md`:
 - `App/` — SwiftUI harness: request `.child` authorization, show filter status,
   edit the local test policy (default deny + allow one id), trigger
   `notifyRulesChanged()`, grant a short temporary approval, and receive the

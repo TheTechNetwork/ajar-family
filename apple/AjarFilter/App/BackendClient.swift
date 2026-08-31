@@ -287,7 +287,7 @@ final class BackendClient {
 /// containing app talks to the backend.
 enum DeviceCredentials {
 
-    private static let service = "family.ajar.child.deviceToken"
+    private static let service = "family.ajar.filter.deviceToken"
     private static let account = "device"
     private static let deviceIdKey = "backend_device_id"
 
@@ -343,7 +343,7 @@ enum DeviceCredentials {
 /// one when it starts mattering, instead of needing a migration.
 enum DeviceIdentity {
 
-    private static let service = "family.ajar.child.deviceIdentity"
+    private static let service = "family.ajar.filter.deviceIdentity"
     private static let account = "ed25519"
 
     static func publicKeyB64() -> String {

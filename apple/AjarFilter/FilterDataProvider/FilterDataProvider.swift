@@ -69,7 +69,7 @@ final class FilterDataProvider: NEFilterDataProvider {
     /// the app itself is a separate control (ManagedSettings application policy).
     static let applyYouTubeDefaultToSocketFlows = false
 
-    private let log = Logger(subsystem: "family.ajar.child", category: "data")
+    private let log = Logger(subsystem: "family.ajar.filter", category: "data")
     private let store = PolicyStore.shared
     private let cnameCache = CnameChainCache.shared
 

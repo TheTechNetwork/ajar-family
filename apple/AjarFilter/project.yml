@@ -1,18 +1,34 @@
-# XcodeGen definition for PoC A (docs/APPLE_CONTENT_FILTER_POC.md).
+# XcodeGen definition for AJAR FILTER — the app installed on the device being
+# filtered. One product across iOS, iPadOS and macOS, one bundle id, one App
+# Store Connect record.
+#
+# NAMING. This was `child` until it became a real product. "Filter" describes
+# what the app IS rather than who it is for: the same binary protects a phone, an
+# iPad and a Mac, and on a shared family Mac "the child app" is simply the wrong
+# noun. The parent-facing app is AjarParent (../AjarParent).
+#
+# WHAT IS PROVEN. The iOS target below is the configuration measured working on
+# an iPhone 16 Pro Max / iOS 27.0 (docs/DECISIONS.md ADR-001, A1-A3): per-video
+# enforcement, the block page, and the two content-filter extensions. It has not
+# been changed except for the rename.
+#
+# WHAT IS NOT. The macOS destination is NEW and has not been generated, built or
+# run — see the macOS note on the AjarFilter target.
 #
 #   brew install xcodegen && xcodegen generate
 #
 # Signing: pass your team on the command line or set it in Xcode, e.g.
-#   xcodebuild -project ParentFilterPoC.xcodeproj -scheme ParentFilterPoC \
+#   xcodebuild -project AjarFilter.xcodeproj -scheme AjarFilter \
 #     -destination 'generic/platform=iOS' DEVELOPMENT_TEAM=ABCDE12345 build
 # The Family Controls + Network Extension entitlements require a real team;
 # a compile/link-only check can use CODE_SIGNING_ALLOWED=NO.
 
-name: ParentFilterPoC
+name: AjarFilter
 options:
   bundleIdPrefix: family.ajar
   deploymentTarget:
     iOS: "26.0"
+    macOS: "26.0"
   createIntermediateGroups: true
 
 settings:
@@ -32,9 +48,23 @@ settings:
 
 targets:
 
-  ParentFilterPoC:
+  AjarFilter:
     type: application
-    platform: iOS
+    # One target, several destinations: iOS and iPadOS come from the iOS
+    # destination (TARGETED_DEVICE_FAMILY "1,2"), macOS is the third. A single
+    # target means a single PRODUCT_BUNDLE_IDENTIFIER, which is what keeps this
+    # to one App Store Connect record instead of two apps that drift.
+    #
+    # ⚠️ UNVERIFIED ON macOS. Generated, built and run only for iOS so far.
+    # The known obstacle is not this file: on macOS a content filter must ship as
+    # a SYSTEM extension (com.apple.developer.system-extension.install on the
+    # installing app, Developer ID signing + notarization outside the App Store),
+    # whereas the two targets below are iOS APP extensions. So a macOS build of
+    # this target produces the app shell WITHOUT filtering until that separate
+    # extension exists. Do not read a successful macOS compile as a working
+    # filter — that distinction is exactly what the Simulator already taught us
+    # (docs/DECISIONS.md: loadFromPreferences succeeds against an unbacked stub).
+    supportedDestinations: [iOS, macOS]
     sources:
       - path: App
       - path: Shared          # compiled into every target (no embedded framework)
@@ -43,8 +73,8 @@ targets:
       - target: FilterControlProvider
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.child
-        CODE_SIGN_ENTITLEMENTS: App/ParentFilterPoC.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.filter
+        CODE_SIGN_ENTITLEMENTS: App/AjarFilter.entitlements
         # Manual signing in CI (docs/APPLE_ACCOUNT_SETUP.md §3.1, §5). Each
         # target reads a DIFFERENT variable because a build setting passed on
         # the xcodebuild command line applies to every target at once — one
@@ -94,7 +124,7 @@ targets:
         # on blocked.ajar.family plus the Associated Domains capability; this
         # works today and does not gate the flow on DNS.
         CFBundleURLTypes:
-          - CFBundleURLName: family.ajar.child
+          - CFBundleURLName: family.ajar.filter
             CFBundleURLSchemes:
               - ajar
         UIApplicationSupportsIndirectInputEvents: true
@@ -106,6 +136,8 @@ targets:
           - UIInterfaceOrientationLandscapeRight
 
   # Content filter DATA provider — sees every flow, returns allow/drop/remediate.
+  # iOS ONLY, deliberately: the macOS equivalent is a system extension with a
+  # different container, entitlement and distribution channel (see AjarFilter).
   FilterDataProvider:
     type: app-extension
     platform: iOS
@@ -114,7 +146,7 @@ targets:
       - path: Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.child.FilterDataProvider
+        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.filter.DataProvider
         CODE_SIGN_ENTITLEMENTS: FilterDataProvider/FilterDataProvider.entitlements
         PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_DATA)
     info:
@@ -130,6 +162,7 @@ targets:
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FilterDataProvider
 
   # Content filter CONTROL provider — owns remediationMap + notifyRulesChanged().
+  # iOS only, for the same reason as the data provider above.
   FilterControlProvider:
     type: app-extension
     platform: iOS
@@ -138,7 +171,7 @@ targets:
       - path: Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.child.FilterControlProvider
+        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.filter.ControlProvider
         CODE_SIGN_ENTITLEMENTS: FilterControlProvider/FilterControlProvider.entitlements
         PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_CONTROL)
     info:
@@ -154,9 +187,9 @@ targets:
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FilterControlProvider
 
 schemes:
-  ParentFilterPoC:
+  AjarFilter:
     build:
       targets:
-        ParentFilterPoC: all
+        AjarFilter: all
     run:
       config: Debug

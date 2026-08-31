@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct ParentFilterPoCApp: App {
+struct AjarFilterApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()

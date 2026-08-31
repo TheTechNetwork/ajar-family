@@ -75,9 +75,9 @@ patch to the content filter.
 | `windows/extension/` | **Windows MV3 extension** — enforcing client; browser-testable against the live backend (enroll → long-poll → block → request → approve). |
 | `shared/policy/policy-model.ts` | Platform-agnostic policy model + evaluation order + reference evaluator (**the source of truth**). |
 | `shared/youtube/youtube-normalize.ts` | Canonical YouTube object normalization (**the source of truth**). |
-| `apple/poc-contentfilter/` | PoC A scaffold (Xcode 26 / iOS 26, on-device). |
+| `apple/AjarFilter/` | **Ajar Filter** — the app on the filtered device (iOS, iPadOS, macOS) plus its two content-filter extensions. Per-video enforcement measured on hardware; see ADR-001. |
 | `apple/poc-urlfilter/` | PoC D scaffold (NEURLFilter + Bloom builder + PIR server config). |
-| `apple/child-agent/`, `apple/parent-app/` | Later-phase placeholders. |
+| `apple/AjarParent/` | **Ajar Parent** — the app a parent approves from (iOS, iPadOS, macOS). |
 | `macos/safari-extension/` | Safari Web Extension — enforcing client, backend-wired (same client modules as Windows; Safari gates via webNavigation + content-script since it lacks blocking webRequest). |
 | `windows/agent/`, `windows/extension/` | PoC C skeleton (service + MV3 extension). |
 

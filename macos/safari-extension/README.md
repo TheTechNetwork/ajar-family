@@ -157,7 +157,7 @@ system-extension layers are described here and stood up on macOS.
 - **If** a native macOS system-extension layer (Swift) is added for the
   socket/hostname tier, its Swift port of the shared evaluation/normalization
   must match the TypeScript spec exactly — the same obligation the iOS scaffold
-  carries (`apple/poc-contentfilter/Shared/*`).
+  carries (`apple/AjarFilter/Shared/*`).
 
 ## What to measure
 
