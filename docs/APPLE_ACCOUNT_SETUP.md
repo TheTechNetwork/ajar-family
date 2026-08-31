@@ -34,6 +34,7 @@ above it, and the two marked ⏳ have waiting attached — start them early.
 | 1 | Enroll as an **Organization** ⏳ | §1 | everything (D-U-N-S + verification can take days-to-weeks) |
 | 2 | Note the **Team ID**, set roles | §2 | every later step |
 | 3 | **Request the Family Controls distribution entitlement** ⏳ | §6 | ALL distribution signing — file it the day you decide TestFlight is the goal |
+| 3b | **Create a child Apple Account in a Family Sharing group** ⏳ | §2.1 | **the entire A1–A6 on-device matrix** — measured, see below |
 | 4 | Register 3 App IDs + 1 App Group | §4 | signing anything |
 | 5 | Create the **App Store Connect API key** (App Manager) | §8.1 | CI signing + upload |
 | 6 | Set 3 GitHub secrets + 1 variable | §8.1 | CI signing + upload |
@@ -41,10 +42,20 @@ above it, and the two marked ⏳ have waiting attached — start them early.
 | 8 | Fill the record's compliance fields | §8.5 | a build reaching a tester |
 | 9 | Run the TestFlight workflow | §8.1 | — |
 
-**Step 3 is the one that surprises people.** It is a human review at Apple with
-calendar time attached, and no amount of correct CI gets past it: development
-signing works without it, App Store and TestFlight signing do not. It is
-independent of steps 4-8, so file it first and do the rest while you wait.
+**Steps 3 and 3b are the two that surprise people, and they are independent of
+everything else — start both first and do the rest while they settle.**
+
+Step 3 is a human review at Apple with calendar time attached. No amount of
+correct CI gets past it: development signing works without it, App Store and
+TestFlight signing do not.
+
+Step 3b is not a review but it is a hard gate, and it was measured rather than
+predicted: on a device signed in with an **adult** Apple Account,
+`requestAuthorization(for: .child)` fails with
+`FamilyControlsError.invalidAccountType`. Because TN3134 grants the content
+filter on an unsupervised device only to a **Family-Controls-authorized** app,
+that failure blocks the whole A1–A6 protocol, not just the tamper tests. See
+§2.1.
 
 The **distribution certificate is created by hand** from a CSR (§3.1) — but not
 in Keychain Access, and not on a Mac: OpenSSL produces the CSR anywhere. Add it
@@ -99,6 +110,39 @@ between steps 4 and 5. Provisioning profiles are still minted by CI (§5).
 
 ---
 
+## 2.1 The child Apple Account — the on-device gate
+
+**Measured, not predicted.** With the app signed and running on an iPhone,
+`requestAuthorization(for: .child)` returns
+`FamilyControlsError.invalidAccountType` when the device is signed in with an
+ordinary adult Apple Account. `.child` authorization requires the device to be
+signed in as a **child or teen member of a Family Sharing group**.
+
+This is the current critical path. Everything upstream of it — toolchain,
+signing, App IDs, the App Group, development profiles — is done; nothing in the
+A1–A6 protocol (`docs/APPLE_CONTENT_FILTER_POC.md`) can run until it is
+resolved, because on an unsupervised device the classic content filter is
+granted only to a Family-Controls-authorized app (TN3134).
+
+- [ ] The person who will act as **parent** needs a Family Sharing group they
+      organize, with a payment method on file — Apple requires one to verify
+      parental consent when creating a child account.
+- [ ] Add or create a **child/teen Apple Account** in that group. Exact age
+      bands and what a minor may do without consent vary by country; check
+      Apple's current Family Sharing docs for your region rather than assuming.
+- [ ] Sign the **test device** into that account.
+
+> **Budget a second device.** The measured failure was on a device signed in
+> with the developer's own adult account. Re-signing a daily-driver phone into a
+> child account is disruptive and hard to undo cleanly, so the practical answer
+> is usually a spare iPhone dedicated to testing — not a blocker, but it is
+> hardware someone has to find.
+
+> A child account also cannot simply be removed from the family group on a whim
+> in some regions, so create it deliberately rather than as a throwaway.
+
+---
+
 ## 3. Signing certificates
 
 > **For the CI path you do not create a certificate, and you do not need a CSR.**
@@ -147,9 +191,16 @@ openssl pkcs12 -export -inkey ajar-distribution.key -in distribution.pem \
   -out distribution.p12 -name "Apple Distribution"
 ```
 
-**This is the path we are taking.** `-allowProvisioningUpdates` runs into an
-Apple-side cap on how much it will create automatically, so the certificate is
-made by hand from the CSR above and handed to CI rather than minted per run.
+**This is the path we are taking**, and a session on a real Mac has now measured
+why. `xcodebuild -allowProvisioningUpdates` **does not perform the portal
+writes**: it silently falls back to a cached wildcard profile and emits no
+authentication diagnostic at all, even with the account signed in and the team
+cached. It does not fail — it produces a build signed with the wrong profile,
+which is worse. Only the Xcode GUI or an App Store Connect API key actually
+registers devices and creates App IDs.
+
+So the certificate is made by hand from the CSR above and handed to CI rather
+than minted per run.
 
 Three things follow from that, and they are the cost of this route — worth
 knowing rather than rediscovering:
@@ -671,9 +722,12 @@ checklist (from the PoC-D research; see `docs/APPLE_URL_FILTER_POC.md`):
 | App Store Connect records + TestFlight (§8) | ❌ | ✅ |
 | **`NEURLFilter` Identity & Trust** onboarding (§9) | ❌ deferred | ✅ (only if PoC-D layer ships) |
 
-> The remaining alpha blocker is **hardware + a signed dev build**, not a
-> distribution artifact — exactly the ADR-012 gap. Everything in the ALPHA column
-> is account/portal work the account holder can complete now.
+> **Superseded by measurement.** Hardware and a signed dev build are no longer
+> the blocker: the app builds, signs and launches on a physical iPhone, and
+> `com.apple.developer.family-controls` is granted for **development** without
+> Apple review (read off a minted profile). The remaining alpha blocker is the
+> **child Apple Account** (§2.1) — without it `.child` authorization fails and
+> no on-device enforcement test can run.
 
 ---
 
