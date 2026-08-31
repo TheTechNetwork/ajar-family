@@ -30,10 +30,16 @@ final class BackendClient {
 
     /// Where the backend lives. Stored in the App Group so it survives a
     /// relaunch and can be pointed at a local Worker during development.
+    /// Defaults to the same origin as the block page. The Worker's custom domain
+    /// takes every path, not just `/blocked`, so one hostname serves both — which
+    /// means a child device talks to a single origin and a fresh install needs no
+    /// typing before it can enrol. Overridable for local Worker development.
+    static let defaultBaseURL = URL(string: "https://blocked.ajar.family")!
+
     static var baseURL: URL? {
         get {
-            guard let s = defaults?.string(forKey: baseURLKey), let u = URL(string: s) else { return nil }
-            return u
+            guard let s = defaults?.string(forKey: baseURLKey) else { return defaultBaseURL }
+            return s.isEmpty ? nil : URL(string: s)
         }
         set { defaults?.set(newValue?.absoluteString, forKey: baseURLKey) }
     }
