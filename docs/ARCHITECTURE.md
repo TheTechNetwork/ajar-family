@@ -434,6 +434,55 @@ on the **watch-page gate** (which _is_ per-video) to actually control access.
 This is a deliberate, documented limitation; do **not** block `googlevideo.com`
 for an otherwise-approved video.
 
+#### MEASURED: playback support is specified but only enforced on one platform
+
+A session on real hardware (iPhone 16 Pro Max, iOS 27.0) measured this against a
+snapshot pulled from the device, with one video approved by id:
+
+```
+browser  watch?v=dQw4w9WgXcQ   ALLOW  rule:YOUTUBE_VIDEO   (page loads)
+socket   www.youtube.com       BLOCK  default:youtube      dropped, silently
+socket   googlevideo.com       ALLOW  default:web
+socket   i.ytimg.com           ALLOW  default:web
+```
+
+**The good half:** WebKit browser flows carry the full watch URL including the
+query, so per-video matching genuinely works on iOS. That is the central
+Phase-0 question and it holds.
+
+**The gap:** allowing a video by id is not sufficient to *play* it. The page's
+own API calls arrive as socket flows carrying a hostname only, hit the YouTube
+domain default, and are dropped with no block page.
+
+Auditing the tree for how each platform handles this found a three-way split
+that the conformance corpus **cannot** catch, because the behaviour lives
+*outside* `evaluate()`:
+
+| Where | `PLAYBACK_SUPPORT_HOSTS` data | Rule actually applied? |
+|---|---|---|
+| `shared/policy` (the spec) | yes, in `youtube-normalize.ts` | **no** — `evaluate()` never reads it |
+| Windows extension | yes | **yes** — in `background.js`, outside `evaluate()`: sub-resources only, and on `www.youtube.com` only true player endpoints |
+| macOS Safari extension | yes (`isPlaybackSupportHost`) | **no** — `background.js` never calls it |
+| Apple (Swift) | yes (`playbackSupportHosts`) | **no** — hence the socket drops above |
+
+So only Windows implements it. `shared/README.md` says of these hosts "never
+block these", and two of the three platforms do. The corpus was built precisely
+to stop platforms disagreeing about what is blocked, and this slipped through
+the seam: it can only compare what `evaluate()` decides, and this rule is not in
+`evaluate()`.
+
+`EvalContext` has no request-kind field, which is *why* the rule sits outside
+the evaluator — the spec cannot currently express "sub-resource, not a document
+load", and that distinction is load-bearing. Without it, one approved video
+opens all of YouTube; a bug this project has already had once.
+
+**Open decision, deliberately not taken unilaterally.** Closing this means
+allowing host-only flows to `www.youtube.com` while any video approval is
+active. On iOS that is defensible — a real navigation would have arrived as a
+WebKit browser flow and been gated on its full URL — but it is a loosening on a
+child-safety path, so it is a product decision, not a refactor. Recorded here
+rather than resolved.
+
 The per-adapter mechanics of enforcing a canonical-id decision differ:
 `NEFilterDataProvider` inspects the WebKit flow URL; the Safari/MV3 extensions
 inspect the navigation URL and in-page SPA route changes (which never hit the
