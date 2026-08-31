@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// This is the SUPPLEMENTARY NEURLFilter (Bloom + PIR) blocklist proof — NOT the
 /// per-video-approval engine. Per-video approval is PoC A
-/// (apple/poc-contentfilter/, NEFilterDataProvider + FamilyControls `.child`).
+/// (apple/AjarFilter/, NEFilterDataProvider + FamilyControls `.child`).
 @main
 struct URLFilterPoCApp: App {
     var body: some Scene {

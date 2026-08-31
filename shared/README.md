@@ -2,7 +2,7 @@
 
 These TypeScript modules are the **authoritative specification** the backend and
 every platform enforcement adapter must reproduce. When a Swift/JS port exists
-(iOS `apple/poc-contentfilter/Shared/`, macOS/Windows extension
+(iOS `apple/AjarFilter/Shared/`, macOS/Windows extension
 `youtube-normalize.js`), the TypeScript here is canonical and the ports must be
 kept in lockstep.
 

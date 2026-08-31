@@ -25,7 +25,7 @@ override) and has **no remediation/Request-Access UX**. The classic
 `.individual` posture is explicitly not marketed as parental control.
 **Evidence:** _runtime, on hardware, 2026-08-31._ Tests A1-A3 were run on an
 iPhone 16 Pro Max (iOS 27.0) with a development-signed build (team
-`2BPX4R682U`, App Group `group.family.ajar.child`). **The central claim holds,
+`2BPX4R682U`, App Group `group.family.ajar.filter`). **The central claim holds,
 with one qualification that matters.**
 
 Confirmed:
@@ -186,7 +186,7 @@ bearing for the remediation ("Request Access") design, not cosmetic.
 3. `NEFilterProvider.handleReport(_:)` was **obsoleted in Swift 3** and is
    renamed to **`handle(_:)`**. Overriding `handleReport` fails to compile.
 **Consequence:** none architectural — the capabilities ADR-001 depends on are all
-present under corrected names. `apple/poc-contentfilter` now compiles as written.
+present under corrected names. `apple/AjarFilter` now compiles as written.
 
 ### ADR-012 — PoC A is build-verified but **not** hardware-verified
 **Status:** PARTIALLY CLOSED 2026-08-31 — A1-A3 ran on hardware; A4-A6 have not.
@@ -231,7 +231,7 @@ matter are not:
 
 **The app is signed, installed and running on hardware (2026-08-31).** Xcode
 automatic signing against team `2BPX4R682U` registered the device, created all
-three App IDs and the `group.family.ajar.child` App Group, and minted three
+three App IDs and the `group.family.ajar.filter` App Group, and minted three
 development profiles. `xcodebuild -allowProvisioningUpdates` from the command
 line will NOT do this — it silently falls back to a cached wildcard profile and
 emits no authentication diagnostic; the portal writes only happen through the

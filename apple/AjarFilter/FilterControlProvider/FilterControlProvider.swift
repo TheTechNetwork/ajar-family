@@ -28,7 +28,7 @@ final class FilterControlProvider: NEFilterControlProvider {
         return "https://blocked.ajar.family/blocked"
     }
 
-    private let log = Logger(subsystem: "family.ajar.child", category: "control")
+    private let log = Logger(subsystem: "family.ajar.filter", category: "control")
     private let store = PolicyStore.shared
     private let cache = CnameChainCache.shared
     private let queue = DispatchQueue(label: "com.ajar.control.cname", qos: .userInitiated)

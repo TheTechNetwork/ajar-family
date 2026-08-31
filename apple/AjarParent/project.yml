@@ -1,0 +1,71 @@
+# XcodeGen definition for AJAR PARENT — the app a parent approves from.
+#
+#   brew install xcodegen && xcodegen generate
+#
+# One product across iOS, iPadOS and macOS, one bundle id, one App Store Connect
+# record — the same universal shape as AjarFilter (../AjarFilter).
+#
+# This app enforces nothing. It signs in, watches the pending-request feed, and
+# posts a decision; all policy lives server-side and reaches devices as a signed
+# snapshot. That is why its entitlements are almost empty next to the filter's.
+#
+# ⚠️ NOT YET BUILT. Written against backend/openapi.json rather than compiled —
+# there is no Xcode here. The first `xcodegen generate` + build is expected to
+# surface real errors; treat that as the point, not as a regression.
+
+name: AjarParent
+options:
+  bundleIdPrefix: family.ajar
+  deploymentTarget:
+    iOS: "26.0"
+    macOS: "26.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+
+targets:
+
+  AjarParent:
+    type: application
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: App
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.parent
+        CODE_SIGN_ENTITLEMENTS: App/AjarParent.entitlements
+        # See the note in ../AjarFilter/project.yml: each target reads a
+        # DIFFERENT variable, because a build setting passed on the xcodebuild
+        # command line applies to every target at once.
+        PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_PARENT)
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Ajar Parent
+        # Answered once here instead of on every upload. Same basis as the
+        # filter app: only OS-provided encryption (TLS via URLSession, Keychain).
+        # Re-confirm if a third-party crypto library is ever linked.
+        ITSAppUsesNonExemptEncryption: false
+        UIApplicationSupportsIndirectInputEvents: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+
+schemes:
+  AjarParent:
+    build:
+      targets:
+        AjarParent: all
+    run:
+      config: Debug

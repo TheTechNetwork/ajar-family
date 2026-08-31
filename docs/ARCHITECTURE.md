@@ -637,7 +637,7 @@ and in `docs/DECISIONS.md`.
 **PoC A — iOS `NEFilterDataProvider` + FamilyControls `.child` (PRIMARY):**
 _Status 2026-08-27: the scaffold **builds clean for arm64 device** (Xcode 27.0 /
 iPhoneOS 27 SDK, deployment target iOS 26.0) as app + filter-data `.appex` +
-filter-control `.appex` — see `apple/poc-contentfilter/project.yml` and ADR-011.
+filter-control `.appex` — see `apple/AjarFilter/project.yml` and ADR-011.
 **Every numbered item below is still unproven**: no test was executed, because no
 iOS device and no signing identity were available (ADR-012). Compiling is not
 evidence of behaviour._

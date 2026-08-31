@@ -236,12 +236,12 @@ Enable exactly the capabilities listed. `<org>` is the reverse-DNS org prefix.
 
 | App ID / bundle id | Purpose | Capabilities to enable |
 |---|---|---|
-| `family.ajar.child` | **Child app** (container) | **Family Controls**; **Network Extensions**; **App Groups** |
-| `family.ajar.child.FilterDataProvider` | Content-**filter data** provider (`NEFilterDataProvider`) | **Network Extensions**; **App Groups** |
-| `family.ajar.child.FilterControlProvider` | Content-**filter control** provider (`NEFilterControlProvider`) | **Network Extensions**; **App Groups** |
-| `family.ajar.parent` | **Parent app** (not built yet — `apple/parent-app/` is a stub) | **Push Notifications**; **Sign in with Apple** |
+| `family.ajar.filter` | **Ajar Filter** — the filtered device's app (iOS, iPadOS, macOS) | **Family Controls**; **Network Extensions**; **App Groups** |
+| `family.ajar.filter.DataProvider` | Content-**filter data** provider (`NEFilterDataProvider`) | **Network Extensions**; **App Groups** |
+| `family.ajar.filter.ControlProvider` | Content-**filter control** provider (`NEFilterControlProvider`) | **Network Extensions**; **App Groups** |
+| `family.ajar.parent` | **Ajar Parent** — the approving app (iOS, iPadOS, macOS) | **Push Notifications**; **Sign in with Apple** |
 
-The first three are hardcoded in `apple/poc-contentfilter/project.yml` and its
+The first three are hardcoded in `apple/AjarFilter/project.yml` and its
 `.entitlements` files (§8.4) — they are what `testflight.yml` signs today.
 `family.ajar.parent` is registered ahead of its target existing. Register all
 four plus the App Group below.
@@ -252,8 +252,8 @@ regenerated later just because a merge turned one on.
 
 | Capability | On | Note |
 |---|---|---|
-| **Push Notifications** | `family.ajar.child`, `family.ajar.parent` | no Apple code registers for remote notifications yet; the entitlement is inert until it does |
-| **`url-filter-provider`** | `family.ajar.child` (add to the existing NetworkExtension array) | for the `NEURLFilter` layer in `apple/poc-urlfilter/` (§9) |
+| **Push Notifications** | `family.ajar.filter`, `family.ajar.parent` | no Apple code registers for remote notifications yet; the entitlement is inert until it does |
+| **`url-filter-provider`** | `family.ajar.filter` (add to the existing NetworkExtension array) | for the `NEURLFilter` layer in `apple/poc-urlfilter/` (§9) |
 | **Sign in with Apple** | `family.ajar.parent` | 4.8 only compels it alongside a third-party login, which Ajar does not offer |
 
 One consequence to be ready for rather than surprised by: App Review asks you to
@@ -263,7 +263,7 @@ not a rejection — and it is the trade for never regenerating a profile mid-mer
 
 > **App IDs, not App Store Connect records.** Registering an App ID is free and
 > reversible. An App Store Connect *record* is the permanent artifact — its bundle
-> id can never be renamed or reused — so create the record for `family.ajar.child`
+> id can never be renamed or reused — so create the record for `family.ajar.filter`
 > only (§8), and add `family.ajar.parent`'s record when that app can actually be
 > uploaded.
 
@@ -279,11 +279,11 @@ entitlement the binary does not use is a review question you have to answer.
 that value in its array. `FC` = `com.apple.developer.family-controls`.
 `AG` = `com.apple.security.application-groups`.
 
-**A. iOS child app — `apple/poc-contentfilter/` (MERGED, signs today)**
+**A. iOS child app — `apple/AjarFilter/` (MERGED, signs today)**
 
 | Target | Entitlements | Verified |
 |---|---|---|
-| `family.ajar.child` | `FC`, `NE[content-filter-provider]`, `AG` | ✅ in repo |
+| `family.ajar.filter` | `FC`, `NE[content-filter-provider]`, `AG` | ✅ in repo |
 | `…child.FilterDataProvider` | `NE[content-filter-provider]`, `AG` | ✅ in repo |
 | `…child.FilterControlProvider` | `NE[content-filter-provider]`, `AG` | ✅ in repo |
 
@@ -299,7 +299,7 @@ that value in its array. `FC` = `com.apple.developer.family-controls`.
 > control provider has to read the prefilter the app builds. Add `AG` when it
 > merges. Also note this target does **not** need `FC` — PoC D loads without it.
 
-**C. Parent iOS app — `apple/parent-app/` (README stub, NOT built)**
+**C. Parent iOS app — `apple/AjarParent/` (README stub, NOT built)**
 
 | Target | Entitlements | Note |
 |---|---|---|
@@ -358,7 +358,7 @@ capability checkboxes are.
 
 **App Group (register once, share across app + all extensions):**
 
-- [ ] Register App Group **`group.family.ajar.child`** under Identifiers →
+- [ ] Register App Group **`group.family.ajar.filter`** under Identifiers →
       App Groups, and add it to the child agent app **and every child-side
       extension** above. This group is where the **Ed25519-signed
       `DevicePolicySnapshot`** cache lives (ARCHITECTURE §8, ADR-010).
@@ -419,7 +419,7 @@ Distinct from the *development* Family Controls capability enabled in §4.
 - [ ] Submit the request at
       **<https://developer.apple.com/contact/request/family-controls-distribution>**.
 - [ ] List every bundle id that uses Family Controls / Screen Time APIs. Today
-      that is **`family.ajar.child`** only — the entitlement lives on the app
+      that is **`family.ajar.filter`** only — the entitlement lives on the app
       target, not the two extensions (§4).
 - [ ] Describe the parental-control use (aligns with the 5.5 "approved provider"
       posture).
@@ -442,7 +442,7 @@ and does not expire like per-app certificates.
 - [ ] **Download the `.p8` once** (Apple never lets you re-download it) and store
       it in the team secret manager.
 - [ ] Record the **Key ID** (10 chars) and the **Team ID** (§2).
-- [ ] Note which bundle ids will send push: **`family.ajar.child`** (child gets
+- [ ] Note which bundle ids will send push: **`family.ajar.filter`** (child gets
       "sync now"). There is no parent push topic — the parent console is the web
       app, which uses Web Push, not APNs. Deferred either way: no Apple code
       registers for remote notifications yet (§4).
@@ -457,7 +457,7 @@ and does not expire like per-app certificates.
 ## 8. App Store Connect & TestFlight (LATER)
 
 - [ ] Create the App Store Connect app record for the **child app**
-      (`family.ajar.child`) at <https://appstoreconnect.apple.com/>. There is no
+      (`family.ajar.filter`) at <https://appstoreconnect.apple.com/>. There is no
       parent app record — the parent console is the web app (§4).
 - [ ] Use **TestFlight** for internal/external beta once distribution signing +
       the Family Controls distribution entitlement (§6) are in place.
@@ -494,7 +494,7 @@ passwords and Fastlane Match; it both mints signing profiles and uploads).
 | `ASC_KEY_P8` | secret | **the whole `.p8` file contents**, including the `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE KEY-----` lines |
 | `APPLE_DIST_P12` | secret | the distribution `.p12` (§3.1), **base64**: `base64 -i distribution.p12 \| pbcopy` |
 | `APPLE_DIST_P12_PASSWORD` | secret | the passphrase set at `openssl pkcs12 -export` |
-| `APPLE_PROFILE_APP` | secret | App Store profile for `family.ajar.child`, **base64** |
+| `APPLE_PROFILE_APP` | secret | App Store profile for `family.ajar.filter`, **base64** |
 | `APPLE_PROFILE_DATA` | secret | profile for `…child.FilterDataProvider`, **base64** |
 | `APPLE_PROFILE_CONTROL` | secret | profile for `…child.FilterControlProvider`, **base64** |
 | `APPLE_TEAM_ID` | **variable** | the 10-char Team ID (§2) |
@@ -592,15 +592,15 @@ start that, not how you finish it.
 
 ### 8.4 The bundle identifiers (hardcoded, and why)
 
-These live in `apple/poc-contentfilter/project.yml` and the `.entitlements` files,
+These live in `apple/AjarFilter/project.yml` and the `.entitlements` files,
 not in CI variables:
 
 | Identifier | What |
 |---|---|
-| `family.ajar.child` | the child app (container) |
-| `family.ajar.child.FilterDataProvider` | content-filter data provider extension |
-| `family.ajar.child.FilterControlProvider` | content-filter control provider extension |
-| `group.family.ajar.child` | App Group shared by all three |
+| `family.ajar.filter` | the child app (container) |
+| `family.ajar.filter.DataProvider` | content-filter data provider extension |
+| `family.ajar.filter.ControlProvider` | content-filter control provider extension |
+| `group.family.ajar.filter` | App Group shared by all three |
 
 Reverse-DNS of `ajar.family`, the domain we own. Register **all four** (the three
 App IDs and the App Group) before the first signed build.
@@ -618,12 +618,12 @@ record is permanent):
 
 | Future identifier | Blocked on | Note |
 |---|---|---|
-| `family.ajar.parent` | no parent iOS app — `apple/parent-app/` is a README stub and the parent console is `web/parent/` | correct name when it exists |
+| `family.ajar.parent` | no parent iOS app — `apple/AjarParent/` is a README stub and the parent console is `web/parent/` | correct name when it exists |
 | macOS container app + `…​.Extension` | `macos/safari-extension/` is loose JS with no Xcode project, container app or `Info.plist` | a Safari Web Extension cannot ship standalone; it needs a container app plus the native messaging host |
 
 **Decide before the first macOS upload:** one bundle id can span iOS **and**
 macOS under a *single* App Store Connect record. The macOS child app can
-therefore reuse **`family.ajar.child`** rather than minting `family.ajar.mac` —
+therefore reuse **`family.ajar.filter`** rather than minting `family.ajar.mac` —
 one record, one TestFlight history, one Family Controls entitlement request,
 instead of two apps that drift apart. Cheap to choose now, impossible to merge
 later.
@@ -645,7 +645,7 @@ code, and each one can hold a build that uploaded perfectly.
 
 - [x] **Export compliance** — *already handled in code.*
       `ITSAppUsesNonExemptEncryption: false` is set in
-      `apple/poc-contentfilter/project.yml`, so uploads no longer stop to ask.
+      `apple/AjarFilter/project.yml`, so uploads no longer stop to ask.
       The basis: Apple exempts encryption built into the OS, and this app uses
       only TLS via `URLSession` plus CryptoKit for Ed25519 snapshot verification.
       **Re-confirm if a third-party crypto library is ever linked** — the
@@ -714,9 +714,9 @@ checklist (from the PoC-D research; see `docs/APPLE_URL_FILTER_POC.md`):
 | Team + Team ID + roles (§2) | ✅ required | — |
 | **Apple Development** signing cert (§3) | ✅ only to sign from a Mac (Xcode makes it) | — |
 | Apple **Distribution** cert (§3) | — | ✅ created by hand from a CSR (§3.1) |
-| Child app **App ID** `family.ajar.child` (§4) | ✅ required | — |
+| Child app **App ID** `family.ajar.filter` (§4) | ✅ required | — |
 | The two filter-provider extension App IDs (§4) | ✅ required | — |
-| **App Group** `group.family.ajar.child` (§4) | ✅ required | — |
+| **App Group** `group.family.ajar.filter` (§4) | ✅ required | — |
 | **APNs `.p8` key** + Key ID + Team ID (§7) | ❌ not yet (no Apple push code) | ✅ when APNs ships |
 | **Family Controls _distribution_ entitlement** (§6) | ❌ not needed (dev-signed works) | ✅ required |
 | App Store Connect records + TestFlight (§8) | ❌ | ✅ |
@@ -741,7 +741,7 @@ Cloudflare/signing secrets live in `docs/DEPLOYMENT.md`.
 | `APNS_KEY` | the APNs **`.p8`** file contents (§7) | backend APNs `Notifier` |
 | `APNS_KEY_ID` | 10-char Key ID (§7) | backend APNs `Notifier` |
 | `APPLE_TEAM_ID` | 10-char Team ID (§2) | backend APNs `Notifier` (also = APNs Team ID) |
-| `APNS_TOPIC_CHILD` | bundle id `family.ajar.child` (§4) | APNs topic for child "sync now" pushes (unused until APNs is wired) |
+| `APNS_TOPIC_CHILD` | bundle id `family.ajar.filter` (§4) | APNs topic for child "sync now" pushes (unused until APNs is wired) |
 | `ASC_KEY_ID` | App Store Connect API **Key ID** (§8.1) | `testflight.yml` — signing + upload |
 | `ASC_ISSUER_ID` | App Store Connect API **Issuer UUID** (§8.1) | `testflight.yml` — signing + upload |
 | `ASC_KEY_P8` | the App Store Connect **`.p8`** contents (§8.1) | `testflight.yml` — upload |

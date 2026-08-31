@@ -17,11 +17,11 @@ and must NOT be merged** — it is held for an alpha/beta gate.
 ## What is already true
 
 - The iOS child app, its two content-filter extensions, and a signed-policy
-  evaluator exist in `apple/poc-contentfilter/`. `project.yml` drives XcodeGen;
+  evaluator exist in `apple/AjarFilter/`. `project.yml` drives XcodeGen;
   the `.xcodeproj` is generated, never committed.
-- Bundle ids are **hardcoded and permanent**: `family.ajar.child`,
-  `family.ajar.child.FilterDataProvider`,
-  `family.ajar.child.FilterControlProvider`, App Group `group.family.ajar.child`.
+- Bundle ids are **hardcoded and permanent**: `family.ajar.filter`,
+  `family.ajar.filter.DataProvider`,
+  `family.ajar.filter.ControlProvider`, App Group `group.family.ajar.filter`.
   Do not change them without saying so explicitly — an App Store Connect record
   makes a bundle id unrenameable.
 - `.github/workflows/testflight.yml` archives, signs and uploads. Signing is
@@ -44,8 +44,8 @@ and must NOT be merged** — it is held for an alpha/beta gate.
 This is the single highest-value thing you can do that a Linux session cannot.
 
 ```sh
-cd apple/poc-contentfilter && xcodegen generate
-xcodebuild -project ParentFilterPoC.xcodeproj -scheme ParentFilterPoC \
+cd apple/AjarFilter && xcodegen generate
+xcodebuild -project AjarFilter.xcodeproj -scheme AjarFilter \
   -destination 'generic/platform=iOS' -configuration Release \
   CODE_SIGNING_ALLOWED=NO build
 ```

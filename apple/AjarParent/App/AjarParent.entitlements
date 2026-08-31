@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Parent app entitlements. Deliberately almost empty: the parent device enforces
+  NOTHING. No family-controls, no networkextension — this app is a client of the
+  API, and asking for filtering entitlements it never uses would be a claim to
+  justify at App Review for no capability.
+
+  Push arrives when APNs is actually wired; the entitlement is inert until code
+  registers for remote notifications (docs/APPLE_ACCOUNT_SETUP.md §4.1 C).
+
+  The macOS destination is sandboxed and needs outgoing network explicitly.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.security.network.client</key>
+    <true/>
+</dict>
+</plist>
