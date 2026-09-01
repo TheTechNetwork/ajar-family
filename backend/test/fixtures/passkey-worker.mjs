@@ -20,7 +20,9 @@ export default {
     await repo.createWebAuthnChallenge({
       challenge: v.challenge,
       kind: v.mode === "register" ? "REGISTER" : "AUTHENTICATE",
-      userId: v.mode === "register" ? v.userId : undefined,
+      // Both kinds bind to an account now: registration to the parent enrolling,
+      // sign-in to the parent whose password was just accepted.
+      userId: v.userId,
       expiresAt: iso(5 * 60_000),
       createdAt: iso(0),
     });
@@ -31,7 +33,7 @@ export default {
         const cred = await svc.register(v.userId, v.response, "workerd");
         return Response.json({ ok: true, id: cred.id, signCount: cred.signCount, backedUp: cred.backedUp });
       }
-      const out = await svc.login(v.response);
+      const out = await svc.login(v.userId, v.response);
       const after = await repo.getWebAuthnCredential(v.credential.id);
       return Response.json({ ok: true, userId: out.userId, signCount: after.signCount });
     } catch (e) {

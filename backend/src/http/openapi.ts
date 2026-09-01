@@ -265,6 +265,29 @@ const schemas = {
     },
     required: ["userId", "tokenType", "expiresIn", "accessToken", "refreshToken"],
   },
+  MfaChallenge: {
+    type: "object",
+    description: "A half-finished sign-in. The password checked out, but the account has a passkey enrolled, so no session exists yet. Send `mfaToken` as `Authorization: Bearer <mfaToken>` to /v1/auth/passkeys/login/options and then /v1/auth/passkeys/login; nothing else accepts it.",
+    properties: {
+      mfaRequired: { const: true },
+      methods: { type: "array", items: { type: "string", enum: ["passkey"] } },
+      mfaToken: { type: "string" },
+      expiresIn: { type: "integer", description: "mfaToken lifetime (seconds)" },
+    },
+    required: ["mfaRequired", "methods", "mfaToken", "expiresIn"],
+  },
+  Passkey: {
+    type: "object",
+    description: "One enrolled passkey. The public key is never returned.",
+    properties: {
+      id: { type: "string", description: "base64url credential id" },
+      label: { type: "string" },
+      backedUp: { type: "boolean", description: "synced to a cloud keychain — a lost device does not lose it" },
+      createdAt: { type: "string", format: "date-time" },
+      lastUsedAt: { type: "string", format: "date-time" },
+    },
+    required: ["id", "label", "backedUp", "createdAt"],
+  },
   SessionSummary: {
     type: "object",
     description: "One signed-in device/session for the current user.",
@@ -386,7 +409,37 @@ export const openapiDocument = {
     "/v1/auth/login": {
       post: { tags: ["auth"], summary: "Log in with email + password", security: [],
         requestBody: { required: true, content: json({ type: "object", properties: { email: { type: "string", format: "email" }, password: { type: "string" } }, required: ["email", "password"] }) },
-        responses: { "200": { description: "Token pair", content: json({ $ref: "#/components/schemas/TokenResponse" }) }, "401": { description: "Invalid email or password", content: json({ $ref: "#/components/schemas/Error" }) } } },
+        description: "Step one of two. An account with a passkey enrolled gets an MfaChallenge and NO session; finish at /v1/auth/passkeys/login. An account with no passkey yet gets a token pair carrying `passkeyRequired: true`, which is the console's cue to send the parent straight to enrolment.",
+        responses: { "200": { description: "Either a token pair (no passkey enrolled) or an MFA challenge", content: json({ oneOf: [{ $ref: "#/components/schemas/TokenResponse" }, { $ref: "#/components/schemas/MfaChallenge" }] }) }, "401": { description: "Invalid email or password", content: json({ $ref: "#/components/schemas/Error" }) } } },
+    },
+    "/v1/auth/passkeys/login/options": {
+      post: { tags: ["auth"], summary: "Step two of sign-in: get a passkey challenge", security: [],
+        description: "Authorized by the `mfaToken` from /v1/auth/login, sent as a bearer token. Returns PublicKeyCredentialRequestOptions to hand to navigator.credentials.get(). Single-use and bound to that account; valid for five minutes.",
+        responses: { "200": { description: "WebAuthn request options", content: json({ type: "object", additionalProperties: true }) }, "400": errorResponses["400"], "401": errorResponses["401"] } },
+    },
+    "/v1/auth/passkeys/login": {
+      post: { tags: ["auth"], summary: "Step two of sign-in: present the assertion", security: [],
+        description: "Authorized by the same `mfaToken`. The only route that turns one into a session.",
+        requestBody: { required: true, content: json({ type: "object", properties: { credential: { type: "object", additionalProperties: true, description: "the PublicKeyCredential from navigator.credentials.get(), JSON-serialized" } }, required: ["credential"] }) },
+        responses: { "200": { description: "Token pair", content: json({ $ref: "#/components/schemas/TokenResponse" }) }, "400": errorResponses["400"], "401": errorResponses["401"] } },
+    },
+    "/v1/me/passkeys/options": {
+      post: { tags: ["auth"], summary: "Get enrolment options for a new passkey", security: userAuth,
+        description: "Returns PublicKeyCredentialCreationOptions for navigator.credentials.create(). Already-enrolled credentials are excluded, so a parent cannot silently register the same key twice.",
+        responses: { "200": { description: "WebAuthn creation options", content: json({ type: "object", additionalProperties: true }) }, "401": errorResponses["401"] } },
+    },
+    "/v1/me/passkeys": {
+      get: { tags: ["auth"], summary: "List this account's passkeys", security: userAuth,
+        responses: { "200": { description: "Passkeys", content: json({ type: "array", items: { $ref: "#/components/schemas/Passkey" } }) }, "401": errorResponses["401"] } },
+      post: { tags: ["auth"], summary: "Enrol a passkey", security: userAuth,
+        requestBody: { required: true, content: json({ type: "object", properties: { credential: { type: "object", additionalProperties: true, description: "the PublicKeyCredential from navigator.credentials.create(), JSON-serialized" }, label: { type: "string", maxLength: 64 } }, required: ["credential"] }) },
+        responses: { "201": { description: "Enrolled", content: json({ $ref: "#/components/schemas/Passkey" }) }, "400": errorResponses["400"], "401": errorResponses["401"] } },
+    },
+    "/v1/me/passkeys/{id}": {
+      delete: { tags: ["auth"], summary: "Remove a passkey (never the last one)", security: userAuth,
+        description: "409 when it is the only passkey on the account: removing it would leave no way to sign in. Enrol the replacement first.",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Removed", content: json({ type: "object", properties: { ok: { const: true } } }) }, "401": errorResponses["401"], "404": errorResponses["404"], "409": { description: "This is the only passkey on the account", content: json({ $ref: "#/components/schemas/Error" }) } } },
     },
     "/v1/auth/refresh": {
       post: { tags: ["auth"], summary: "Exchange a refresh token for a fresh token pair", security: [],

@@ -120,6 +120,25 @@ PASSWORD_RESET_URL = "https://ajar.family/parent/"
 # agree and nothing in CI can check that they do.
 MAIL_FROM = "noreply@app.ajar.family"
 
+# WebAuthn relying-party identity — the second factor on every parent account.
+#
+# THESE TWO ARE NOT INTERCHANGEABLE WITH ANY OTHER HOSTNAME AND CANNOT BE
+# CHANGED LATER. A passkey is bound by the browser to the rpId it was created
+# under; change it and every enrolled passkey silently stops working, with no
+# migration and no way for a parent to recover except support. That is also why
+# they are pinned to the APEX: the console is served there, www 301s to it, and
+# a ceremony run on a page whose origin is not `ajar.family` is refused by the
+# browser before it reaches us.
+#
+# Unset, the backend falls back to localhost — which is correct for `npm run
+# dev` and silently wrong in production: the browser would refuse every
+# ceremony, and it would read as "passkeys are broken" rather than as a missing
+# variable. So they are committed rather than left to be remembered.
+PASSKEY_RP_ID = "ajar.family"
+PASSKEY_ORIGIN = "https://ajar.family"
+# Shown inside the platform's own "Save a passkey for …" prompt.
+PASSKEY_RP_NAME = "Ajar"
+
 # ---------------------------------------------------------------------------
 # EMAIL. Cloudflare Email Sending, called as env.EMAIL.send() from worker.ts.
 #

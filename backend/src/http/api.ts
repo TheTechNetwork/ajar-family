@@ -1,7 +1,9 @@
 /**
  * REST API surface wiring the transport-agnostic Router to the domain services.
- * Auth is a bearer-token skeleton (see auth/tokens.ts); production swaps in Sign
- * in with Apple / passkeys + refresh rotation without changing these routes.
+ *
+ * Parent sign-in is self-contained — a password (auth/password.ts) plus a
+ * passkey (domain/passkeys.ts), with HMAC bearer tokens and refresh rotation
+ * (auth/tokens.ts). No external identity provider is involved anywhere.
  */
 import type { App } from "../app.js";
 import { Router, ok, err, html, type HttpRequest, type HttpResponse } from "./router.js";
@@ -36,6 +38,8 @@ const PUSH_KIND_VALUES = ["APNS", "WEBSOCKET", "CONSOLE", "EMAIL", "WEBPUSH"] as
 // LENGTH rule lives in auth/password.ts and stays there: one source of truth.
 const password = () => v.str({ max: 512, trim: false });
 const id = () => v.str({ max: 128 });
+/** Base64url, and nothing else. Every field a WebAuthn ceremony sends is this. */
+const b64url = (max: number) => v.str({ max, pattern: /^[A-Za-z0-9_-]*$/ });
 
 const bodies = {
   register: v.object(
@@ -88,6 +92,36 @@ const bodies = {
   }, { decision: "allow or block", scope: "how widely this applies", duration: "how long for" }),
   endpoint: v.object({ kind: v.oneOf(PUSH_KIND_VALUES), token: v.str({ max: 4096 }) },
     { kind: "kind of notification", token: "where to send it" }),
+
+  // WebAuthn ceremony bodies. These are validated field by field rather than
+  // passed through, and the parser REBUILDS the object from the fields named
+  // here — so whatever reaches the crypto is a known shape of bounded strings,
+  // not whatever JSON arrived. The fields are exactly the ones
+  // @simplewebauthn/server reads; adding one it does not read would be dead
+  // weight, and dropping one it does read would break the ceremony, so this list
+  // is checked against the library rather than guessed.
+  passkeyRegister: v.object({
+    label: v.withDefault(v.str({ max: 64 }), "Passkey"),
+    credential: v.object({
+      id: b64url(1024), rawId: b64url(1024), type: v.oneOf(["public-key"] as const),
+      response: v.object({
+        attestationObject: b64url(32_768),
+        clientDataJSON: b64url(8192),
+        transports: v.optional(v.arrayOf(v.str({ max: 32 }), { max: 8 })),
+      }),
+    }, { id: "passkey" }),
+  }, { credential: "passkey" }),
+  passkeyLogin: v.object({
+    credential: v.object({
+      id: b64url(1024), rawId: b64url(1024), type: v.oneOf(["public-key"] as const),
+      response: v.object({
+        authenticatorData: b64url(8192),
+        clientDataJSON: b64url(8192),
+        signature: b64url(4096),
+        userHandle: v.optional(b64url(1024)),
+      }),
+    }, { id: "passkey" }),
+  }, { credential: "passkey" }),
 };
 
 async function principal(app: App, req: HttpRequest): Promise<Principal | null> {
@@ -116,6 +150,9 @@ async function requireUser(app: App, req: HttpRequest): Promise<string> {
 // user's tokenVersion (global revoke) AND the session id (per-device revoke).
 const ACCESS_TTL = 60 * 60; // 1h
 const REFRESH_TTL = 60 * 60 * 24 * 14; // 14d
+// Long enough to pick up a phone and touch a sensor, short enough that a
+// password captured on a shared machine is not still half a sign-in tomorrow.
+const MFA_TTL = 5 * 60; // 5m
 const deviceLabel = (req: HttpRequest) =>
   req.headers["x-device-label"] || req.headers["user-agent"] || "Unknown device";
 async function tokenPair(app: App, user: { id: string; tokenVersion: number }, sid: string) {
@@ -139,6 +176,24 @@ async function requireDevice(app: App, req: HttpRequest) {
   if (!device) throw Object.assign(new Error("this device has been removed"), { code: "UNAUTHORIZED" });
   return p;
 }
+
+/**
+ * Resolve a half-finished sign-in. Accepts ONLY the `mfa` kind — a full user
+ * token is refused here, so a signed-in session cannot be replayed into the
+ * second half of somebody else's login — and re-checks tokenVersion, so a
+ * password change or a sign-out-everywhere in the seconds between the two steps
+ * invalidates the half-finished one too.
+ */
+async function mfaPrincipal(app: App, req: HttpRequest) {
+  const p = await principal(app, req);
+  if (!p || p.kind !== "mfa") throw UNAUTH("start again from the sign-in page");
+  return app.auth.userForToken(p.userId, p.tv);
+}
+
+/** What a passkey looks like from outside. Never the public key: it is not
+ *  secret, but publishing it is free help to anyone building a target list. */
+const publicPasskey = (c: { id: string; label: string; backedUp: boolean; createdAt: string; lastUsedAt?: string }) =>
+  ({ id: c.id, label: c.label, backedUp: c.backedUp, createdAt: c.createdAt, lastUsedAt: c.lastUsedAt });
 
 /** Device tokens last 30 days and can be refreshed while still valid. */
 const DEVICE_TOKEN_TTL = 60 * 60 * 24 * 30;
@@ -377,12 +432,30 @@ export function buildRouter(app: App): Router {
     const s = await app.auth.startSession(user.id, deviceLabel(req), REFRESH_TTL);
     return ok({ verified: true, ...(await tokenPair(app, user, s.id)) }, 201);
   });
+  // Step ONE of sign-in. The password alone does not produce a session: an
+  // account with a passkey enrolled gets back a short-lived `mfa` token and has
+  // to finish at /v1/auth/passkeys/login. That token is a different KIND, not a
+  // user token with a flag on it, so a route that forgets to check cannot be
+  // talked into accepting a password on its own (auth/tokens.ts).
+  //
+  // An account with NO passkey still gets a full pair, and is told to enrol.
+  // Refusing here instead would lock out every account created before enrolment
+  // existed, with no way in to fix it — the flag is what the console acts on.
   r.post("/v1/auth/login", async (req) => {
     const capped = limited(authLimiter, req); if (capped) return capped;
     const b = await v.readBody(req, bodies.login);
     const user = await app.auth.authenticate(b.email, b.password);
+    const passkeys = await app.passkeys.list(user.id);
+    if (passkeys.length > 0) {
+      return ok({
+        mfaRequired: true,
+        methods: ["passkey"],
+        mfaToken: await issueToken(app.authSecret, { kind: "mfa", userId: user.id, tv: user.tokenVersion }, MFA_TTL),
+        expiresIn: MFA_TTL,
+      });
+    }
     const s = await app.auth.startSession(user.id, deviceLabel(req), REFRESH_TTL);
-    return ok(await tokenPair(app, user, s.id));
+    return ok({ ...(await tokenPair(app, user, s.id)), passkeyRequired: true });
   });
   // Exchange a refresh token for a fresh pair (same session). Rejected if the
   // session was revoked (this device) or the user's tokenVersion changed (all).
@@ -413,6 +486,72 @@ export function buildRouter(app: App): Router {
     const s = await app.auth.startSession(user.id, deviceLabel(req), REFRESH_TTL);
     return ok(await tokenPair(app, user, s.id));
   });
+  // --- passkeys ------------------------------------------------------------
+  //
+  // A passkey is the second factor for a parent account, and the reason it is a
+  // passkey rather than a six-digit code is that a code can be read out over the
+  // phone by someone who has been talked into it. A passkey cannot: it is bound
+  // to this origin by the browser, so a convincing copy of our sign-in page on
+  // another domain gets nothing, and there is no shared secret for a parent to
+  // hand over.
+  //
+  // Enrolment is required at sign-up. That is deliberately strict, and the
+  // reason there is no email-based way around it is that a fallback to "click
+  // the link we sent you" makes the second factor exactly as strong as the
+  // parent's inbox, which is to say it stops being a second factor. The cost is
+  // real — see docs/SECURITY.md on what happens when every passkey is lost.
+
+  /** Step two of sign-in: the challenge, issued against a half-finished login. */
+  r.post("/v1/auth/passkeys/login/options", async (req) => {
+    const capped = limited(authLimiter, req); if (capped) return capped;
+    const user = await mfaPrincipal(app, req);
+    return ok(await app.passkeys.loginOptions(user));
+  });
+
+  /** Step two of sign-in, completed. This is the only route that turns an `mfa`
+   *  token into a session. */
+  r.post("/v1/auth/passkeys/login", async (req) => {
+    const capped = limited(authLimiter, req); if (capped) return capped;
+    const user = await mfaPrincipal(app, req);
+    const b = await v.readBody(req, bodies.passkeyLogin);
+    await app.passkeys.login(user.id, b.credential);
+    const s = await app.auth.startSession(user.id, deviceLabel(req), REFRESH_TTL);
+    return ok(await tokenPair(app, user, s.id));
+  });
+
+  /** Enrolment options. Needs a real session — the one minted by confirming the
+   *  email address at sign-up, or an existing signed-in console. */
+  r.post("/v1/me/passkeys/options", async (req) => {
+    const userId = await requireUser(app, req);
+    const user = await app.repo.getUser(userId);
+    if (!user) throw UNAUTH("login required");
+    return ok(await app.passkeys.registerOptions({
+      id: user.id, email: user.email, displayName: user.displayName,
+    }));
+  });
+
+  /** Enrolment, completed. */
+  r.post("/v1/me/passkeys", async (req) => {
+    const userId = await requireUser(app, req);
+    const b = await v.readBody(req, bodies.passkeyRegister);
+    const cred = await app.passkeys.register(userId, b.credential, b.label);
+    return ok(publicPasskey(cred), 201);
+  });
+
+  r.get("/v1/me/passkeys", async (req) => {
+    const userId = await requireUser(app, req);
+    return ok((await app.passkeys.list(userId)).map(publicPasskey));
+  });
+
+  // Removing the LAST passkey is refused, not warned about: it is a parent
+  // locking themselves out of their children's controls, and the fix (enrol the
+  // replacement first) costs them thirty seconds.
+  r.del("/v1/me/passkeys/:id", async (req) => {
+    const userId = await requireUser(app, req);
+    await app.passkeys.remove(userId, req.params.id!);
+    return ok({ ok: true });
+  });
+
   // Sign out THIS device (revoke the current session only).
   r.post("/v1/auth/logout", async (req) => {
     const { userId, sid } = await userPrincipal(app, req);

@@ -119,6 +119,7 @@ const run = async (body) => {
 
 test("workerd verifies a real ES256 assertion and advances the counter", async () => {
   const out = await run({
+    userId: "parent-1",
     credential: cred(ES256_CRED_ID, ES256_KEY, 77),
     challenge: ES256_CHALLENGE,
     response: ES256_ASSERTION,
@@ -132,6 +133,7 @@ test("workerd verifies a real RS256 assertion — the second algorithm we accept
   // ECDSA and RSASSA-PKCS1-v1_5 are different WebCrypto import and verify paths.
   // One working says nothing about the other.
   const out = await run({
+    userId: "parent-2",
     credential: cred(RS256_CRED_ID, RS256_KEY, 0, "parent-2"),
     challenge: RS256_CHALLENGE,
     response: RS256_ASSERTION,
@@ -156,6 +158,7 @@ test("workerd REFUSES an assertion signed by a different key", async () => {
   // The one that matters. A verifier that cannot do the crypto at all fails the
   // tests above loudly; one that does it wrong passes them and fails this.
   const out = await run({
+    userId: "parent-1",
     credential: cred(ES256_CRED_ID, OTHER_ES256_KEY, 0),
     challenge: ES256_CHALLENGE,
     response: ES256_ASSERTION,
@@ -170,6 +173,7 @@ test("workerd REFUSES a replay — the challenge is spent by the first attempt",
   // proving the challenge row is gone by presenting an assertion whose challenge
   // was never issued at all.
   const out = await run({
+    userId: "parent-1",
     credential: cred(ES256_CRED_ID, ES256_KEY, 77),
     challenge: "a-challenge-that-was-never-issued-for-this-assertion",
     response: ES256_ASSERTION,
@@ -181,6 +185,7 @@ test("workerd REFUSES a replay — the challenge is spent by the first attempt",
 test("workerd REFUSES a genuine assertion presented to the wrong origin", async () => {
   const out = await run({
     cfg: { ...CFG, origin: "https://ajar.family" },
+    userId: "parent-1",
     credential: cred(ES256_CRED_ID, ES256_KEY, 77),
     challenge: ES256_CHALLENGE,
     response: ES256_ASSERTION,

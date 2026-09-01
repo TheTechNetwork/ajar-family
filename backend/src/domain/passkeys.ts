@@ -63,9 +63,12 @@ export class PasskeyService {
     if (Date.parse(row.expiresAt) <= Date.now()) {
       throw new DomainError("that sign-in attempt has expired — please try again", "UNAUTHORIZED");
     }
-    // A registration challenge is issued TO a user; letting one be redeemed by a
-    // different session would register an attacker's key on someone's account.
-    if (kind === "REGISTER" && row.userId !== userId) {
+    // Every challenge we issue is bound to a user — a registration challenge to
+    // the account enrolling, a sign-in challenge to the account whose password
+    // was just accepted. Letting one be redeemed by a different session would
+    // register an attacker's key on someone's account, or settle their second
+    // factor with a passkey ceremony run somewhere else entirely.
+    if (row.userId !== userId) {
       throw new DomainError("that sign-in attempt has expired — please try again", "UNAUTHORIZED");
     }
     return row;
@@ -142,24 +145,31 @@ export class PasskeyService {
   // --- authentication ------------------------------------------------------
 
   /**
-   * Usernameless by design: no allowCredentials, so the browser offers whatever
-   * passkey it holds for this site and we learn who it is from the response.
-   * Listing a user's credentials here would answer "does this address have an
-   * account" to anyone who asks.
+   * Options for the SECOND half of a sign-in. The caller has already proved the
+   * password, so we know who this is and the challenge is bound to them.
+   *
+   * `allowCredentials` names that user's own passkeys, which is safe precisely
+   * because this is not the first step: reaching it already required the
+   * password, so the list answers nothing to someone who does not have it.
    */
-  async loginOptions() {
+  async loginOptions(user: { id: string }) {
+    const credentials = await this.repo.listWebAuthnCredentials(user.id);
+    if (credentials.length === 0) {
+      throw new DomainError("this account has no passkey enrolled", "BAD_REQUEST");
+    }
     const options = await generateAuthenticationOptions({
       rpID: this.cfg.rpId,
+      allowCredentials: credentials.map((c) => ({ id: c.id })),
       userVerification: "preferred",
     });
-    await this.keepChallenge(options.challenge, "AUTHENTICATE");
+    await this.keepChallenge(options.challenge, "AUTHENTICATE", user.id);
     return options;
   }
 
-  async login(response: unknown): Promise<{ userId: string; credential: WebAuthnCredential }> {
+  async login(userId: string, response: unknown): Promise<{ userId: string; credential: WebAuthnCredential }> {
     const challenge = decodeChallenge(response);
     if (!challenge) throw new DomainError("that response could not be read", "BAD_REQUEST");
-    await this.spendChallenge(challenge, "AUTHENTICATE");
+    await this.spendChallenge(challenge, "AUTHENTICATE", userId);
 
     const id = (response as { id?: string }).id;
     if (!id) throw new DomainError("that response could not be read", "BAD_REQUEST");
@@ -167,6 +177,10 @@ export class PasskeyService {
     // Same message whether the credential is unknown or the signature is wrong:
     // the difference would say whether a given passkey is registered here.
     if (!stored) throw new DomainError("that passkey was not recognised", "UNAUTHORIZED");
+    // The challenge was bound to this account and so is the credential. Without
+    // this line, anyone holding ANY passkey enrolled with Ajar could finish a
+    // sign-in that started with someone else's password.
+    if (stored.userId !== userId) throw new DomainError("that passkey was not recognised", "UNAUTHORIZED");
 
     let verification;
     try {
@@ -211,6 +225,24 @@ export class PasskeyService {
   }
 
   list(userId: string) { return this.repo.listWebAuthnCredentials(userId); }
+
+  /**
+   * Remove a passkey — but never the last one. A passkey is required to sign in,
+   * so deleting the only one is not a security decision a parent can meaningfully
+   * consent to in a dialog; it is locking themselves out of their children's
+   * controls. Enrol the replacement first.
+   */
+  async remove(userId: string, credentialId: string): Promise<void> {
+    const stored = await this.repo.getWebAuthnCredential(credentialId);
+    if (!stored || stored.userId !== userId) throw new DomainError("no such passkey", "NOT_FOUND");
+    const all = await this.repo.listWebAuthnCredentials(userId);
+    if (all.length <= 1) {
+      throw new DomainError(
+        "add another passkey before removing this one — it is the only way you can sign in",
+        "CONFLICT");
+    }
+    await this.repo.deleteWebAuthnCredential(credentialId);
+  }
 }
 
 /** Pull the challenge the browser echoed back, so we can look the ceremony up. */

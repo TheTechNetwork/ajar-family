@@ -296,7 +296,7 @@ test("REFUSES when user verification is required and the authenticator did not d
 const cfg = { rpId: RP_ID, origin: ORIGIN, rpName: "Ajar" };
 
 /** A service with one credential enrolled and one live sign-in challenge. */
-async function serviceWith(opts: { publicKeyCose: string; signCount: number; challenge: string }) {
+async function serviceWith(opts: { publicKeyCose: string; signCount: number; challenge: string; userId?: string }) {
   const repo = new MemoryStore();
   await repo.createWebAuthnCredential({
     id: ES256_CRED_ID,
@@ -311,6 +311,9 @@ async function serviceWith(opts: { publicKeyCose: string; signCount: number; cha
   await repo.createWebAuthnChallenge({
     challenge: opts.challenge,
     kind: "AUTHENTICATE",
+    // Bound to the account whose password was just accepted. login() refuses a
+    // challenge minted for anyone else.
+    userId: opts.userId ?? "parent-1",
     expiresAt: new Date(Date.now() + CHALLENGE_TTL_MS).toISOString(),
     createdAt: new Date().toISOString(),
   });
@@ -322,7 +325,7 @@ test("login: a real assertion signs the parent in and advances the counter", asy
     publicKeyCose: ES256_KEY, signCount: 77, challenge: ES256_CHALLENGE,
   });
 
-  const out = await svc.login(ES256_ASSERTION);
+  const out = await svc.login("parent-1", ES256_ASSERTION);
   assert.equal(out.userId, "parent-1");
   assert.equal(out.credential.signCount, 78, "the new counter is persisted, not just returned");
   assert.equal((await repo.getWebAuthnCredential(ES256_CRED_ID))!.signCount, 78);
@@ -337,7 +340,7 @@ test("login: a signature made by a different key is refused, not signed in", asy
     publicKeyCose: OTHER_ES256_KEY, signCount: 0, challenge: ES256_CHALLENGE,
   });
 
-  await assert.rejects(() => svc.login(ES256_ASSERTION), (e: Error) => {
+  await assert.rejects(() => svc.login("parent-1", ES256_ASSERTION), (e: Error) => {
     assert.equal((e as DomainError).code, "UNAUTHORIZED");
     return true;
   });
@@ -348,10 +351,10 @@ test("login: the same assertion cannot be replayed — the challenge is spent", 
     publicKeyCose: ES256_KEY, signCount: 77, challenge: ES256_CHALLENGE,
   });
 
-  await svc.login(ES256_ASSERTION);
+  await svc.login("parent-1", ES256_ASSERTION);
   // Byte-for-byte the same request, which is exactly what a network attacker
   // holds. The challenge row was deleted as it was read.
-  await assert.rejects(() => svc.login(ES256_ASSERTION), (e: Error) => {
+  await assert.rejects(() => svc.login("parent-1", ES256_ASSERTION), (e: Error) => {
     assert.equal((e as DomainError).code, "UNAUTHORIZED");
     return true;
   });
@@ -373,7 +376,7 @@ test("login: a challenge issued for REGISTER cannot be spent to sign in", async 
     createdAt: new Date().toISOString(),
   });
 
-  await assert.rejects(() => new PasskeyService(repo, cfg).login(ES256_ASSERTION));
+  await assert.rejects(() => new PasskeyService(repo, cfg).login("parent-1", ES256_ASSERTION));
 });
 
 test("login: an expired challenge is refused", async () => {
@@ -383,12 +386,12 @@ test("login: an expired challenge is refused", async () => {
     signCount: 77, label: "iPhone", backedUp: true, createdAt: new Date().toISOString(),
   });
   await repo.createWebAuthnChallenge({
-    challenge: ES256_CHALLENGE, kind: "AUTHENTICATE",
+    challenge: ES256_CHALLENGE, kind: "AUTHENTICATE", userId: "parent-1",
     expiresAt: new Date(Date.now() - 1000).toISOString(),
     createdAt: new Date(Date.now() - 60_000).toISOString(),
   });
 
-  await assert.rejects(() => new PasskeyService(repo, cfg).login(ES256_ASSERTION));
+  await assert.rejects(() => new PasskeyService(repo, cfg).login("parent-1", ES256_ASSERTION));
 });
 
 test("login: a counter that goes backwards is treated as a cloned authenticator", async () => {
@@ -404,7 +407,7 @@ test("login: a counter that goes backwards is treated as a cloned authenticator"
     publicKeyCose: ES256_KEY, signCount: 200, challenge: ES256_CHALLENGE,
   });
 
-  await assert.rejects(() => svc.login(ES256_ASSERTION), (e: Error) => {
+  await assert.rejects(() => svc.login("parent-1", ES256_ASSERTION), (e: Error) => {
     assert.equal((e as DomainError).code, "UNAUTHORIZED");
     return true;
   });
@@ -421,12 +424,12 @@ test("login: a synced passkey stuck at counter 0 is NOT mistaken for a clone", a
   });
   await repo.createWebAuthnChallenge({
     challenge: "umGemXJIPBXPxkD8Hjanuv9BDor8Z7O3aPdtOgMCdW4PAfqDX43EFlhrsF0PW90df5zrgbt7YVMRAa27tCdHzw",
-    kind: "AUTHENTICATE",
+    kind: "AUTHENTICATE", userId: "parent-2",
     expiresAt: new Date(Date.now() + CHALLENGE_TTL_MS).toISOString(),
     createdAt: new Date().toISOString(),
   });
 
-  const out = await new PasskeyService(repo, cfg).login({
+  const out = await new PasskeyService(repo, cfg).login("parent-2", {
     id: "ZoIKP1JQvKdrYj1bTUPJ2eTUsbLeFkv-X5xJQNr4k6s",
     rawId: "ZoIKP1JQvKdrYj1bTUPJ2eTUsbLeFkv-X5xJQNr4k6s",
     response: {
@@ -445,15 +448,73 @@ test("login: a synced passkey stuck at counter 0 is NOT mistaken for a clone", a
 test("login: a credential we have never seen is refused without saying so", async () => {
   const repo = new MemoryStore();
   await repo.createWebAuthnChallenge({
-    challenge: ES256_CHALLENGE, kind: "AUTHENTICATE",
+    challenge: ES256_CHALLENGE, kind: "AUTHENTICATE", userId: "parent-1",
     expiresAt: new Date(Date.now() + CHALLENGE_TTL_MS).toISOString(),
     createdAt: new Date().toISOString(),
   });
 
-  await assert.rejects(() => new PasskeyService(repo, cfg).login(ES256_ASSERTION), (e: Error) => {
+  await assert.rejects(() => new PasskeyService(repo, cfg).login("parent-1", ES256_ASSERTION), (e: Error) => {
     // Deliberately the same wording as a bad signature: the difference would
     // tell whoever is asking whether a given passkey is enrolled here.
     assert.equal(e.message, "that passkey was not recognised");
     return true;
   });
+});
+
+test("login: a challenge minted for one account cannot settle another's sign-in", async () => {
+  // The attack this closes: someone knows a parent's password, gets as far as
+  // the second step, and finishes it with a passkey of their OWN — enrolled on
+  // their own Ajar account, on their own phone, with their own face. Both the
+  // challenge binding and the credential's owner have to be checked; either one
+  // alone leaves this open.
+  const repo = new MemoryStore();
+  await repo.createWebAuthnCredential({
+    id: ES256_CRED_ID, userId: "attacker", publicKeyCose: ES256_KEY, alg: -7,
+    signCount: 77, label: "attacker's phone", backedUp: true, createdAt: new Date().toISOString(),
+  });
+  await repo.createWebAuthnChallenge({
+    challenge: ES256_CHALLENGE, kind: "AUTHENTICATE", userId: "victim",
+    expiresAt: new Date(Date.now() + CHALLENGE_TTL_MS).toISOString(),
+    createdAt: new Date().toISOString(),
+  });
+
+  // A genuine, correctly signed assertion — and still not a sign-in as "victim".
+  await assert.rejects(() => new PasskeyService(repo, cfg).login("victim", ES256_ASSERTION));
+});
+
+test("remove: the last passkey cannot be deleted", async () => {
+  // Otherwise "tidying up my passkeys" is indistinguishable from locking
+  // yourself out of your own children's controls.
+  const repo = new MemoryStore();
+  await repo.createWebAuthnCredential({
+    id: ES256_CRED_ID, userId: "parent-1", publicKeyCose: ES256_KEY, alg: -7,
+    signCount: 0, label: "iPhone", backedUp: true, createdAt: new Date().toISOString(),
+  });
+  const svc = new PasskeyService(repo, cfg);
+
+  await assert.rejects(() => svc.remove("parent-1", ES256_CRED_ID), (e: Error) => {
+    assert.equal((e as DomainError).code, "CONFLICT");
+    return true;
+  });
+  assert.equal((await repo.listWebAuthnCredentials("parent-1")).length, 1);
+
+  // With a second one enrolled, the first goes.
+  await repo.createWebAuthnCredential({
+    id: "second", userId: "parent-1", publicKeyCose: OTHER_ES256_KEY, alg: -7,
+    signCount: 0, label: "YubiKey", backedUp: false, createdAt: new Date().toISOString(),
+  });
+  await svc.remove("parent-1", ES256_CRED_ID);
+  assert.deepEqual((await repo.listWebAuthnCredentials("parent-1")).map((c) => c.id), ["second"]);
+});
+
+test("remove: you cannot delete somebody else's passkey", async () => {
+  const repo = new MemoryStore();
+  for (const [id, userId] of [["a", "parent-1"], ["b", "parent-1"], ["theirs", "parent-2"]]) {
+    await repo.createWebAuthnCredential({
+      id: id!, userId: userId!, publicKeyCose: ES256_KEY, alg: -7, signCount: 0,
+      label: "k", backedUp: true, createdAt: new Date().toISOString(),
+    });
+  }
+  await assert.rejects(() => new PasskeyService(repo, cfg).remove("parent-1", "theirs"));
+  assert.ok(await repo.getWebAuthnCredential("theirs"));
 });
