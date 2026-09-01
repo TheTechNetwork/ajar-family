@@ -1,0 +1,12 @@
+# Files under web/ that are NOT part of the served site.
+#
+# `[assets]` in backend/wrangler.toml uploads this whole directory, and anything
+# uploaded is PUBLIC — /parent/check-contrast.mjs would answer 200 to anyone.
+# These are development tooling and notes, not pages, so they stay out of the
+# deployment rather than being quietly reachable on api.ajar.family.
+#
+# .assetsignore is Cloudflare's own mechanism for this and lives in the assets
+# directory itself:
+# https://developers.cloudflare.com/workers/static-assets/binding/#ignoring-assets
+**/README.md
+**/*.mjs

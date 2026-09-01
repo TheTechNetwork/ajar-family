@@ -99,6 +99,10 @@ curl https://api.ajar.family/v1/health
 # → {"status":"ok","version":"0.0.0-alpha"}
 curl https://api.ajar.family/v1/signing-key
 # → {"publicKeyB64":"...","alg":"Ed25519"}
+curl -sI https://api.ajar.family/ | head -1
+# → HTTP/2 200        (the home page — see §4.1)
+curl -sI https://api.ajar.family/parent/ | head -1
+# → HTTP/2 200        (the parent console)
 ```
 
 `GET /v1/health` and `GET /v1/signing-key` are defined in
@@ -106,6 +110,37 @@ curl https://api.ajar.family/v1/signing-key
 confirms the signing secrets are wired ([§5](#5-generate-the-ed25519-signing-keypair));
 if it changes between deploys, the Worker is falling back to an ephemeral key and
 `SIGNING_*` secrets are not set.
+
+### 4.1 The Worker also serves the site and the console
+
+`backend/wrangler.toml` has an **`[assets]`** block: `web/` is uploaded with the
+Worker and `backend/src/worker.ts` maps the public paths onto it — `/` →
+`web/site/index.html`, `/parent/…` → `web/parent/…` — the same mapping the Node
+adapter uses. Workers Static Assets:
+<https://developers.cloudflare.com/workers/static-assets/>.
+
+**One origin is the requirement, not a convenience.** `web/site/signup.js` writes
+the `cf_access` / `cf_refresh` / `cf_family` localStorage keys `web/parent/app.js`
+reads, and localStorage is per-origin. Moving the site to its own hostname breaks
+that handoff silently: a parent finishes signing up and is shown a login screen.
+Serving it from the API's own Worker is what keeps them together, and it adds no
+DNS record.
+
+**`run_worker_first = true` is load-bearing.** By default a matching asset is
+served *before* Worker code runs, and asset routing ignores the hostname — so
+without it `blocked.ajar.family/` would serve the home page, past the
+single-purpose guard in `worker.ts` that keeps everything but `/blocked` off the
+hostname shipped iOS builds bake in. It is asserted in `backend/src/worker.test.ts`
+because it is configuration, and correct code does not substitute for it.
+
+`web/.assetsignore` keeps the READMEs and the `.mjs` dev scripts out: everything
+uploaded is public, and `/parent/check-contrast.mjs` answering 200 to the world
+is not something anyone would choose on purpose. The six files that are meant to
+be served total ~78 KB. `wrangler deploy --dry-run` reports neither the ignore
+result nor the asset bytes — its "Read N files" line counts directory entries and
+its "Total Upload" is the script bundle — so the exclusion is verified the only
+way it can be locally, by requesting those paths under workerd
+(`npm run test:workerd`), not by reading the dry-run output.
 
 ---
 
