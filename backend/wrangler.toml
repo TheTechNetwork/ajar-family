@@ -103,7 +103,12 @@ custom_domain = true
 # reached. That is a quiet downgrade of the flow that now gates account creation,
 # which is why these are committed rather than left to be remembered.
 [vars]
-VERIFY_EMAIL_URL = "https://ajar.family/parent/"
+# The confirmation link resumes the guided setup rather than dropping a brand-new
+# parent into an empty console. /v1/auth/verify returns tokens when the code
+# completes a sign-up, so signup.html can carry straight on to "name your
+# family"; when it is an EXISTING account confirming itself there is nothing to
+# set up and the page forwards to /parent/ instead.
+VERIFY_EMAIL_URL = "https://ajar.family/signup.html"
 PASSWORD_RESET_URL = "https://ajar.family/parent/"
 # The From address on every message Ajar sends. `app.ajar.family` is the
 # subdomain actually onboarded to Email Service; the apex is NOT, and this said

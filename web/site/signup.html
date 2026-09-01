@@ -74,7 +74,13 @@
     </div>
     <div class="field">
       <label for="email">Email <span class="hint">— asks arrive here, so check it for typos</span></label>
-      <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required>
+      <!-- autocomplete="username", NOT "email". A password manager recognises a
+           signup form by a username field sitting with a new-password field;
+           "email" describes the content but does not name the credential's
+           identifier, and Safari and Chrome both went quiet without it. The
+           console has always used "username" (web/parent/index.html) — this page
+           was the one that drifted. type="email" still gets the right keyboard. -->
+      <input id="email" name="email" type="email" autocomplete="username" inputmode="email" required>
     </div>
     <div class="field">
       <label for="password">Password <span class="hint">— at least 8 characters</span></label>
@@ -84,6 +90,14 @@
     <button class="primary" type="submit">Create account</button>
     <button class="link" type="button" onclick="location.href='/parent/'">I already have an account</button>
   </form>
+
+  <!-- 1b · confirm. Not a step the parent DOES, so it gets no dot. -->
+  <div id="sCheck" hidden>
+    <h1>Check your email</h1>
+    <p class="sub" id="checkSub">We sent a link to confirm your address. Open it and we'll pick up right here.</p>
+    <p class="note">Nothing has been created yet — the link is what makes the account. If it doesn't arrive in a few minutes, check spam, then try again.</p>
+    <button class="link" type="button" id="resend">Send it again</button>
+  </div>
 
   <!-- 2 · family -->
   <form id="s2" hidden>
