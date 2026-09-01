@@ -289,7 +289,7 @@ struct RequestStatusView: View {
     private var message: String {
         switch controller.requestState {
         case .sending:  return "Asking about \(controller.requestTarget)."
-        case .waiting:  return "Nothing else to do — it’s on their phone now."
+        case .waiting:  return "Nothing else to do — it is with a parent now."
         case .answered: return "Open \(controller.requestTarget) and see."
         case .failed(let why): return why
         case .idle:     return ""
