@@ -240,3 +240,39 @@ test("the target is escaped for a script context, not just for HTML", async () =
   assert.doesNotMatch(page, /<\/script><img/, "the value did not break out of the script");
   assert.match(page, /var target = "[^"]*"/, "and it is still a plain string literal");
 });
+
+test("a child can write a note, and it reaches the app without a script", async () => {
+  // The Windows and macOS block pages have collected a reason since they were
+  // written; this one did not, so every iOS ask reached the parent contextless
+  // and the quote block on both parent surfaces was dead weight on the flagship
+  // platform.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, "/blocked?u=www.youtube.com/")).body);
+
+  // A real label, not a placeholder standing in for one (SC 3.3.2).
+  assert.match(page, /<label for="note"/, "the note field has a real label");
+  assert.match(page, /id="note"/);
+  // Bounded on the page as well as in the app: this is reflected input on an
+  // unauthenticated screen and the deep link is editable by whoever holds the
+  // device.
+  assert.match(page, /maxlength="280"/);
+
+  // The button's href is COMPLETE before any script runs. If the inline script
+  // never executes, the ask still works — it just carries no note, which is
+  // exactly the behaviour that shipped before the field existed.
+  assert.match(page, /id="ask" *>|<a class="btn" href="ajar:\/\/request\?u=[^"]+" id="ask"/,
+    "the ask link is server-rendered with a working href");
+  assert.match(page, /ajar:\/\/request\?u=/);
+});
+
+test("the closed page has no note field to fill in", async () => {
+  // Nothing to ask about means nothing to annotate. A field here would invite a
+  // child to type an explanation into a form that cannot send it.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, "/blocked")).body);
+
+  assert.match(page, /This page is closed/);
+  assert.doesNotMatch(page, /id="note"/);
+});

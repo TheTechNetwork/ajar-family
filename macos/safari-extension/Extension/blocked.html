@@ -400,6 +400,7 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
     const params = new URLSearchParams(location.search);
     const originalUrl = params.get("u") || "";
     const canonicalKey = params.get("k") || "";
+    const blockReason = params.get("reason") || "";
     const askKey = canonicalKey || (originalUrl ? `URL:${originalUrl}` : "");
 
     const $ = (id) => document.getElementById(id);
@@ -410,14 +411,52 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
     const reasonEl = $("reason");
 
     // Human label is the hero; the raw key/URL live behind Details (UX §4).
+    //
+    // DOMAIN and URL were missing and the fallback was the literal string "This
+    // video", so a blocked news site announced itself as "This video" in 18px
+    // semibold — the largest text on the screen, wrong, for every block that was
+    // not YouTube. The Windows copy has covered all five and fallen back to the
+    // hostname since it was written; this is that table, not a new one.
     const NOUN = {
       YOUTUBE_VIDEO: "A YouTube video",
       YOUTUBE_CHANNEL: "A YouTube channel",
       YOUTUBE_PLAYLIST: "A YouTube playlist",
+      DOMAIN: "A website",
+      URL: "A web page",
     };
-    $("humanLine").textContent =
-      NOUN[(canonicalKey.split(":")[0] || "").toUpperCase()] || "This video";
+    function humanLabel() {
+      const type = (canonicalKey.split(":")[0] || "").toUpperCase();
+      if (NOUN[type]) return NOUN[type];
+      // The hostname beats a guess: it is what the child typed, and it is never
+      // wrong about what they were looking at.
+      try { return new URL(originalUrl).hostname || "This page"; } catch { return "This page"; }
+    }
+
+    // WHY it is closed. UX_PRINCIPLES §9 singles this line out for reducing the
+    // threat-to-freedom that drives circumvention — a rule with a reason reads
+    // as a rule; a rule without one reads as an obstacle. Windows has had this
+    // since it was written and macOS had no equivalent at all, so the Mac page
+    // never said why.
+    const REASON_COPY = {
+      "default:youtube": "A parent keeps YouTube opt-in, video by video.",
+      "default:web": "New sites go past a parent first.",
+      "rule:YOUTUBE_VIDEO": "This video hasn't been opened yet.",
+      "rule:YOUTUBE_CHANNEL": "This channel hasn't been opened yet.",
+      "rule:YOUTUBE_PLAYLIST": "This playlist hasn't been opened yet.",
+      "rule:DOMAIN": "This site hasn't been opened yet.",
+      "rule:URL": "This page hasn't been opened yet.",
+      // Both spellings: `background.js` here emits `no-policy:fail-closed`, the
+      // Windows agent emits `failclosed:no-snapshot`. A table that only knew one
+      // of them would silently say nothing on the surface it was written for.
+      "no-policy:fail-closed": "Ajar is still waking up. Give it a few seconds, then reload.",
+      "failclosed:no-snapshot": "Ajar is still waking up. Give it a few seconds, then reload.",
+    };
+
+    $("humanLine").textContent = humanLabel();
     $("urlLine").textContent = originalUrl || "(no URL)";
+    if (REASON_COPY[blockReason] && $("lede")) {
+      $("lede").textContent = `${REASON_COPY[blockReason]} Send it over and a parent sees it right away.`;
+    }
 
     // Windows guards this; macOS used to call history.back() bare, which is a
     // silent no-op when the block page is the tab's first entry.
@@ -593,13 +632,27 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
       let delivered = false;
       try {
         if (ext && ext.runtime && ext.runtime.sendMessage) {
-          const res = await ext.runtime.sendMessage({
+          // A background worker that never answers used to leave the child on
+          // "Sending…" with no retry and no end — the ask silently lost, and no
+          // way to tell that from a slow one. `sendMessage` returns a promise
+          // that simply never settles when the worker is gone, so the timeout
+          // has to race it rather than wrap it. Windows has guarded this since
+          // it was written; the same 12 seconds, deliberately.
+          const answered = ext.runtime.sendMessage({
             type: "REQUEST_ACCESS",
             key: canonicalKey,
             url: originalUrl,
             reason: reasonEl.value.trim(),
           });
-          delivered = !!(res && res.ok);
+          const timedOut = Symbol("timeout");
+          const res = await Promise.race([
+            answered,
+            new Promise((resolve) => setTimeout(() => resolve(timedOut), 12000)),
+          ]);
+          // A late answer is ignored rather than believed: by then the page is
+          // already showing a retry, and flipping it to "Asked" underneath a
+          // child who is mid-tap is worse than the honest failure.
+          delivered = res !== timedOut && !!(res && res.ok);
         }
       } catch (e) {
         console.warn("[ajar] background message failed:", e);

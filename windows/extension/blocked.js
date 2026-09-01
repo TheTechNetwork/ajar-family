@@ -71,7 +71,7 @@ $("target").textContent = blockedUrl || "(unknown)";
 if (!blockedUrl) $("details").classList.add("hide");
 if (REASON_COPY[reason]) {
   $("lede").textContent =
-    `${REASON_COPY[reason]} Send it over and a parent gets it on their phone.`;
+    `${REASON_COPY[reason]} Send it over and a parent sees it right away.`;
 }
 
 backBtn.addEventListener("click", () => {

@@ -236,6 +236,14 @@ struct RequestStatusView: View {
                 Link("Open the page", destination: url)
                     .buttonStyle(PrimaryButton()).frame(maxWidth: 360).padding(.bottom, 12)
             }
+            // The retry the refresh icon has always promised. A failed ask used
+            // to offer "Done" alone, so the only way forward was back to Safari
+            // to start the whole thing over — on the one screen a child reaches
+            // by being told no by the network.
+            if case .failed = controller.requestState, controller.lastIncoming != nil {
+                Button("Try again") { Task { await controller.retryLastRequest() } }
+                    .buttonStyle(PrimaryButton()).frame(maxWidth: 360).padding(.bottom, 12)
+            }
             Button("Done") { dismiss() }.buttonStyle(SecondaryButton()).frame(maxWidth: 360)
         }
         .padding(24)

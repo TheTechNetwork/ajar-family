@@ -493,10 +493,15 @@ function spendOnce(res) {
   });
 }
 
-function blockedPageUrl(originalUrl, key) {
+function blockedPageUrl(originalUrl, key, reason) {
   const u = new URL(browser.runtime.getURL(BLOCKED_PAGE));
   u.searchParams.set("u", originalUrl);
   if (key) u.searchParams.set("k", key);
+  // WHY it was closed. `decide()` has always returned this and it stopped here,
+  // so the Mac block page could not say why — the one line UX_PRINCIPLES §9
+  // singles out for reducing the threat-to-freedom that drives circumvention.
+  // Same parameter name as the Windows redirect.
+  if (reason) u.searchParams.set("reason", reason);
   return u.toString();
 }
 
@@ -505,11 +510,11 @@ browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
   if (details.frameId !== 0) return; // top-level only for redirects
   if (!snapshot) await restoreCachedPolicy();
   const res = decide(details.url);
-  const { blocked, key } = res;
+  const { blocked, key, reason } = res;
   if (!blocked) spendOnce(res);
   if (blocked) {
     try {
-      await browser.tabs.update(details.tabId, { url: blockedPageUrl(details.url, key) });
+      await browser.tabs.update(details.tabId, { url: blockedPageUrl(details.url, key, reason) });
     } catch (e) {
       console.warn("[guard] redirect failed:", e);
     }
@@ -529,11 +534,14 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
     // A pushState route change is a real load as far as a parent is concerned,
     // even though no network navigation fired.
     const res = decide(msg.url);
-    const { blocked, key } = res;
+    const { blocked, key, reason } = res;
     if (!blocked) spendOnce(res);
     if (blocked && sender.tab?.id != null) {
       try {
-        await browser.tabs.update(sender.tab.id, { url: blockedPageUrl(msg.url, key) });
+        // Same three arguments as the navigation path above. An SPA route change
+        // is a real load to a parent, so it must not be the one that arrives
+        // without a reason.
+        await browser.tabs.update(sender.tab.id, { url: blockedPageUrl(msg.url, key, reason) });
       } catch (e) {
         console.warn("[guard] SPA redirect failed:", e);
       }

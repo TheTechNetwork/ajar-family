@@ -229,6 +229,21 @@ final class FilterController: ObservableObject {
     /// take them back. Shown to nobody — it is a destination, not copy.
     @Published var requestURL: URL?
 
+    /// The `ajar://request?…` link that started the ask in flight, so a failure
+    /// can be retried in place. Without it `.failed` offered "Done" and nothing
+    /// else — while drawing a refresh icon that promised a retry which did not
+    /// exist — and the only way on was back to Safari to start again. Both
+    /// extension block pages always leave a retry; UX_PRINCIPLES §2 names dead
+    /// ends by name.
+    @Published private(set) var lastIncoming: URL?
+
+    /// Send the same ask again. No-op when there is nothing to resend, so the
+    /// button can be bound without a second nil check at the call site.
+    func retryLastRequest() async {
+        guard let url = lastIncoming else { return }
+        await handleIncoming(url: url)
+    }
+
     var baseURLString: String { BackendClient.baseURL?.absoluteString ?? "" }
     var policyVersion: Int? { store.current()?.version }
 
@@ -318,11 +333,23 @@ final class FilterController: ObservableObject {
     /// item, not two.
     func handleIncoming(url: URL) async {
         guard url.scheme == "ajar", url.host == "request" else { return }
-        guard let blocked = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "u" })?.value, !blocked.isEmpty else {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        guard let blocked = items?.first(where: { $0.name == "u" })?.value, !blocked.isEmpty else {
             lastError = "That link carried no address to request."
             return
         }
+        // The child's own words, typed on the block page. Both extension block
+        // pages have collected this since they were written and the deep link
+        // did not carry it, so every iOS ask reached the parent contextless and
+        // the quote block on both parent surfaces was dead weight on the
+        // flagship platform. Trimmed and bounded here as well as on the page:
+        // the link is editable by whoever holds the device.
+        let note = (items?.first(where: { $0.name == "note" })?.value ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let reason = note.isEmpty ? nil : String(note.prefix(280))
+        // Remembered so `.failed` can offer a retry that does not send the child
+        // back to Safari to start the whole ask over.
+        lastIncoming = url
 
         let yt = YouTube.normalize(blocked)
         let targetType: String, targetValue: String
@@ -345,7 +372,8 @@ final class FilterController: ObservableObject {
         requestURL = URL(string: blocked)
         requestState = .sending
         do {
-            try await backend.createRequest(targetType: targetType, targetValue: targetValue, url: blocked)
+            try await backend.createRequest(targetType: targetType, targetValue: targetValue,
+                                            url: blocked, reason: reason)
             backendStatus = "Request sent — waiting for a parent."
             requestState = .waiting(since: Date())
             // Park on the long poll so an approval applies without the child

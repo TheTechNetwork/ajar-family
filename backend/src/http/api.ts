@@ -487,6 +487,11 @@ export function buildRouter(app: App): Router {
   .btn.again { background:transparent; color:var(--accent-ink); border:1px solid var(--line);
                margin-top:12px; }
   .foot { font-size:14px; color:var(--muted); text-align:center; margin:16px 0 0; }
+  .note { margin-bottom:16px; }
+  .note label { display:block; font-size:14px; color:var(--ink-2); margin-bottom:6px; }
+  .note textarea { width:100%; min-height:52px; padding:12px 14px; resize:vertical;
+                   background:var(--surface); color:var(--ink); font:inherit; font-size:16px;
+                   border:1px solid var(--field-line); border-radius:10px; }
 </style></head>
 <body><div class="card">
   <div class="mark">
@@ -501,7 +506,11 @@ export function buildRouter(app: App): Router {
     <div class="name">${shown.replace(/^https?:\/\/(www\.)?/i, "").split("/")[0] || "This page"}</div>
     <details><summary>Details</summary><div class="url">${shown}</div></details>
   </div>
-  <a class="btn" href="${escapeHtml(deepLink)}">${askLabel}</a>
+  <div class="note">
+    <label for="note">Add a note if you want — like “it’s for homework”</label>
+    <textarea id="note" rows="2" maxlength="280" placeholder="A quick note for your parent"></textarea>
+  </div>
+  <a class="btn" href="${escapeHtml(deepLink)}" id="ask">${askLabel}</a>
   <a class="btn again" href="${shown}" id="again">Try the page again</a>
   <p class="foot">New sites go past a parent first.</p>`
          : `<h1>This page is closed</h1>
@@ -548,6 +557,32 @@ ${safe ? `<script>
   // replace(), not assign(): a child who taps back should reach where they were
   // before, not walk back through a stack of block pages.
   if (reloaded) location.replace(target);
+
+  /* Carry the note into the app.
+   *
+   * The Windows and macOS block pages have always collected a reason, and this
+   * one did not — so the parent's card quoted nothing for every iOS family, and
+   * the quote block on both parent surfaces was dead weight on the flagship
+   * platform. The deep link is OURS (unlike the remediation URL the system
+   * substitutes into), so a second parameter is safe here; u is kept last
+   * anyway, because a reader who has learned that rule for one URL should not
+   * have to relearn where it does and does not apply.
+   * (No backticks in this comment: it lives inside a template literal.)
+   *
+   * The href starts out complete and note-less. If this script never runs, the
+   * ask still works — it just arrives without the note, which is exactly what
+   * happened before the field existed. */
+  var ask = document.getElementById("ask");
+  var note = document.getElementById("note");
+  if (ask && note) {
+    var base = ask.getAttribute("href");
+    note.addEventListener("input", function () {
+      var text = note.value.trim().slice(0, 280);
+      ask.setAttribute("href", text
+        ? "ajar://request?note=" + encodeURIComponent(text) + "&u=" + encodeURIComponent(target)
+        : base);
+    });
+  }
 })();
 </script>` : ""}
 </body></html>`);
