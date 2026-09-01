@@ -69,23 +69,25 @@ struct SignInView: View {
 
 struct RequestsView: View {
     @EnvironmentObject var model: ParentModel
-    @State private var familyIdField = ""
 
     var body: some View {
         NavigationStack {
             ZStack {
                 Ajar.bg.ignoresSafeArea()
-                if model.familyId == nil {
-                    familyPrompt
-                } else if model.pending.isEmpty {
-                    quiet
+                // Order matters, and the first branch is why. Until /v1/me
+                // answers we know nothing: `families` is empty and `familyId`
+                // is nil, which is indistinguishable from "no family" and from
+                // "several to choose between". Leading with the loaded case and
+                // ending with a spinner keeps a half-second of network from
+                // rendering an empty picker or a wrong empty state.
+                if model.familyId != nil {
+                    requestList
+                } else if model.hasNoFamily {
+                    noFamily
+                } else if model.families.count > 1 {
+                    familyPicker
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(model.pending) { RequestCard(request: $0) }
-                        }
-                        .padding(16)
-                    }
+                    ProgressView().tint(Ajar.muted)
                 }
             }
             .navigationTitle("Waiting on you")
@@ -93,6 +95,12 @@ struct RequestsView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button("Refresh") { Task { await model.refresh() } }
+                        // Only when there is somewhere else to go. On a
+                        // single-family account this would be a button that
+                        // takes a parent to a screen with one option on it.
+                        if model.families.count > 1 {
+                            Button("Switch family") { model.switchFamily() }
+                        }
                         Button("Sign out", role: .destructive) { Task { await model.signOut() } }
                     } label: { Image(systemName: "ellipsis.circle").foregroundStyle(Ajar.ink) }
                 }
@@ -100,19 +108,59 @@ struct RequestsView: View {
         }
     }
 
-    private var familyPrompt: some View {
+    @ViewBuilder private var requestList: some View {
+        if model.pending.isEmpty {
+            quiet
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(model.pending) { RequestCard(request: $0) }
+                }
+                .padding(16)
+            }
+        }
+    }
+
+    /// Shown ONLY when this parent belongs to more than one family.
+    ///
+    /// It used to be a text field asking for the family id — a server-generated
+    /// uuid that is printed nowhere a parent can read, so the screen could not
+    /// be got past. One family is now adopted without asking; this asks only
+    /// when there is a real choice, and it asks by NAME.
+    private var familyPicker: some View {
         VStack(spacing: 14) {
             Text("Which family?").font(.system(size: 18, weight: .semibold)).foregroundStyle(Ajar.ink)
-            TextField("Family id", text: $familyIdField)
-                .font(.system(size: 16)).autocorrectionDisabled()
-                .padding(.horizontal, 14).frame(minHeight: Ajar.tap).frame(maxWidth: 360)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Ajar.surface))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Ajar.fieldLine, lineWidth: 1))
-            Button("Continue") { Task { await model.use(familyId: familyIdField) } }
-                .buttonStyle(PrimaryButton()).frame(maxWidth: 360)
-                .disabled(familyIdField.isEmpty)
+            Text("You look after more than one.")
+                .font(.system(size: 16)).foregroundStyle(Ajar.muted)
+                .padding(.bottom, 4)
+            ForEach(model.families) { membership in
+                Button(membership.label) { Task { await model.use(familyId: membership.familyId) } }
+                    .buttonStyle(PrimaryButton()).frame(maxWidth: 360)
+            }
         }
         .padding(24)
+    }
+
+    /// Signed in, but the account has no family yet — a real state for a parent
+    /// who made an account and stopped. It says where to finish rather than
+    /// leaving a blank screen, and does not pretend this app can do it: creating
+    /// a family, adding a child and enrolling a device all live in the console.
+    private var noFamily: some View {
+        VStack(spacing: 12) {
+            ZStack {
+                Circle().fill(Ajar.accentWash).frame(width: 64, height: 64)
+                Image(systemName: "house").font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(Ajar.accentInk)
+            }
+            .padding(.bottom, 8)
+            Text("No family set up yet").font(.system(size: 18, weight: .semibold)).foregroundStyle(Ajar.ink)
+            Text("Finish setting up at ajar.family, then come back here to answer requests.")
+                .font(.system(size: 16)).foregroundStyle(Ajar.muted)
+                .multilineTextAlignment(.center)
+            Button("Check again") { Task { await model.loadFamilies() } }
+                .buttonStyle(PrimaryButton()).frame(maxWidth: 360).padding(.top, 8)
+        }
+        .padding(40)
     }
 
     /// Not an empty shrug — reassurance that the thing is working.

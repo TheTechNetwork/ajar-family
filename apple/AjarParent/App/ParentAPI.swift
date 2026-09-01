@@ -150,6 +150,34 @@ struct Child: Codable, Identifiable, Equatable {
     let timezone: String
 }
 
+/// One family this parent belongs to, as `/v1/me` reports it.
+///
+/// `family` is optional because the endpoint returns the membership row joined
+/// to the family, and the join can come back null. Falling back to the id would
+/// put a uuid in front of a parent, so `label` says "Your family" instead — a
+/// generic word beats an identifier nobody recognises.
+struct Membership: Codable, Identifiable, Equatable {
+    let familyId: String
+    let role: String
+    let family: Family?
+
+    var id: String { familyId }
+    var label: String { family?.name ?? "Your family" }
+}
+
+struct Family: Codable, Equatable {
+    let id: String
+    let name: String
+}
+
+/// The signed-in parent. Only the fields this app acts on are decoded.
+struct Me: Codable {
+    let userId: String
+    let email: String?
+    let displayName: String?
+    let families: [Membership]
+}
+
 // MARK: - Client
 
 actor ParentAPI {
@@ -196,6 +224,16 @@ actor ParentAPI {
     }
 
     // MARK: The core loop
+
+    /// Who is signed in, and which families they can act in.
+    ///
+    /// This is what replaced asking a parent to TYPE a family id. The id is a
+    /// server-generated uuid that appears nowhere a parent can read, so the text
+    /// box it used to sit in was unanswerable: signing in led to a field that
+    /// could not be filled.
+    func me() async throws -> Me {
+        try await send("/v1/me", method: "GET", body: nil)
+    }
 
     func children(familyId: String) async throws -> [Child] {
         try await send("/v1/families/\(familyId)/children", method: "GET", body: nil)

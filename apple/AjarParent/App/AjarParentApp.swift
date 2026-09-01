@@ -21,17 +21,31 @@ struct AjarParentApp: App {
 final class ParentModel: ObservableObject {
     @Published var signedIn = false
     @Published var familyId: String?
+    /// Every family this parent can act in. Empty until `/v1/me` answers.
+    @Published var families: [Membership] = []
     @Published var children: [Child] = []
     @Published var pending: [AccessRequest] = []
     @Published var error: String?
     @Published var busy = false
 
+    /// True only when the parent genuinely has a choice to make. One family is
+    /// not a choice, and no families is a different screen entirely.
+    var needsFamilyChoice: Bool { signedIn && familyId == nil && families.count > 1 }
+    /// Signed in, and the account has no family at all yet.
+    var hasNoFamily: Bool { signedIn && families.isEmpty && loadedFamilies }
+
+    private var loadedFamilies = false
     private var pollTask: Task<Void, Never>?
+
+    /// The last family this parent chose, so a relaunch does not re-ask. Not a
+    /// credential — an id already in every request this app makes — so
+    /// UserDefaults is the right home for it, unlike the tokens next door.
+    private static let lastFamilyKey = "parent.lastFamilyId"
 
     func restore() async {
         await ParentAPI.shared.restore()
         signedIn = await ParentAPI.shared.isSignedIn
-        if signedIn { await refresh() }
+        if signedIn { await loadFamilies() }
     }
 
     func signIn(email: String, password: String) async {
@@ -40,20 +54,62 @@ final class ParentModel: ObservableObject {
             _ = try await ParentAPI.shared.signIn(email: email, password: password)
             signedIn = true
             error = nil
-            await refresh()
+            await loadFamilies()
         } catch { self.error = error.localizedDescription }
     }
 
     func signOut() async {
         pollTask?.cancel(); pollTask = nil
         await ParentAPI.shared.signOut()
+        UserDefaults.standard.removeObject(forKey: Self.lastFamilyKey)
         signedIn = false; pending = []; children = []; familyId = nil
+        families = []; loadedFamilies = false
+    }
+
+    /// Ask the server which families this parent belongs to, then pick one
+    /// WITHOUT asking whenever there is nothing to ask about.
+    ///
+    /// This replaced a text field that wanted the family id typed in. The id is
+    /// a server-generated uuid printed nowhere a parent can see, so that field
+    /// could not be filled: signing in led straight to a dead end.
+    ///
+    /// Order matters. The remembered family is preferred, but only if it is
+    /// still one this account belongs to — a parent removed from a family must
+    /// not keep landing in it. Otherwise a single family is adopted silently,
+    /// and only a genuine multi-family account is asked.
+    func loadFamilies() async {
+        do {
+            let me = try await ParentAPI.shared.me()
+            families = me.families
+            loadedFamilies = true
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
+
+        let remembered = UserDefaults.standard.string(forKey: Self.lastFamilyKey)
+        if let remembered, families.contains(where: { $0.familyId == remembered }) {
+            await use(familyId: remembered)
+        } else if families.count == 1, let only = families.first {
+            await use(familyId: only.familyId)
+        }
+        // More than one and nothing remembered: RequestsView shows the picker.
     }
 
     func use(familyId id: String) async {
         familyId = id
+        UserDefaults.standard.set(id, forKey: Self.lastFamilyKey)
         await refresh()
         startPolling()
+    }
+
+    /// Go back to the picker. Only reachable when there is more than one family,
+    /// because otherwise it would strand a parent on a screen with one button.
+    func switchFamily() {
+        pollTask?.cancel(); pollTask = nil
+        UserDefaults.standard.removeObject(forKey: Self.lastFamilyKey)
+        familyId = nil; pending = []; children = []
     }
 
     func refresh() async {
