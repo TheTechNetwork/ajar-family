@@ -31,7 +31,7 @@ const API = (() => {
   return "http://localhost:8787"; // file:// during local development only
 })();
 
-const state = { token: null, familyId: null, childId: null, childName: "" };
+const state = { token: null, familyId: null, childId: null, childName: "", pendingEmail: "" };
 
 function announce(msg) {
   const el = $("sr");
@@ -79,6 +79,7 @@ function step(n) {
     const panel = $(`s${i}`);
     if (panel) panel.hidden = i !== n;
   }
+  $("sCheck").hidden = true;
   for (let i = 1; i <= 4; i++) {
     const dot = $(`d${i}`);
     if (dot) dot.toggleAttribute("data-on", i <= Math.min(n, 4));
@@ -118,6 +119,32 @@ function wire(form, busyLabel, handler) {
   });
 }
 
+/**
+ * Ask the browser to remember the credential.
+ *
+ * The autocomplete attributes on the form are most of the story, but they rely
+ * on the browser NOTICING a submission. This flow calls preventDefault() and
+ * swaps panels in place, so there is no navigation for Chrome's save heuristic
+ * to hang off — the account is created and the browser never asks. The
+ * Credential Management API is the explicit way to say so from JS.
+ *
+ * Progressive enhancement on purpose: Safari does not implement
+ * PasswordCredential, so there the autocomplete tokens ARE the whole mechanism —
+ * which is why `username` on the email field matters more than this does.
+ *
+ * Never allowed to break signup. A browser that refuses, or a page not in a
+ * secure context, must not turn a created account into an error.
+ */
+async function rememberCredential(email, password, name) {
+  try {
+    const PC = window.PasswordCredential;
+    if (typeof PC !== "function" || !navigator.credentials?.store) return;
+    await navigator.credentials.store(new PC({ id: email, password, name }));
+  } catch {
+    /* the password just does not get saved; the account is fine */
+  }
+}
+
 // 1 · account -----------------------------------------------------------------
 wire($("s1"), "Creating your account…", async () => {
   const out = await api("/v1/auth/register", {
@@ -129,15 +156,73 @@ wire($("s1"), "Creating your account…", async () => {
       displayName: $("name").value.trim(),
     },
   });
+  // 202 and NOTHING else — no tokens, no account. Registration now creates a
+  // pending row and emails a code; the account comes into existence when that
+  // code is redeemed. This used to read out.accessToken, which after that change
+  // was undefined: it stored the STRING "undefined" and every later step sent
+  // `Bearer undefined`. Broken end to end, and invisible while mail was down
+  // because the request never got this far.
+  await rememberCredential($("email").value.trim(), $("password").value, $("name").value.trim());
+  // Seed the family name from theirs, because "the Brody family" is what most
+  // people would have typed anyway. Still editable after they confirm.
+  const first = $("name").value.trim().split(/\s+/)[0];
+  if (first) $("family").value = `The ${first.replace(/'s$/, "")} family`;
+  state.pendingEmail = $("email").value.trim();
+  showCheckEmail();
+});
+
+function showCheckEmail() {
+  step(1);                       // resets the dots to the first step
+  $("s1").hidden = true;
+  $("sCheck").hidden = false;
+  $("checkSub").textContent =
+    `We sent a link to ${state.pendingEmail}. Open it and we'll pick up right here.`;
+  announce("Check your email for a confirmation link.");
+  $("resend").focus();
+}
+
+$("resend").addEventListener("click", async () => {
+  clearError();
+  announce("Sending it again…");
+  try {
+    await api("/v1/auth/verify/request", { method: "POST", auth: false, body: { email: state.pendingEmail } });
+    // Always 202, whether or not that address has anything pending — the
+    // endpoint refuses to say, and so does this button.
+    announce("Sent. Check your email.");
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+/**
+ * Continue after the emailed link. `?verify=<code>` is what the backend puts in
+ * the confirmation mail (VERIFY_EMAIL_URL points here, not at the console,
+ * precisely so the guided setup resumes instead of dumping a new parent into an
+ * empty console).
+ *
+ *   201 + tokens  the code completed a SIGN-UP: carry on at "name your family".
+ *   200           an existing account just confirmed itself: nothing to set up
+ *                 here, so send them to the console to sign in.
+ */
+async function resumeFromEmail(code) {
+  clearError();
+  announce("Confirming your address…");
+  let out;
+  try {
+    // The body key is `token`, not `code` — the URL parameter is named
+    // `verify` and the field is `token`, and guessing cost a 400.
+    out = await api("/v1/auth/verify", { method: "POST", auth: false, body: { token: code } });
+  } catch (err) {
+    showError(`${err.message} You can ask for a new link from the sign-in page.`);
+    step(1);
+    return;
+  }
+  if (!out?.accessToken) { location.href = "/parent/"; return; }
   state.token = out.accessToken;
   localStorage.setItem("cf_access", out.accessToken);
   localStorage.setItem("cf_refresh", out.refreshToken);
-  // Seed the family name from theirs, because "the Brody family" is what most
-  // people would have typed anyway. Still editable.
-  const first = $("name").value.trim().split(/\s+/)[0];
-  if (first) $("family").value = `The ${first.replace(/'s$/, "")} family`;
   step(2);
-});
+}
 
 // 2 · family ------------------------------------------------------------------
 wire($("s2"), "Setting up…", async () => {
@@ -186,4 +271,15 @@ $("skipCode").addEventListener("click", () => {
   step(5);
 });
 
-step(1);
+// Entry: a confirmation link resumes the flow; anything else starts it.
+const verifyCode = new URLSearchParams(location.search).get("verify");
+if (verifyCode) {
+  // Strip the code from the address bar before doing anything with it: it is a
+  // single-use credential and it does not belong in history, a bookmark, or a
+  // Referer header on the next request this page makes.
+  history.replaceState(null, "", location.pathname);
+  step(1);
+  resumeFromEmail(verifyCode);
+} else {
+  step(1);
+}
