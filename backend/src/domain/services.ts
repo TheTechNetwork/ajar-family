@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import type { Repository } from "../store/repository.js";
 import type { Notifier } from "../push/notifier.js";
+import type { MailSender } from "../push/mail.js";
 import type { EventHub } from "../push/hub.js";
 import { signSnapshot, signCanonical } from "./signing.js";
 import { CATEGORY_DATA_ATTRIBUTION, type CategoryFilterSet } from "@ajar/shared/categories";
@@ -13,7 +14,7 @@ import type {
   User, Session, Family, FamilyMembership, Child, Device, EnrollmentToken,
   AccessRequest, ApprovalDecision, Role, Platform, ApprovalScope, ApprovalDuration,
   PolicyRule, TemporaryRule, TemporaryGrant, DefaultPolicy, PolicyTargetType, RuleScope,
-  NotificationEndpoint, PasswordResetToken,
+  NotificationEndpoint, PasswordResetToken, EmailVerificationToken, PendingRegistration,
 } from "./model.js";
 import type { DevicePolicySnapshot } from "@ajar/shared/policy";
 import type { CategoryProvider } from "../categories/provider.js";
@@ -47,6 +48,16 @@ function secretToken(bytes = 32): string {
     .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/** The body of a confirmation email. Written for a parent: no "token", no
+ *  "endpoint", and it says plainly what happens if they ignore it. */
+function verifyText(raw: string, urlBase?: string): string {
+  const link = urlBase ? `${urlBase}${urlBase.includes("?") ? "&" : "?"}verify=${raw}` : undefined;
+  return `Use this code within ${VERIFY_TTL_MINUTES} minutes to confirm this address.\n`
+    + "If you did not ask for this, ignore this message — no account has been created "
+    + `and nothing has changed.\n\n${raw}`
+    + (link ? `\n\n${link}` : "");
+}
+
 /** Cheap structural check — we never claim to validate deliverability. */
 export function looksLikeEmail(email: unknown): email is string {
   return typeof email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
@@ -63,18 +74,45 @@ export class DomainError extends Error {
 /** How long a password-reset token is usable. Short: it is emailed in clear. */
 export const RESET_TTL_MINUTES = 30;
 
-export class AuthService {
-  constructor(private repo: Repository, private notifier?: Notifier) {}
+/**
+ * How long a sign-up or verification link is usable. Also short, and for the
+ * same reason — it travels in clear text through an inbox that is often read on
+ * a shared screen. Asking again is one form submit and costs the parent nothing,
+ * so there is no reason to leave one of these lying around for a day.
+ */
+export const VERIFY_TTL_MINUTES = 60;
 
-  /** Register a parent with a password. Fails if the email is already taken. */
-  async register(email: string, password: string, displayName: string): Promise<User> {
+/**
+ * Every email this flow sends carries the SAME subject, whether it confirms a
+ * new sign-up, tells an existing owner someone tried to reuse their address, or
+ * re-sends a confirmation. The mail provider is a third party that can read
+ * subject lines (docs/SECURITY.md), and three different subjects would hand it
+ * exactly the answer the 202 is there to withhold.
+ */
+const VERIFY_SUBJECT = "Confirm your email for Ajar";
+
+export class AuthService {
+  constructor(private repo: Repository, private notifier?: Notifier, private mail?: MailSender) {}
+
+  /**
+   * Create a parent account outright. This is the ACCOUNT-CREATION primitive and
+   * is no longer the HTTP registration path: `POST /v1/auth/register` goes
+   * through `requestRegistration` + `completeVerification` so that it answers the
+   * same whether or not the address is taken. Kept public because creating an
+   * account directly is exactly what a test, a seed script or an ops tool wants.
+   */
+  async register(email: string, password: string, displayName: string,
+                 opts: { passwordHash?: string; emailVerifiedAt?: string } = {}): Promise<User> {
     if (!email || !displayName) throw new DomainError("email and displayName required");
     if (!looksLikeEmail(email)) throw new DomainError("a valid email address is required");
-    // Generic message (don't confirm which specific field is taken). Full
-    // non-enumeration would require an email-verification flow — see SECURITY.md.
+    // Generic message (don't confirm which specific field is taken). The HTTP
+    // path never surfaces this — it cannot, or register would be an oracle again.
     if (await this.repo.getUserByEmail(email)) throw new DomainError("could not create an account with those details", "CONFLICT");
-    const passwordHash = await hashPassword(password); // throws on too-short
-    const user = await this.repo.createUser({ id: uid(), email, displayName, passwordHash, tokenVersion: 0, createdAt: now() });
+    const passwordHash = opts.passwordHash ?? await hashPassword(password); // throws on too-short
+    const user = await this.repo.createUser({
+      id: uid(), email, displayName, passwordHash, tokenVersion: 0,
+      emailVerifiedAt: opts.emailVerifiedAt, createdAt: now(),
+    });
     // Register the parent's email as a notification endpoint IMMEDIATELY. Before
     // this, a family could run for weeks with zero endpoints, so every "your
     // child asked for something" notification was fanned out to nobody at all.
@@ -91,6 +129,121 @@ export class AuthService {
     return this.repo.addNotificationEndpoint({
       id: uid(), userId: user.id, kind: "EMAIL", token: user.email, createdAt: now(),
     });
+  }
+
+  // --- email verification + non-enumerating sign-up ------------------------
+
+  /**
+   * Ask to create an account. ALWAYS resolves, so the caller can answer 202 with
+   * one body whatever happened — registering used to answer 201 for a free
+   * address and 409 for a taken one, which is a working "does this person have
+   * an account here?" oracle for anyone holding a list of addresses.
+   *
+   * NOTHING is written to `users` here. A free address gets a PendingRegistration
+   * (password already hashed, token stored only as its SHA-256) and an email with
+   * the link; a taken address gets an email to its owner saying someone tried,
+   * and no row at all. So the answer exists only in that inbox — and a squatter
+   * cannot park on an address they do not control, because the pending row
+   * expires and never stands between the real owner and signing up.
+   *
+   * Both branches hash the password, read the user table once, and send exactly
+   * one message with the same subject, so the coarse timing tell is gone as well.
+   */
+  async requestRegistration(email: string, password: string, displayName: string,
+                            opts: { verifyUrlBase?: string } = {}): Promise<void> {
+    if (!looksLikeEmail(email)) throw new DomainError("a valid email address is required");
+    if (!displayName) throw new DomainError("a name is required");
+    // Deliberately BEFORE the lookup and unconditional: PBKDF2 is by far the most
+    // expensive thing on this path, and doing it in only one branch would put the
+    // answer straight back into the response time.
+    const passwordHash = await hashPassword(password); // throws on too-short
+    const existing = await this.repo.getUserByEmail(email);
+
+    if (existing) {
+      // The one place the truth is told, and only to the mailbox that owns it.
+      await this.mail?.send({
+        to: email,
+        subject: VERIFY_SUBJECT,
+        text: "Someone asked to create an Ajar account with this address, and it already has one.\n\n"
+          + "If that was you, sign in instead — or use \"Forgot password\" if you cannot remember it.\n"
+          + "If it was not you, nothing has changed and there is nothing to do.",
+      });
+      return;
+    }
+
+    await this.repo.invalidatePendingRegistrationsForEmail(email, now());
+    const raw = secretToken();
+    const pending: PendingRegistration = {
+      id: uid(), email, displayName, passwordHash, tokenHash: await sha256b64url(raw),
+      expiresAt: new Date(Date.now() + VERIFY_TTL_MINUTES * 60_000).toISOString(),
+      createdAt: now(),
+    };
+    await this.repo.createPendingRegistration(pending);
+    await this.mail?.send({ to: email, subject: VERIFY_SUBJECT, text: verifyText(raw, opts.verifyUrlBase) });
+  }
+
+  /**
+   * Re-send a confirmation for an account that already exists — the path for an
+   * alpha parent who registered before any of this existed, and for anyone whose
+   * link expired. Silent and always-resolving for the same reason as
+   * `requestPasswordReset`: the caller answers 202 either way.
+   */
+  async requestEmailVerification(email: string, opts: { verifyUrlBase?: string } = {}): Promise<void> {
+    const user = looksLikeEmail(email) ? await this.repo.getUserByEmail(email) : null;
+    if (!user || user.emailVerifiedAt) return; // nobody to prove it, or nothing to prove
+    await this.repo.invalidateEmailVerificationTokensForUser(user.id, now());
+    const raw = secretToken();
+    const token: EmailVerificationToken = {
+      id: uid(), userId: user.id, tokenHash: await sha256b64url(raw),
+      expiresAt: new Date(Date.now() + VERIFY_TTL_MINUTES * 60_000).toISOString(),
+      createdAt: now(),
+    };
+    await this.repo.createEmailVerificationToken(token);
+    await this.mail?.send({ to: user.email, subject: VERIFY_SUBJECT, text: verifyText(raw, opts.verifyUrlBase) });
+  }
+
+  /**
+   * Redeem a code from either kind of confirmation email. Single-use and
+   * TTL-bounded, and any sibling token is burned with it, so a link that was
+   * forwarded or sat in a mail archive is dead the moment one of them is used.
+   *
+   * `created` separates the two outcomes for the caller: a sign-up that has just
+   * become an account (the parent is signed straight in — they proved the address
+   * seconds ago, and making them retype the password they chose two minutes
+   * earlier buys nothing) from an existing account confirming itself.
+   */
+  async completeVerification(rawToken: string): Promise<{ user: User; created: boolean }> {
+    const invalid = () => new DomainError("this confirmation link is invalid or has expired", "UNAUTHORIZED");
+    if (typeof rawToken !== "string" || rawToken.length < 16) throw invalid();
+    const hash = await sha256b64url(rawToken);
+    const live = (rec: { usedAt?: string; expiresAt: string }) => !rec.usedAt && Date.parse(rec.expiresAt) > Date.now();
+
+    const pending = await this.repo.getPendingRegistrationByHash(hash);
+    if (pending) {
+      if (!live(pending)) throw invalid();
+      await this.repo.updatePendingRegistration({ ...pending, usedAt: now() });
+      await this.repo.invalidatePendingRegistrationsForEmail(pending.email, now());
+      // Someone finished a sign-up for this address in the meantime (or the
+      // parent registered twice and opened the older link). Not worth hiding —
+      // whoever holds this token holds the inbox.
+      if (await this.repo.getUserByEmail(pending.email))
+        throw new DomainError("that address already has an account — sign in instead", "CONFLICT");
+      const user = await this.register(pending.email, "", pending.displayName,
+        { passwordHash: pending.passwordHash, emailVerifiedAt: now() });
+      return { user, created: true };
+    }
+
+    const token = await this.repo.getEmailVerificationTokenByHash(hash);
+    if (!token || !live(token)) throw invalid();
+    const user = await this.repo.getUser(token.userId);
+    if (!user) throw invalid();
+    await this.repo.updateEmailVerificationToken({ ...token, usedAt: now() });
+    await this.repo.invalidateEmailVerificationTokensForUser(user.id, now());
+    // Already verified is a no-op, not a refusal: two taps on the same link in a
+    // mail client must not read as an error to a parent.
+    const verified = user.emailVerifiedAt ? user : await this.repo.updateUser({ ...user, emailVerifiedAt: now() });
+    await this.registerEmailEndpoint(verified);
+    return { user: verified, created: false };
   }
 
   // --- password reset ------------------------------------------------------

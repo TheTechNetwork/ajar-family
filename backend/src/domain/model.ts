@@ -34,6 +34,13 @@ export interface User {
   passwordHash?: string;
   /** Bumped on logout / password change to revoke every outstanding token. */
   tokenVersion: number;
+  /**
+   * When the person holding this address proved they hold it. Absent means "not
+   * proved" — including for every account created before verification existed,
+   * which is why nothing is gated on it (see docs/SECURITY.md). Accounts created
+   * through the verify-then-create flow are verified from their first moment.
+   */
+  emailVerifiedAt?: string;
   createdAt: string;
 }
 
@@ -186,6 +193,42 @@ export interface NotificationEndpoint {
 export interface PasswordResetToken {
   id: string;
   userId: string;
+  /** base64url(SHA-256(rawToken)) — never the raw token. */
+  tokenHash: string;
+  expiresAt: string;
+  createdAt: string;
+  usedAt?: string;
+}
+
+/**
+ * A single-use grant proving an address belongs to whoever asked. Same discipline
+ * as PasswordResetToken: only base64url(SHA-256(raw)) is stored, so the table is
+ * not a set of ready-made confirmations.
+ */
+export interface EmailVerificationToken {
+  id: string;
+  userId: string;
+  /** base64url(SHA-256(rawToken)) — never the raw token. */
+  tokenHash: string;
+  expiresAt: string;
+  createdAt: string;
+  usedAt?: string;
+}
+
+/**
+ * A sign-up that has been ASKED FOR but not yet proved. No `users` row exists
+ * yet — that is the whole point: `POST /v1/auth/register` answers identically
+ * whether or not the address is already taken, so it cannot be used to test who
+ * has an account, and the account only comes into being when someone opens the
+ * link in that inbox. The password is stored already hashed (never in the clear,
+ * not even for the hour this row lives), and the token only as its SHA-256.
+ */
+export interface PendingRegistration {
+  id: string;
+  email: string;
+  displayName: string;
+  /** PBKDF2 hash of the password the person chose (auth/password.ts). */
+  passwordHash: string;
   /** base64url(SHA-256(rawToken)) — never the raw token. */
   tokenHash: string;
   expiresAt: string;

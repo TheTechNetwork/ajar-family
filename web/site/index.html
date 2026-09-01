@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ajar — say yes faster</title>
+<meta name="description" content="Block YouTube generally, then open one video in seconds. Parental controls that let you say yes, not just no.">
+<!-- `..` clamps at the server root, so this one href works both when served
+     (/parent/tokens.css) and when opened as a file (web/parent/tokens.css).
+     Linked, not inlined: only the extension pages have to duplicate the palette,
+     and every extra copy is one more place a colour can drift. -->
+<link rel="stylesheet" href="../parent/tokens.css">
+<style>
+  body { background: var(--bg); color: var(--ink); font: 16px/1.6 var(--font, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif); margin: 0; }
+  .wrap { max-width: 62rem; margin: 0 auto; padding: 0 1.25rem; }
+  a { color: var(--accent-ink); }
+
+  nav { display: flex; align-items: center; justify-content: space-between; padding: 1.25rem 0; }
+  .mark { display: flex; align-items: center; gap: .55rem; font-weight: 650; letter-spacing: -.01em; }
+  .mark svg { display: block; }
+
+  header.hero { padding: clamp(2.5rem, 8vw, 5.5rem) 0 clamp(2rem, 5vw, 3.5rem); }
+  h1 { font-size: clamp(2.2rem, 6.5vw, 3.9rem); line-height: 1.08; letter-spacing: -.03em; margin: 0 0 1rem; max-width: 18ch; }
+  .lede { font-size: clamp(1.05rem, 2.4vw, 1.3rem); color: var(--ink-2); max-width: 46ch; margin: 0 0 2rem; }
+
+  .cta { display: inline-flex; align-items: center; justify-content: center; min-height: 52px; padding: 0 1.5rem;
+         border-radius: 12px; border: 0; font: inherit; font-weight: 650; text-decoration: none; cursor: pointer; }
+  .cta-primary { background: var(--yes); color: var(--yes-ink); }
+  .cta-primary:hover { background: var(--yes-strong); }
+  .cta-quiet { background: transparent; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+  .ctas { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+
+  section { padding: clamp(2.5rem, 6vw, 4.5rem) 0; border-top: 1px solid var(--line); }
+  h2 { font-size: clamp(1.5rem, 3.4vw, 2.1rem); letter-spacing: -.02em; margin: 0 0 .75rem; max-width: 22ch; }
+  .sub { color: var(--ink-2); max-width: 52ch; margin: 0 0 2rem; }
+
+  /* The comparison is the whole product in one glance, so it gets to be big. */
+  .compare { display: grid; gap: 1rem; grid-template-columns: 1fr; }
+  @media (min-width: 40rem) { .compare { grid-template-columns: 1fr 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 1.5rem; }
+  .card h3 { margin: 0 0 .75rem; font-size: 1rem; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+  .row { display: flex; align-items: baseline; gap: .6rem; padding: .45rem 0; }
+  .row .k { font-variant-numeric: tabular-nums; }
+  .verdict { font-weight: 650; font-size: .85rem; padding: .1rem .5rem; border-radius: 999px; white-space: nowrap; }
+  .no { background: var(--surface-2); color: var(--muted); }
+  .yes { background: var(--yes); color: var(--yes-ink); }
+
+  ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 0; display: grid; gap: 1.25rem; }
+  @media (min-width: 46rem) { ol.steps { grid-template-columns: repeat(3, 1fr); gap: 2rem; } }
+  ol.steps li { counter-increment: s; }
+  ol.steps li::before { content: counter(s); display: grid; place-items: center; width: 2rem; height: 2rem;
+    border-radius: 999px; background: var(--accent-wash); color: var(--accent-ink); font-weight: 650; margin-bottom: .75rem; }
+  ol.steps h3 { margin: 0 0 .35rem; font-size: 1.05rem; }
+  ol.steps p { margin: 0; color: var(--ink-2); }
+
+  table.platforms { width: 100%; border-collapse: collapse; }
+  table.platforms th, table.platforms td { text-align: left; padding: .7rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.platforms th { color: var(--muted); font-weight: 600; font-size: .9rem; }
+  .tag { font-size: .8rem; font-weight: 650; padding: .1rem .5rem; border-radius: 999px; white-space: nowrap; }
+  .tag-live { background: var(--ok-wash); color: var(--ok); }
+  .tag-soon { background: var(--warn-wash); color: var(--warn); }
+
+  .plain { background: var(--surface-2); border-radius: 14px; padding: 1.5rem; }
+  .plain ul { margin: 0; padding-left: 1.1rem; color: var(--ink-2); }
+  .plain li + li { margin-top: .5rem; }
+
+  footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; color: var(--muted); font-size: .9rem;
+           display: flex; gap: 1.25rem; flex-wrap: wrap; justify-content: space-between; }
+  :where(a, button):focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; box-shadow: 0 0 0 2px var(--focus-halo); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <nav>
+    <span class="mark">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="5" y="3" width="14" height="18" rx="2.5" fill="var(--accent-strong)"/>
+        <path d="M7 4.4 L14.5 6 L14.5 18 L7 19.6 Z" fill="var(--bg)"/>
+        <circle cx="13" cy="12" r=".9" fill="var(--accent-strong)"/>
+      </svg>
+      Ajar
+    </span>
+    <a href="/parent/">Sign in</a>
+  </nav>
+
+  <header class="hero">
+    <h1>Say yes faster.</h1>
+    <p class="lede">
+      Every other tool gives you one switch: YouTube on, or YouTube off.
+      Ajar lets you keep it off and open <strong>one video</strong> — in about
+      the time it takes to read the title.
+    </p>
+    <div class="ctas">
+      <a class="cta cta-primary" href="/signup.html">Create your account</a>
+      <a class="cta cta-quiet" href="#how">See how it works</a>
+    </div>
+  </header>
+</div>
+
+<div class="wrap">
+  <section>
+    <h2>The difference is one video</h2>
+    <p class="sub">
+      Your kid needs a specific clip for a school project. Here is what each kind
+      of tool can actually do about it.
+    </p>
+    <div class="compare">
+      <div class="card">
+        <h3>Domain-level tools</h3>
+        <div class="row"><span class="verdict no">no</span><span class="k">Open just that video</span></div>
+        <div class="row"><span class="verdict no">no</span><span class="k">Keep the rest of YouTube closed</span></div>
+        <div class="row"><span class="verdict yes">yes</span><span class="k">Open all of YouTube for an hour</span></div>
+        <p class="sub" style="margin:1rem 0 0">
+          They see hostnames, not addresses. Letting one video through means
+          letting the whole site through, so that is what everyone does.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Ajar</h3>
+        <div class="row"><span class="verdict yes">yes</span><span class="k">Open just that video</span></div>
+        <div class="row"><span class="verdict yes">yes</span><span class="k">Keep the rest of YouTube closed</span></div>
+        <div class="row"><span class="verdict yes">yes</span><span class="k">Have it close again on its own</span></div>
+        <p class="sub" style="margin:1rem 0 0">
+          Ajar reads the whole address, so a yes can be as small as one video,
+          for thirty minutes, and nothing else moves.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <h2>Three steps, then it stays out of your way</h2>
+    <ol class="steps">
+      <li>
+        <h3>Set up their device</h3>
+        <p>You make a setup code here; they type it in once. No profiles to install, no VPN, no admin tools.</p>
+      </li>
+      <li>
+        <h3>They ask</h3>
+        <p>When something is closed, they get a page with a button — not a dead end and not a telling-off.</p>
+      </li>
+      <li>
+        <h3>You say yes</h3>
+        <p>One tap opens exactly what they asked for, for as long as you choose. It reaches their device in seconds.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Where it runs</h2>
+    <p class="sub">Honestly labelled. Anything not marked ready is not ready.</p>
+    <table class="platforms">
+      <thead><tr><th>Device</th><th>How it works</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>iPhone &amp; iPad</td><td>A content filter, approved by Apple's Family Controls. No VPN.</td><td><span class="tag tag-soon">in testing</span></td></tr>
+        <tr><td>Mac</td><td>A Safari extension plus a system-level filter.</td><td><span class="tag tag-soon">in testing</span></td></tr>
+        <tr><td>Windows</td><td>A browser extension plus a background service the child cannot stop.</td><td><span class="tag tag-soon">in testing</span></td></tr>
+        <tr><td>Your phone</td><td>Asks arrive by email; approve from any browser.</td><td><span class="tag tag-live">working now</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Plainly, before you sign up</h2>
+    <div class="plain">
+      <ul>
+        <li><strong>Ajar is in early testing.</strong> You can create an account and set up a family today, but the device apps are still going through Apple and Microsoft review.</li>
+        <li><strong>We record what your child asks to unlock — not everywhere they go.</strong> There is no browsing history in this product, because approving a request does not need one.</li>
+        <li><strong>Your email address is not verified yet.</strong> A typo means you get no notifications and cannot reset your password. Check it carefully when you sign up; verification is coming before we open to the public.</li>
+        <li><strong>Your child can see that Ajar is there.</strong> It is not hidden and it is not a monitoring tool. The whole design assumes they know, and asks them to ask.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<div class="wrap">
+  <footer>
+    <span>Ajar — open, just enough.</span>
+    <span><a href="/parent/">Sign in</a> · <a href="/signup.html">Create an account</a></span>
+  </footer>
+</div>
+
+</body>
+</html>

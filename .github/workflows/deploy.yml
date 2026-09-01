@@ -195,6 +195,33 @@ jobs:
                 *) echo "::error::/v1/signing-key did not return a public key: ${key:-<no response>}"
                    exit 1 ;;
               esac
+              # The home page and the console are served by this SAME Worker, from
+              # the [assets] block in wrangler.toml. That is not a detail: signup
+              # hands off to the console through localStorage, which is per-origin,
+              # so "the API is up" and "a parent can sign up" are only the same
+              # statement while both answer here. A deploy that serves /v1 and
+              # 404s / is one nobody can create an account on, and until these two
+              # assertions existed the smoke test reported it as a success.
+              #
+              # Same shape as the signing-key check above, and for the same
+              # reason: `curl ... | head -c 200` would take head's exit status and
+              # pass whatever curl did. --fail plus a case on the body, never a
+              # pipeline whose status comes from the last command in it.
+              home="$(curl -sS --fail "$BASE/" || true)"
+              case "$home" in
+                *"<title>Ajar"*) echo "home page served: $(printf '%s' "$home" | head -c 80)" ;;
+                *) echo "::error::/ did not serve the home page: ${home:-<no response>}"
+                   exit 1 ;;
+              esac
+              # /parent/ takes the other branch of the path mapping, and its
+              # markup references app.js RELATIVELY — so this also catches the
+              # console being served from a prefix where its assets do not load.
+              console="$(curl -sS --fail "$BASE/parent/" || true)"
+              case "$console" in
+                *'src="app.js"'*) echo "parent console served at /parent/" ;;
+                *) echo "::error::/parent/ did not serve the console: ${console:-<no response>}"
+                   exit 1 ;;
+              esac
               exit 0
             fi
             echo "attempt $i: HTTP $code — retrying"; sleep 5

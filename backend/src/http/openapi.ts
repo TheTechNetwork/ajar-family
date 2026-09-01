@@ -359,9 +359,29 @@ export const openapiDocument = {
         responses: { "200": { description: "Signed filter set or up-to-date", content: json({ oneOf: [{ $ref: "#/components/schemas/CategoryFilterAsset" }, { type: "object", properties: { upToDate: { const: true } } }] }) }, "401": errorResponses["401"] } },
     },
     "/v1/auth/register": {
-      post: { tags: ["auth"], summary: "Register a parent with a password", security: [],
+      post: { tags: ["auth"], summary: "Ask to create an account (always 202)", security: [],
+        description:
+          "Emails a single-use confirmation code, valid for 60 minutes. Responds 202 with an identical body whether or not the address already has an account — a different status would make this an account-enumeration oracle — and NO account is created here: the account comes into being when the code is redeemed at POST /v1/auth/verify, which returns the token pair. An address that already has an account is emailed a notice instead, with the same subject and no code. A 400 means the request itself was unusable (malformed body, bad address, password below the minimum) and says nothing about the address. Rate-limited.",
         requestBody: { required: true, content: json({ type: "object", properties: { email: { type: "string", format: "email" }, password: { type: "string", minLength: 8 }, displayName: { type: "string" } }, required: ["email", "password", "displayName"] }) },
-        responses: { "201": { description: "Token pair", content: json({ $ref: "#/components/schemas/TokenResponse" }) }, "400": errorResponses["400"], "409": { description: "Email already registered", content: json({ $ref: "#/components/schemas/Error" }) } } },
+        responses: { "202": { description: "Accepted (whether or not the address is known)", content: json({ type: "object", properties: { status: { const: "accepted" } } }) }, "400": errorResponses["400"], "429": { description: "Rate limited", content: json({ $ref: "#/components/schemas/Error" }) } } },
+    },
+    "/v1/auth/verify/request": {
+      post: { tags: ["auth"], summary: "Re-send a confirmation email (always 202)", security: [],
+        description: "For an account that already exists and has not confirmed its address — including every account created before this flow existed. Responds 202 whether or not the address is known, and sends nothing when there is nothing to confirm. Rate-limited.",
+        requestBody: { required: true, content: json({ type: "object", properties: { email: { type: "string", format: "email" } }, required: ["email"] }) },
+        responses: { "202": { description: "Accepted (whether or not the address is known)", content: json({ type: "object", properties: { status: { const: "accepted" } } }) }, "400": errorResponses["400"], "429": { description: "Rate limited", content: json({ $ref: "#/components/schemas/Error" }) } } },
+    },
+    "/v1/auth/verify": {
+      post: { tags: ["auth"], summary: "Confirm an email address with the emailed code", security: [],
+        description: "Single use, 60-minute TTL, stored only as a SHA-256 hash, and superseded by any newer code. For a sign-up this CREATES the account and returns 201 with a token pair, so the parent is signed straight in. For an account that already exists it records the confirmation and returns 200 with no session.",
+        requestBody: { required: true, content: json({ type: "object", properties: { token: { type: "string" } }, required: ["token"] }) },
+        responses: {
+          "200": { description: "An existing account confirmed its address", content: json({ type: "object", properties: { verified: { const: true }, userId: { type: "string" } }, required: ["verified"] }) },
+          "201": { description: "The account was created; token pair returned", content: json({ allOf: [{ $ref: "#/components/schemas/TokenResponse" }, { type: "object", properties: { verified: { const: true } } }] }) },
+          "400": errorResponses["400"],
+          "401": { description: "Invalid or expired confirmation code", content: json({ $ref: "#/components/schemas/Error" }) },
+          "409": { description: "That address already has an account", content: json({ $ref: "#/components/schemas/Error" }) },
+        } },
     },
     "/v1/auth/login": {
       post: { tags: ["auth"], summary: "Log in with email + password", security: [],
@@ -409,7 +429,8 @@ export const openapiDocument = {
     },
     "/v1/me": {
       get: { tags: ["auth"], summary: "Current user + family memberships", security: userAuth,
-        responses: { "200": { description: "Profile", content: json({ type: "object", properties: { userId: { type: "string" }, email: { type: "string" }, displayName: { type: "string" }, families: { type: "array", items: { type: "object", properties: { familyId: { type: "string" }, role: { $ref: "#/components/schemas/Role" }, family: { $ref: "#/components/schemas/Family" } } } } } }) }, "401": errorResponses["401"] } },
+        description: "`emailVerified` is reported, never enforced: an unconfirmed account keeps every capability, because every account created before this flow existed is unconfirmed. Use it to prompt, not to gate.",
+        responses: { "200": { description: "Profile", content: json({ type: "object", properties: { userId: { type: "string" }, email: { type: "string" }, displayName: { type: "string" }, emailVerified: { type: "boolean", description: "Whether the address has been proved to belong to this person." }, emailVerifiedAt: { type: "string", format: "date-time", description: "When it was proved. Absent = never." }, families: { type: "array", items: { type: "object", properties: { familyId: { type: "string" }, role: { $ref: "#/components/schemas/Role" }, family: { $ref: "#/components/schemas/Family" } } } } } }) }, "401": errorResponses["401"] } },
     },
     "/v1/families": {
       post: { tags: ["families"], summary: "Create a family (caller becomes OWNER)", security: userAuth,

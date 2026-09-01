@@ -12,7 +12,7 @@ import type {
   AccessRequest, ApprovalDecision, AuditEvent, NotificationEndpoint,
   PolicyRule, TemporaryRule, DefaultPolicy, RuleScope, Role, Platform,
   RuleAction, PolicyTargetType, ApprovalScope, ApprovalDuration,
-  CategoryDomain, PasswordResetToken, TemporaryGrant,
+  CategoryDomain, PasswordResetToken, EmailVerificationToken, PendingRegistration, TemporaryGrant,
 } from "../../domain/model.js";
 
 const s = (v: unknown) => (v == null ? null : String(v));
@@ -41,13 +41,14 @@ export class SqlStore implements Repository {
 
   // users
   async createUser(u: User) {
-    await this.db.run("INSERT INTO users(id,email,display_name,password_hash,token_version,created_at) VALUES(?,?,?,?,?,?)",
-      [u.id, u.email, u.displayName, u.passwordHash ?? null, u.tokenVersion, u.createdAt]);
+    await this.db.run(
+      "INSERT INTO users(id,email,display_name,password_hash,token_version,created_at,email_verified_at) VALUES(?,?,?,?,?,?,?)",
+      [u.id, u.email, u.displayName, u.passwordHash ?? null, u.tokenVersion, u.createdAt, s(u.emailVerifiedAt)]);
     return u;
   }
   async updateUser(u: User) {
-    await this.db.run("UPDATE users SET email=?, display_name=?, password_hash=?, token_version=? WHERE id=?",
-      [u.email, u.displayName, u.passwordHash ?? null, u.tokenVersion, u.id]);
+    await this.db.run("UPDATE users SET email=?, display_name=?, password_hash=?, token_version=?, email_verified_at=? WHERE id=?",
+      [u.email, u.displayName, u.passwordHash ?? null, u.tokenVersion, s(u.emailVerifiedAt), u.id]);
     return u;
   }
   async getUser(id: string) { return this.mapUser(await this.db.get("SELECT * FROM users WHERE id=?", [id])); }
@@ -57,6 +58,7 @@ export class SqlStore implements Repository {
       id: r.id as string, email: r.email as string, displayName: r.display_name as string,
       passwordHash: (r.password_hash as string | null) ?? undefined,
       tokenVersion: Number(r.token_version ?? 0), createdAt: r.created_at as string,
+      emailVerifiedAt: (r.email_verified_at as string | null) ?? undefined,
     } : null;
   }
 
@@ -103,6 +105,57 @@ export class SqlStore implements Repository {
   private mapReset(r: SqlRow | null): PasswordResetToken | null {
     return r ? {
       id: r.id as string, userId: r.user_id as string, tokenHash: r.token_hash as string,
+      expiresAt: r.expires_at as string, createdAt: r.created_at as string,
+      usedAt: (r.used_at as string | null) ?? undefined,
+    } : null;
+  }
+
+  // email verification tokens
+  async createEmailVerificationToken(t: EmailVerificationToken) {
+    await this.db.run(
+      "INSERT INTO email_verification_tokens(id,user_id,token_hash,expires_at,created_at,used_at) VALUES(?,?,?,?,?,?)",
+      [t.id, t.userId, t.tokenHash, t.expiresAt, t.createdAt, s(t.usedAt)]);
+    return t;
+  }
+  async getEmailVerificationTokenByHash(tokenHash: string) {
+    return this.mapVerify(await this.db.get("SELECT * FROM email_verification_tokens WHERE token_hash=?", [tokenHash]));
+  }
+  async updateEmailVerificationToken(t: EmailVerificationToken) {
+    await this.db.run("UPDATE email_verification_tokens SET used_at=? WHERE id=?", [s(t.usedAt), t.id]);
+    return t;
+  }
+  async invalidateEmailVerificationTokensForUser(userId: string, at: string) {
+    await this.db.run("UPDATE email_verification_tokens SET used_at=? WHERE user_id=? AND used_at IS NULL", [at, userId]);
+  }
+  private mapVerify(r: SqlRow | null): EmailVerificationToken | null {
+    return r ? {
+      id: r.id as string, userId: r.user_id as string, tokenHash: r.token_hash as string,
+      expiresAt: r.expires_at as string, createdAt: r.created_at as string,
+      usedAt: (r.used_at as string | null) ?? undefined,
+    } : null;
+  }
+
+  // pending registrations
+  async createPendingRegistration(p: PendingRegistration) {
+    await this.db.run(
+      "INSERT INTO pending_registrations(id,email,display_name,password_hash,token_hash,expires_at,created_at,used_at) VALUES(?,?,?,?,?,?,?,?)",
+      [p.id, p.email, p.displayName, p.passwordHash, p.tokenHash, p.expiresAt, p.createdAt, s(p.usedAt)]);
+    return p;
+  }
+  async getPendingRegistrationByHash(tokenHash: string) {
+    return this.mapPending(await this.db.get("SELECT * FROM pending_registrations WHERE token_hash=?", [tokenHash]));
+  }
+  async updatePendingRegistration(p: PendingRegistration) {
+    await this.db.run("UPDATE pending_registrations SET used_at=? WHERE id=?", [s(p.usedAt), p.id]);
+    return p;
+  }
+  async invalidatePendingRegistrationsForEmail(email: string, at: string) {
+    await this.db.run("UPDATE pending_registrations SET used_at=? WHERE email=? AND used_at IS NULL", [at, email]);
+  }
+  private mapPending(r: SqlRow | null): PendingRegistration | null {
+    return r ? {
+      id: r.id as string, email: r.email as string, displayName: r.display_name as string,
+      passwordHash: r.password_hash as string, tokenHash: r.token_hash as string,
       expiresAt: r.expires_at as string, createdAt: r.created_at as string,
       usedAt: (r.used_at as string | null) ?? undefined,
     } : null;

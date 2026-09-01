@@ -21,8 +21,8 @@
  */
 
 import { normalizeYouTube, youTubePolicyKey } from "./youtube-normalize.js";
-import { getConfig, startPolicySync, startCategoryFilterSync, postAccessRequest } from "./backend-client.js";
-import { verifySnapshotSignature } from "./policy-verify.js";
+import { getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest } from "./backend-client.js";
+import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
 import { makeResolver } from "./cname-resolve.js";
 
 // On-device CNAME resolver (anti-cloaking); async + cached, read synchronously.
@@ -42,25 +42,78 @@ let BACKEND_MODE = false;
 /** @type {any|null} A DevicePolicySnapshot per shared/policy/policy-model.ts. */
 let snapshot = null;
 
-async function loadSnapshot() {
+/**
+ * Restore cached policy.
+ *
+ * SECURITY: browser.storage.local lives in the child's own profile and is
+ * therefore writable by anyone at the machine. Adopting whatever is in it (as
+ * this used to) means hand-editing the cache to an allow-all policy is enough —
+ * no signature needed, no server needed. So the cached snapshot and the cached
+ * category filters are re-verified against the PINNED signing key on every load
+ * and discarded if they don't check out. Same contract as the Windows mirror.
+ *
+ * "Pinned" is literal: the key comes from the trust anchor set at enrollment
+ * (trust-anchor.js), not from the config the options page rewrites.
+ */
+export async function restoreCachedPolicy() {
   try {
     const got = await browser.storage.local.get([STORAGE_KEY, "categoryFilters"]);
-    snapshot = got?.[STORAGE_KEY] ?? null;
-    if (got?.categoryFilters) setCategoryFilters(got.categoryFilters); // restore compact filters
+    const key = await getVerifyingKey();
+
+    if (got?.[STORAGE_KEY] && key && await verifySnapshotSignature(got[STORAGE_KEY], key)) {
+      snapshot = got[STORAGE_KEY];
+    } else {
+      if (got?.[STORAGE_KEY]) {
+        console.warn("[guard] discarding cached snapshot: signature invalid or no pinned key");
+        await browser.storage.local.remove(STORAGE_KEY);
+      }
+      snapshot = null;
+    }
+
+    const cached = got?.categoryFilters;
+    if (cached && key
+        && await verifyCanonicalSignature(cached.set ?? cached, cached.signature ?? "", key)) {
+      setCategoryFilters(cached.set ?? cached);
+    } else if (cached) {
+      await browser.storage.local.remove("categoryFilters");
+    }
   } catch (e) {
     // Fail closed for YouTube gating if we can't read policy (see evaluate()).
     console.warn("[guard] could not load snapshot:", e);
     snapshot = null;
   }
+  return snapshot;   // returned so tools/conformance/ can assert what was adopted
 }
 
-// React to snapshot updates written by the native-host bridge below (B4).
-browser.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes[STORAGE_KEY]) {
-    snapshot = changes[STORAGE_KEY].newValue ?? null;
+/** Adopt a snapshot only if it carries a signature from the pinned key. */
+async function adoptSnapshotIfVerified(next) {
+  const key = await getVerifyingKey();
+  if (key && await verifySnapshotSignature(next, key)) snapshot = next;
+  else console.warn("[guard] ignoring a cached snapshot that is not signed by the pinned key");
+}
+
+/** Same, for the category filter set. */
+async function adoptFiltersIfVerified(next) {
+  const key = await getVerifyingKey();
+  if (key && await verifyCanonicalSignature(next.set ?? next, next.signature ?? "", key)) {
+    setCategoryFilters(next.set ?? next);
   }
-  if (area === "local" && changes.categoryFilters) {
-    setCategoryFilters(changes.categoryFilters.newValue ?? null);
+}
+
+// React to snapshot updates written by the native-host bridge below (B4), and to
+// anything else that writes the cache — verified either way, since "something
+// wrote our storage key" is not evidence of where it came from.
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes[STORAGE_KEY]) {
+    const next = changes[STORAGE_KEY].newValue ?? null;
+    if (!next) snapshot = null;
+    else adoptSnapshotIfVerified(next);
+  }
+  if (changes.categoryFilters) {
+    const next = changes.categoryFilters.newValue ?? null;
+    if (!next) setCategoryFilters(null);
+    else adoptFiltersIfVerified(next);
   }
 });
 
@@ -84,8 +137,8 @@ function connectNative() {
         // Fail closed: verify the Ed25519 signature before trusting a snapshot
         // from the native host (a local process could otherwise inject an
         // allow-all policy). Same check as the backend path in backend-client.js.
-        const cfg = await getConfig();
-        if (!cfg.signingKeyB64 || !(await verifySnapshotSignature(msg.snapshot, cfg.signingKeyB64))) {
+        const key = await getVerifyingKey();
+        if (!key || !(await verifySnapshotSignature(msg.snapshot, key))) {
           console.warn("[guard] rejected native snapshot: missing key or bad signature");
           return;
         }
@@ -405,7 +458,7 @@ function blockedPageUrl(originalUrl, key) {
 // Full navigations (top frame). SPA route changes come via content.js below.
 browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
   if (details.frameId !== 0) return; // top-level only for redirects
-  if (!snapshot) await loadSnapshot();
+  if (!snapshot) await restoreCachedPolicy();
   const { blocked, key } = decide(details.url);
   if (blocked) {
     try {
@@ -421,7 +474,7 @@ browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
 // ---------------------------------------------------------------------------
 
 browser.runtime.onMessage.addListener(async (msg, sender) => {
-  if (!snapshot) await loadSnapshot();
+  if (!snapshot) await restoreCachedPolicy();
 
   if (msg?.type === "EVALUATE_URL") {
     // content.js observed an in-page (pushState/replaceState/popstate) route
@@ -461,7 +514,7 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
 });
 
 // Prime the cache and select the policy source on worker start.
-loadSnapshot();
+restoreCachedPolicy();
 getConfig().then((cfg) => {
   if (cfg.backendUrl && cfg.deviceToken) {
     BACKEND_MODE = true;
@@ -470,9 +523,10 @@ getConfig().then((cfg) => {
       snapshot = snap;
       await browser.storage.local.set({ [STORAGE_KEY]: snap });
     });
-    startCategoryFilterSync(async (set) => {
+    startCategoryFilterSync(async (set, signature) => {
       setCategoryFilters(set);
-      await browser.storage.local.set({ categoryFilters: set });
+      // Store the signature with the set so the next load can re-check it.
+      await browser.storage.local.set({ categoryFilters: { set, signature: signature ?? "" } });
     });
   } else {
     connectNative();

@@ -69,8 +69,16 @@ struct SetUpView: View {
                 TextField("Setup code", text: $code)
                     .font(.system(size: 28, weight: .bold, design: .monospaced))
                     .multilineTextAlignment(.center)
+                    // NOT .numberPad. Codes are drawn from
+                    // ABCDEFGHJKLMNPQRSTUVWXYZ23456789 (services.ts CODE_ALPHABET),
+                    // so an 8-character code almost always contains letters and a
+                    // number pad cannot type it — step one of the product, dead on
+                    // the primary platform. Uppercase because the server matches
+                    // the code exactly.
                     #if os(iOS)
-                    .keyboardType(.numberPad)
+                    .keyboardType(.asciiCapable)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
                     #endif
                     .padding(.vertical, 20)
                     .frame(maxWidth: .infinity)

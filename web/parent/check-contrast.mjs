@@ -81,7 +81,9 @@ const PAIRS = [
   ["yes-ink", "yes", TEXT, "the approve button label"],
   ["yes-ink", "yes-strong", TEXT, "approve button label, hover"],
   ["warn", "surface", TEXT, "the asked / waiting status word"],
+  ["warn", "warn-wash", TEXT, "the waiting word on its own panel / status pill"],
   ["err", "surface", TEXT, "error text"],
+  ["err", "err-wash", TEXT, "error text on its own panel"],
   ["ok", "ok-wash", TEXT, "the done word on its success panel"],
   // SC 1.4.11 — boundaries and focus indicators, not text.
   ["field-line", "surface", UI, "input / select / secondary-button border"],

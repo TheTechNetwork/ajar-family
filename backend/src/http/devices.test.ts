@@ -31,8 +31,9 @@ interface Ctx { app: App; r: ReturnType<typeof buildRouter>; parent: string; fam
 async function fixture(): Promise<Ctx> {
   const app = await App.create({ config: { authSecret: "test" } });
   const r = buildRouter(app);
-  const reg = await call(r, "POST", "/v1/auth/register", { email: "d@e.com", password: "correct-horse", displayName: "D" });
-  const parent = (reg.body as { accessToken: string }).accessToken;
+  await app.auth.register("d@e.com", "correct-horse", "D");
+  const parent = ((await call(r, "POST", "/v1/auth/login", { email: "d@e.com", password: "correct-horse" }))
+    .body as { accessToken: string }).accessToken;
   const fam = (await call(r, "POST", "/v1/families", { name: "F" }, parent)).body as { id: string };
   const child = (await call(r, "POST", `/v1/families/${fam.id}/children`, { displayName: "Kid" }, parent)).body as { id: string };
   const code = (await call(r, "POST", `/v1/families/${fam.id}/enroll`, { childId: child.id, platform: "WINDOWS" }, parent)).body as { code: string };
@@ -148,8 +149,9 @@ test("deleting a child erases their devices, policy, grants and requests", async
 
 test("a non-member can neither see nor delete another family's devices", async () => {
   const c = await fixture();
-  const outsider = (await call(c.r, "POST", "/v1/auth/register",
-    { email: "out@e.com", password: "correct-horse", displayName: "Out" })).body as { accessToken: string };
+  await c.app.auth.register("out@e.com", "correct-horse", "Out");
+  const outsider = (await call(c.r, "POST", "/v1/auth/login",
+    { email: "out@e.com", password: "correct-horse" })).body as { accessToken: string };
   assert.equal((await call(c.r, "GET", `/v1/families/${c.famId}/devices`, undefined, outsider.accessToken)).status, 403);
   assert.equal((await call(c.r, "DELETE", `/v1/families/${c.famId}/devices/${c.deviceId}`, undefined, outsider.accessToken)).status, 403);
   assert.equal((await call(c.r, "DELETE", `/v1/families/${c.famId}/children/${c.childId}`, undefined, outsider.accessToken)).status, 403);

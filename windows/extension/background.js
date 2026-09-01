@@ -20,7 +20,7 @@
  */
 
 import { normalizeYouTube, youTubePolicyKey, isPlaybackSupportUrl } from "./youtube-normalize.js";
-import { getConfig, startPolicySync, startCategoryFilterSync, postAccessRequest } from "./backend-client.js";
+import { getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest } from "./backend-client.js";
 import { makeResolver } from "./cname-resolve.js";
 import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
 
@@ -72,7 +72,7 @@ function connectNativeHost() {
       } else if (msg && msg.type === "categoryFilters" && msg.set) {
         // The service verifies the asset's Ed25519 signature (signCanonical over
         // the set) before forwarding — same fail-closed contract as snapshots.
-        applyCategoryFilters(msg.set);
+        applyCategoryFilters(msg.set, msg.signature);
       }
     });
     port.onDisconnect.addListener(() => {
@@ -97,10 +97,12 @@ function applySnapshot(snapshot, serverNowMs) {
   reevaluateOpenTabs(); // an approval just landed — reopen what it unblocked
 }
 
-/** Install + persist a verified category filter set (from native host or backend). */
-function applyCategoryFilters(rawSet) {
+/** Install + persist a verified category filter set (from native host or backend).
+ *  The signature is stored WITH the set so restoreCachedPolicy() can re-check it;
+ *  a set cached without one is discarded on the next load (fail closed). */
+function applyCategoryFilters(rawSet, signature) {
   setCategoryFilters(rawSet);
-  chrome.storage.local.set({ categoryFilters: rawSet });
+  chrome.storage.local.set({ categoryFilters: { set: rawSet, signature: signature ?? "" } });
 }
 
 /** True once we've finished loading cached policy (or established there is none).
@@ -115,16 +117,19 @@ let POLICY_READY = false;
  * child could hand-edit the cache to an allow-all policy and we would enforce it.
  * So the cached snapshot and the cached category filters are re-verified against
  * the pinned signing key on EVERY load, and discarded if they don't check out.
+ *
+ * "Pinned" is now literal: the key comes from the trust anchor set at enrollment
+ * (trust-anchor.js), not from the config the options page rewrites.
  */
-async function restoreCachedPolicy() {
+export async function restoreCachedPolicy() {
   try {
     const v = await chrome.storage.local.get(["snapshot", "clockAnchor", "categoryFilters"]);
-    const cfg = await getConfig();
-    const key = cfg.signingKeyB64;
+    const key = await getVerifyingKey();
     if (v?.snapshot && key && await verifySnapshotSignature(v.snapshot, key)) {
       SNAPSHOT = v.snapshot;
     } else if (v?.snapshot) {
       console.warn("[ajar] discarding cached snapshot: signature invalid or no pinned key");
+      SNAPSHOT = null;   // hold nothing rather than hold something unverified
       await chrome.storage.local.remove("snapshot");
     }
     if (v?.categoryFilters && key
@@ -146,6 +151,7 @@ async function restoreCachedPolicy() {
     POLICY_READY = true;
     reevaluateOpenTabs(); // close the cold-start window immediately
   }
+  return SNAPSHOT;   // returned so tools/conformance/ can assert what was adopted
 }
 restoreCachedPolicy();
 
@@ -194,7 +200,7 @@ getConfig().then((cfg) => {
   if (cfg.backendUrl && cfg.deviceToken) {
     BACKEND_MODE = true;
     startPolicySync((snapshot, serverNowMs) => applySnapshot(snapshot, serverNowMs));
-    startCategoryFilterSync((set) => applyCategoryFilters(set));
+    startCategoryFilterSync((set, signature) => applyCategoryFilters(set, signature));
   } else {
     connectNativeHost();
   }

@@ -1,6 +1,12 @@
 /**
- * Auth flow through the real router: register -> login -> authed request ->
- * refresh -> logout revokes -> password change. Self-contained passwords, no IdP.
+ * Auth flow through the real router: login -> authed request -> refresh ->
+ * logout revokes -> password change. Self-contained passwords, no IdP.
+ *
+ * Accounts are created here with `app.auth.register`, the account-creation
+ * primitive. The HTTP sign-up path no longer hands back tokens at all — it
+ * answers 202 and emails a link, because a 201-vs-409 split told anyone who
+ * asked which addresses have accounts. That path has its own file:
+ * auth-verify.test.ts.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -18,22 +24,21 @@ function call(router: ReturnType<typeof buildRouter>, method: string, path: stri
   return router.handle(req);
 }
 
-test("password auth: register, login, refresh, revoke on logout", async () => {
+test("password auth: sign in, refresh, revoke on logout", async () => {
   const app = await App.create({ config: { authSecret: "test" } });
   const r = buildRouter(app);
 
-  // Register requires a password of adequate length.
+  // Sign-up still refuses a password too short to be worth hashing, and says so
+  // without depending on whether the address is known.
   const short = await call(r, "POST", "/v1/auth/register", { email: "p@e.com", password: "short", displayName: "P" });
   assert.equal(short.status, 400, "too-short password rejected");
 
-  const reg = await call(r, "POST", "/v1/auth/register", { email: "p@e.com", password: "correct-horse", displayName: "P" });
-  assert.equal(reg.status, 201);
-  const tokens = reg.body as { accessToken: string; refreshToken: string; tokenType: string };
+  await app.auth.register("p@e.com", "correct-horse", "P");
+  const first = await call(r, "POST", "/v1/auth/login", { email: "p@e.com", password: "correct-horse" });
+  assert.equal(first.status, 200);
+  const tokens = first.body as { accessToken: string; refreshToken: string; tokenType: string };
   assert.equal(tokens.tokenType, "Bearer");
   assert.ok(tokens.accessToken && tokens.refreshToken);
-
-  // Duplicate registration conflicts.
-  assert.equal((await call(r, "POST", "/v1/auth/register", { email: "p@e.com", password: "another-one", displayName: "P" })).status, 409);
 
   // Wrong password is rejected; correct one logs in.
   assert.equal((await call(r, "POST", "/v1/auth/login", { email: "p@e.com", password: "nope" })).status, 401);
@@ -51,8 +56,8 @@ test("password auth: register, login, refresh, revoke on logout", async () => {
   const access2 = (refresh.body as { accessToken: string }).accessToken;
   assert.equal((await call(r, "GET", "/v1/me", undefined, access2)).status, 200);
 
-  // Per-device logout revokes ONLY the current session. `access` is the login
-  // session; logging it out must NOT kill the separate register session.
+  // Per-device logout revokes ONLY the current session. `access` is the second
+  // sign-in; logging it out must NOT kill the first one.
   assert.equal((await call(r, "POST", "/v1/auth/logout", undefined, access)).status, 200);
   assert.equal((await call(r, "GET", "/v1/me", undefined, access)).status, 401, "this device's token revoked");
   assert.equal((await call(r, "GET", "/v1/me", undefined, access2)).status, 200, "the other session survives");
@@ -66,7 +71,7 @@ test("password auth: register, login, refresh, revoke on logout", async () => {
 test("per-device sessions: list and remotely revoke one device", async () => {
   const app = await App.create({ config: { authSecret: "test" } });
   const r = buildRouter(app);
-  await call(r, "POST", "/v1/auth/register", { email: "s@e.com", password: "correct-horse", displayName: "S" });
+  await app.auth.register("s@e.com", "correct-horse", "S");
 
   // Two logins = two sessions ("phone" and "laptop" via X-Device-Label).
   const login = (label: string) => r.handle({
@@ -79,7 +84,7 @@ test("per-device sessions: list and remotely revoke one device", async () => {
 
   // The phone lists both sessions and sees which one is current.
   const list = (await call(r, "GET", "/v1/me/sessions", undefined, phone.accessToken)).body as Array<{ id: string; label: string; current: boolean }>;
-  assert.ok(list.length >= 2, "phone + laptop sessions listed (plus the register session)");
+  assert.ok(list.length >= 2, "phone + laptop sessions are both listed");
   assert.equal(list.filter((s) => s.current).length, 1, "exactly one session is current");
   const laptopId = list.find((s) => s.label === "Laptop")!.id;
 
@@ -92,8 +97,9 @@ test("per-device sessions: list and remotely revoke one device", async () => {
 test("password change verifies the current password and revokes old sessions", async () => {
   const app = await App.create({ config: { authSecret: "test" } });
   const r = buildRouter(app);
-  const reg = await call(r, "POST", "/v1/auth/register", { email: "c@e.com", password: "first-password", displayName: "C" });
-  const access = (reg.body as { accessToken: string }).accessToken;
+  await app.auth.register("c@e.com", "first-password", "C");
+  const access = ((await call(r, "POST", "/v1/auth/login", { email: "c@e.com", password: "first-password" }))
+    .body as { accessToken: string }).accessToken;
 
   // Wrong current password rejected.
   assert.equal((await call(r, "POST", "/v1/auth/password", { currentPassword: "wrong", newPassword: "second-password" }, access)).status, 401);

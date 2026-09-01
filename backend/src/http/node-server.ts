@@ -8,7 +8,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve, normalize, join, extname, dirname } from "node:path";
+import { resolve, normalize, join, extname, dirname, sep } from "node:path";
 import type { App } from "../app.js";
 import { buildRouter } from "./api.js";
 import { corsHeaders, type HttpRequest, type Router } from "./router.js";
@@ -20,6 +20,14 @@ const CORS_HEADERS = corsHeaders(process.env.ALLOWED_ORIGIN);
 // disables static serving). Otherwise pick the first directory that exists among
 // the repo layout (run from backend/) and locations beside a shipped binary, so
 // the single-executable release (backend + a web/ folder) just works.
+//
+// TWO surfaces are served, and they must stay on ONE origin: the marketing +
+// signup site at `/` and the console at `/parent/`. Signup writes the same
+// localStorage keys the console reads, and localStorage is per-origin — split
+// them across hosts and a parent finishes signing up only to land on a login
+// screen. The console moved from `/` to `/parent/` rather than the other way
+// round because its markup references `app.js` and `tokens.css` RELATIVELY, so
+// it keeps working under a prefix while the site could not.
 function resolveUiDir(): string {
   if (process.env.PARENT_UI_DIR !== undefined) {
     return process.env.PARENT_UI_DIR ? resolve(process.env.PARENT_UI_DIR) : "";
@@ -36,6 +44,8 @@ function resolveUiDir(): string {
   return "";
 }
 const UI_DIR = resolveUiDir();
+/** The site lives beside the console. Empty when the console dir is unknown. */
+const SITE_DIR = UI_DIR ? resolve(UI_DIR, "..", "site") : "";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -43,19 +53,41 @@ const MIME: Record<string, string> = {
   ".png": "image/png", ".ico": "image/x-icon", ".webmanifest": "application/manifest+json",
 };
 
+export type Served = { body: Buffer; full: string };
+
+/** Read one file from `dir`, refusing anything the relative path escapes to. */
+export async function readUnder(dir: string, rel: string): Promise<Served | null> {
+  if (!dir) return null;
+  const full = normalize(join(dir, rel));
+  // Compare against dir + separator. Without it a sibling directory whose name
+  // merely STARTS with dir's — /web/site-old against /web/site — passes.
+  if (full !== dir && !full.startsWith(dir.endsWith(sep) ? dir : dir + sep)) return null;
+  try {
+    return { body: await readFile(full), full };
+  } catch {
+    return null;
+  }
+}
+
 async function tryServeStatic(pathname: string, nres: ServerResponse): Promise<boolean> {
   if (!UI_DIR) return false;
-  const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
-  const full = normalize(join(UI_DIR, rel));
-  if (!full.startsWith(UI_DIR)) return false; // path-traversal guard
-  try {
-    const body = await readFile(full);
-    nres.writeHead(200, { "content-type": MIME[extname(full)] ?? "application/octet-stream", ...CORS_HEADERS });
-    nres.end(body);
-    return true;
-  } catch {
-    return false;
+
+  // The console keeps its own prefix so its relative asset paths still resolve.
+  const consolePath = pathname === "/parent" ? "/parent/" : pathname;
+  let hit: Served | null;
+  if (consolePath.startsWith("/parent/")) {
+    hit = await readUnder(UI_DIR, consolePath.slice("/parent/".length) || "index.html");
+  } else {
+    const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+    // Site first, then the console dir — so a deep link to a console asset that
+    // predates the /parent/ prefix still resolves instead of 404ing.
+    hit = (await readUnder(SITE_DIR, rel)) ?? (await readUnder(UI_DIR, rel));
   }
+  if (!hit) return false;
+
+  nres.writeHead(200, { "content-type": MIME[extname(hit.full)] ?? "application/octet-stream", ...CORS_HEADERS });
+  nres.end(hit.body);
+  return true;
 }
 
 function routeApi(nreq: IncomingMessage, nres: ServerResponse, router: Router) {

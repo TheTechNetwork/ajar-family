@@ -43,6 +43,7 @@ async function main(): Promise<void> {
       mailToken: process.env.MAIL_TOKEN,
       mailFrom: process.env.MAIL_FROM,
       resetUrlBase: process.env.PASSWORD_RESET_URL,
+      verifyUrlBase: process.env.VERIFY_EMAIL_URL,
     },
     // Follow CNAME chains for category lookups via the host's system resolver.
     cnameResolver: new NodeCnameResolver(),
@@ -61,7 +62,9 @@ async function main(): Promise<void> {
     }
     if (!process.env.MAIL_ENDPOINT || !process.env.MAIL_TOKEN) {
       // eslint-disable-next-line no-console
-      console.log("WARNING: MAIL_ENDPOINT/MAIL_TOKEN are unset — nobody will receive request or password-reset emails.");
+      console.log("WARNING: MAIL_ENDPOINT/MAIL_TOKEN are unset — nobody will receive request or password-reset emails,");
+      // eslint-disable-next-line no-console
+      console.log("         and NOBODY CAN SIGN UP: creating an account needs the confirmation link we cannot send.");
     }
   });
 }
