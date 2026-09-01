@@ -17,14 +17,14 @@ function recorder() {
 
 test("sends with the field names the binding actually reads", async () => {
   const { sent, binding } = recorder();
-  await new WorkersEmailSender(binding, "no-reply@ajar.family")
+  await new WorkersEmailSender(binding, "noreply@app.ajar.family")
     .send({ to: "parent@example.com", subject: "Confirm your address", text: "code 123456" });
 
   assert.equal(sent.length, 1);
   // from/to/subject/text — the documented shape. A typo in any one of these
   // throws at the provider, not at compile time.
   assert.deepEqual(sent[0], {
-    from: "no-reply@ajar.family",
+    from: "noreply@app.ajar.family",
     to: "parent@example.com",
     subject: "Confirm your address",
     text: "code 123456",
@@ -33,7 +33,7 @@ test("sends with the field names the binding actually reads", async () => {
 
 test("sends no HTML at all", async () => {
   const { sent, binding } = recorder();
-  await new WorkersEmailSender(binding, "no-reply@ajar.family")
+  await new WorkersEmailSender(binding, "noreply@app.ajar.family")
     .send({ to: "p@example.com", subject: "s", text: "t" });
   // Deliberate, and the same choice FetchMailSender documents: a remote image in
   // an HTML mail is a read receipt on a message about someone's child.

@@ -178,8 +178,11 @@ company that can read every subject line, and every subject line here concerns a
 specific child. Two things to do once, in the dashboard:
 
 1. **Onboard the sending domain** under Email → Domains, and set `MAIL_FROM` to
-   an address on it. Cloudflare will suggest a subdomain such as
-   `app.ajar.family`; whichever you pick, `MAIL_FROM` must match.
+   an address on it. For this project that is **`app.ajar.family`** — the apex is
+   not onboarded — so `MAIL_FROM = "noreply@app.ajar.family"`. The two have to
+   agree and nothing in CI can check that they do: a mismatch fails per-send with
+   `E_SENDER_NOT_VERIFIED`, never at startup, so the first symptom is a parent
+   waiting for a code that was never sent.
 2. **Confirm the account is on the Workers paid plan.** Email Sending has been
    in public beta since 2026-04-16 and is a paid-plan feature.
 

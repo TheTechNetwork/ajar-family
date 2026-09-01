@@ -80,7 +80,8 @@ export interface FetchMailSenderOptions {
   endpoint: string;
   /** Bearer credential for the endpoint. */
   token: string;
-  /** From address, e.g. "Ajar <no-reply@ajar.family>". */
+  /** From address, e.g. "Ajar <noreply@app.ajar.family>" — app.ajar.family
+   *  is the subdomain onboarded for sending, not the apex. */
   from?: string;
   /** Injectable for tests; defaults to the runtime's global fetch. */
   fetchImpl?: typeof fetch;
@@ -102,7 +103,7 @@ export class FetchMailSender implements MailSender {
   constructor(private opts: FetchMailSenderOptions) {
     if (!opts.endpoint || !opts.token) throw new Error("FetchMailSender requires endpoint and token");
     this.fetchImpl = opts.fetchImpl ?? ((...a: Parameters<typeof fetch>) => globalThis.fetch(...a));
-    this.from = opts.from ?? "Ajar <no-reply@ajar.family>";
+    this.from = opts.from ?? "Ajar <noreply@app.ajar.family>";
     this.timeoutMs = opts.timeoutMs ?? 10_000;
   }
 
