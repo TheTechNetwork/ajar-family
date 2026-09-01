@@ -251,23 +251,31 @@ struct RequestStatusView: View {
         }
     }
 
+    // `.answered` means the POLICY CHANGED, not that a parent said yes — the
+    // long poll wakes on any version bump, and a refusal bumps it too
+    // (services.ts decide(), BLOCK branch). So a denied child was shown a green
+    // wash and a checkmark: an affirmative signal, which a young child reads
+    // before the words, followed by the same wall. The copy was already careful
+    // here ("NOT 'You're in'"); the icon was never brought into line with it.
+    //
+    // Neutral until the device can be told the actual decision.
     private var circleFill: Color {
         switch controller.requestState {
-        case .answered: return Ajar.okWash
+        case .answered: return Ajar.surface2
         case .failed:   return Ajar.surface2
         default:        return Ajar.warnWash
         }
     }
     private var symbolColor: Color {
         switch controller.requestState {
-        case .answered: return Ajar.ok
+        case .answered: return Ajar.ink2
         case .failed:   return Ajar.muted
         default:        return Ajar.warn
         }
     }
     private var symbol: String {
         switch controller.requestState {
-        case .answered: return "checkmark"
+        case .answered: return "arrow.clockwise"
         case .failed:   return "arrow.clockwise"
         default:        return "clock"
         }
@@ -280,7 +288,7 @@ struct RequestStatusView: View {
         // NOT "You're in": the long poll returns on any policy change, and the
         // backend does not report the decision to the device yet. Claiming a yes
         // the parent may not have given is worse than saying what is known.
-        case .answered: return "Something changed"
+        case .answered: return "There’s an answer"
         case .failed:   return "Couldn’t send it"
         case .idle:     return ""
         }
@@ -290,7 +298,7 @@ struct RequestStatusView: View {
         switch controller.requestState {
         case .sending:  return "Asking about \(controller.requestTarget)."
         case .waiting:  return "Nothing else to do — it is with a parent now."
-        case .answered: return "Open \(controller.requestTarget) and see."
+        case .answered: return "Open \(controller.requestTarget) to see what it is."
         case .failed(let why): return why
         case .idle:     return ""
         }

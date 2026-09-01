@@ -232,8 +232,18 @@ struct RequestCard: View {
 
             HStack(spacing: 8) {
                 Button("Change…") { showingChange = true }.buttonStyle(SecondaryButton())
+                // NARROWEST possible refusal, never `defaultScope`/`defaultDuration`.
+                // For a DOMAIN ask those are THIS_DOMAIN + ALWAYS, so the softest
+                // button on the screen minted a permanent, site-wide block — with
+                // no undo on this surface. The web console was fixed for exactly
+                // this (app.js: BLOCK / THIS_REQUEST / ONCE); the phone, which is
+                // where a tired parent actually decides, was missed.
+                //
+                // A refusal should be the one thing in this product that is easy
+                // to revisit: a permanent invisible block is a door that never
+                // opens again and that the child is never told about.
                 Button("Not now") {
-                    Task { await model.decide(request, allow: false, scope: defaultScope, duration: defaultDuration) }
+                    Task { await model.decide(request, allow: false, scope: .thisRequest, duration: .once) }
                 }
                 .buttonStyle(SecondaryButton(quiet: true))
             }
