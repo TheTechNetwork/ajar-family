@@ -35,7 +35,7 @@ jobs:
               go build -trimpath -ldflags "-s -w" \
               -o "../../out/ajar-agent-windows-$arch.exe" .
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-agent
           path: out/*.exe
@@ -92,7 +92,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force out | Out-Null
           Compress-Archive -Path "stage/${{ matrix.asset }}/*" -DestinationPath "out/${{ matrix.asset }}.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset }}
           path: out/*.zip
@@ -103,7 +103,7 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Flatten artifacts
