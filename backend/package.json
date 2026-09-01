@@ -16,7 +16,8 @@
     "test:workerd": "npm run build && node --test 'test/**/*.test.mjs'"
   },
   "dependencies": {
-    "@ajar/shared": "*"
+    "@ajar/shared": "*",
+    "@simplewebauthn/server": "13.3.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
