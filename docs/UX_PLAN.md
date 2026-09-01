@@ -118,12 +118,28 @@ indefinitely: a screen-reader user is interrupted with the same count, any open
 The focus-restore code at `:749-787` is good work that only exists to paper
 over a re-render that should not happen. `if (out.upToDate) continue;`
 
-### A7. The iOS block page's personalisation is unreachable
+### A7. The iOS block page's personalisation is unreachable — STILL OPEN
 `FilterControlProvider.swift:97` builds the remediation URL as `?u=…` with no
 `ally` parameter, so `api.ts:403-413`'s entire "Ask Mom" personalisation is
 dead in production — every iOS child sees the generic copy. `ally=` appears
-nowhere outside `blocked-page.test.ts`. Append it, respecting the contract that
-**`u` stays last**.
+nowhere outside `blocked-page.test.ts`.
+
+**Not fixed, and here is why it is not one line.** Appending `ally=` before `u`
+is trivial; the problem is that nothing on the device knows what to put in it.
+The comment on the route says "the device passes the label it already holds in
+its signed snapshot" — and `DevicePolicySnapshot` has no such field. There is no
+"what the kids call you" anywhere in the product: not on `Family`, not in the
+console, not in signup.
+
+So the real work is a family-level label, end to end: a field in the console, a
+column on the family, delivery to the device (either in the signed snapshot,
+which means touching the canonical serialisation the signature covers, or in the
+enrol-redeem response, which does not), and then the parameter on all three block
+pages rather than only this one. That is a small feature, not a defect fix, and
+doing the one-line half would leave a parameter that is always empty.
+
+Blocked on: deciding whether the label travels signed. Everything else is
+mechanical.
 
 ### A8. The iOS ask is a dead end when it fails
 `ContentView.swift:235-239` offers the `Link` only for `.answered`; `.failed`
