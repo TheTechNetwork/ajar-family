@@ -196,26 +196,58 @@ living document for an alpha, not a completed audit.
 
 ## Deferred / known limitations
 
-- **THERE IS NO SECOND FACTOR. No MFA, no passkeys, no TOTP — a password is the
-  whole of parent authentication.** `docs/ARCHITECTURE.md` §7 lists "Sign in with
-  Apple / passkeys / email; parent MFA" as part of the design, and this list did
-  not mention their absence at all until someone signed up and asked where they
-  were. An architecture that names a control, a limitations list that stays
-  silent about it, and no implementation is the same failure this document has
-  already had three times over ("just once", device-token renewal, best-effort
-  mail delivery).
+- **The second factor is a passkey, and the recovery story is the weak part.**
+  Sign-in is two steps: `POST /v1/auth/login` checks the password and, for an
+  account with a passkey enrolled, returns a short-lived `mfa` token and **no
+  session**; only `POST /v1/auth/passkeys/login` turns that into a token pair.
+  The `mfa` kind is its own token kind rather than a user token with a flag, so a
+  route that does nothing special refuses it by default — including
+  `/v1/me/passkeys/options`, which would otherwise let someone with a password
+  enrol their own passkey and then finish the sign-in honestly. Both the
+  challenge and the credential are bound to the account, so a genuine assertion
+  from an attacker's own enrolled passkey is not a sign-in as somebody else.
 
-  It matters more here than the usual "you should have MFA". The adversary this
-  product is built around **lives in the house**: they can watch the password
-  being typed, try the ones a parent reuses, and reach a shared computer where a
-  session may still be open. A parent account is not a mailbox — it approves what
-  a child may reach, and it can approve silently. A child who gets that password
-  unlocks everything and can grant their own requests, and the audit log records
-  a parent doing it.
+  A passkey rather than a code because **the adversary lives in the house**: they
+  can watch a password being typed, try the ones a parent reuses, and reach a
+  shared computer where a session may still be open. A six-digit code can be read
+  out to someone who asks for it; an assertion bound to this origin cannot be, and
+  there is nothing for a phishing page on another domain to collect.
 
-  Nothing about the current design blocks fixing this: sessions, `tokenVersion`
-  revocation and per-request enforcement are already in place, and a second
-  factor slots in at sign-in. It has simply not been built.
+  **What is honestly still open:**
+
+  - **Two ways to hold an account with no second factor.** An account created
+    before this existed has no passkey, and `POST /v1/auth/login` still returns a
+    session for it, flagged `passkeyRequired`. And a browser that cannot do
+    WebAuthn at all can skip the enrolment step at sign-up. Both are deliberate —
+    refusing would lock people out with no way in to fix it — and both mean "every
+    parent has a second factor" is **not** a claim this document makes. The
+    console asks; nothing enforces.
+  - **Losing every passkey means losing the account.** There is no recovery code,
+    and email is deliberately not a way around the passkey: a fallback to "click
+    the link we sent you" makes the second factor exactly as strong as the
+    parent's inbox, which is to say it stops being one. A password reset changes
+    the password and nothing else. Synced passkeys (iCloud Keychain, Google
+    Password Manager) survive a lost phone, which is why `backedUp` is shown in
+    the console — but a device-bound passkey on a single lost device is an
+    account with no way in. **Recovery codes are the intended answer and are not
+    built.** Until they are, the mitigation is social: the console shows what is
+    enrolled and pushes for a second one.
+  - **`PASSKEY_RP_ID` / `PASSKEY_ORIGIN` cannot be changed after parents enrol.**
+    A passkey is bound by the browser to the rpId it was created under. Changing
+    either invalidates every enrolled passkey at once, with no migration. They are
+    committed in `wrangler.toml` rather than left to be set, because getting them
+    wrong does not fail at boot — the browser simply refuses every ceremony, which
+    reads as "passkeys are broken".
+  - **Sign-in is where it stops.** Approving a request, changing a policy and
+    removing a device all ride on a session that a passkey opened; none of them
+    ask again. A step-up on an already-open session is the obvious next control
+    and is not built.
+
+  Verification: `backend/src/domain/passkeys.test.ts` (real captured ceremonies
+  from py_webauthn, plus the negatives), `backend/test/passkey-workerd.test.mjs`
+  (the same ceremonies inside workerd, which has no `node:crypto`), and
+  `backend/src/http/passkey-routes.test.ts` (that the HTTP surface actually
+  withholds a session until the second step happens).
 
 - **Enumeration resistance is about STATUS and shape, not wall-clock time.**
   Register's two branches were made to do the same work — one PBKDF2 hash, one

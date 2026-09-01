@@ -538,12 +538,18 @@ network) and redirect to a block page. All call the same `normalizeYouTube()`.
   **Approvals are server-authoritative and cryptographically signed** so a child
   device cannot fabricate one.
 
-  > **Status, 2026-09-01: the authentication half of that line is NOT built.**
-  > Parent auth is email + password only — no passkeys, no MFA, no Sign in with
-  > Apple (the last by decision: no external IdP). Everything after "per-device
-  > keypair" in that list IS implemented. This paragraph described the design and
-  > read as a description of the system; `docs/SECURITY.md` now carries it as a
-  > named limitation rather than leaving the gap to be discovered at signup.
+  > **Status, 2026-09-01: built, with one piece named and missing.** Parent auth
+  > is a password plus a **passkey**, verified as a second step at sign-in
+  > (ADR-017). Sign in with Apple is not there and will not be: parent auth is
+  > self-contained by decision, no external IdP. Everything after "per-device
+  > keypair" in that list is implemented.
+  >
+  > What is NOT built is **recovery**: losing every passkey means losing the
+  > account, because an emailed way around the passkey would make the second
+  > factor exactly as strong as the parent's inbox. Recovery codes are the
+  > intended answer. `docs/SECURITY.md` carries that, and the two remaining ways
+  > to hold an account with no passkey at all, as named limitations rather than
+  > leaving them to be discovered at signup.
 
 ## 8. Policy synchronization
 

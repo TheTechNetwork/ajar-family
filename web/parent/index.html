@@ -147,7 +147,30 @@
           <button type="button" class="btn-ghost" id="btnMode">Create an account</button>
         </div>
       </form>
+      <!-- Step two of sign-in. Hidden until the password is accepted and the
+           server says the account has a passkey; the form above is hidden then,
+           because going back and retyping the password would start over. -->
+      <div id="passkeyStep" class="hide">
+        <p>Now confirm it's you with your passkey.</p>
+        <div class="actions">
+          <button type="button" class="btn-primary" id="btnPasskey">Use your passkey</button>
+          <button type="button" class="btn-ghost" id="btnPasskeyCancel">Start again</button>
+        </div>
+      </div>
       <p class="errline" id="authErr"></p>
+    </section>
+
+    <!-- ================= Passkeys ================= -->
+    <section class="card hide" id="passkeysCard" aria-labelledby="pkH">
+      <div class="cardhead">
+        <h2 id="pkH">Passkeys</h2>
+      </div>
+      <p class="help" id="pkWhy">A passkey is what stops someone who has your password from changing what your children can see.</p>
+      <ul class="reqlist" id="pkList"></ul>
+      <div class="actions">
+        <button type="button" class="btn-primary" id="btnAddPasskey">Add a passkey</button>
+      </div>
+      <p class="errline" id="pkErr"></p>
     </section>
 
     <!-- ================= 1. THE JOB: asks ================= -->
@@ -224,6 +247,7 @@
     <button type="button" class="hide" id="toastUndo">Undo</button>
   </div>
 
-  <script src="app.js"></script>
+  <script src="webauthn.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
