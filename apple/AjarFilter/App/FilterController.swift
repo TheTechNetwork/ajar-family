@@ -207,8 +207,12 @@ final class FilterController: ObservableObject {
     /// DEBUG unsigned path onto verified snapshots.
     func enroll(code: String, displayName: String) async {
         do {
-            let device = try await backend.enroll(
-                code: code.trimmingCharacters(in: .whitespacesAndNewlines), displayName: displayName)
+            // Same normalisation both extension options pages already do
+            // (`.toUpperCase().replace(/[^A-Z0-9]/g, "")`): the server matches the
+            // code exactly, and a parent reading one aloud produces lowercase,
+            // spaces and hyphens.
+            let normalized = code.uppercased().filter { $0.isLetter || $0.isNumber }
+            let device = try await backend.enroll(code: normalized, displayName: displayName)
             isEnrolled = true
             backendStatus = "Enrolled as \(device.id) (child \(device.childId))."
             await syncPolicy()
@@ -237,7 +241,11 @@ final class FilterController: ObservableObject {
     /// Long-poll for a parent's decision. This is the A4 fast path: the backend
     /// parks the request until something is decided, so an approval lands on the
     /// child's device in seconds without polling in a loop.
-    func waitForPolicyChange() async {
+    /// Returns whether a new snapshot actually arrived. The caller needs this:
+    /// a timeout and an approval are completely different things to tell a child,
+    /// and this used to return Void so the call site could not tell them apart.
+    @discardableResult
+    func waitForPolicyChange() async -> Bool {
         do {
             let changed = try await backend.waitForPolicyChange()
             if changed {
@@ -246,8 +254,10 @@ final class FilterController: ObservableObject {
             } else {
                 backendStatus = "No change before the timeout."
             }
+            return changed
         } catch {
             lastError = "Policy wait failed: \(error.localizedDescription)"
+            return false
         }
     }
 
@@ -290,14 +300,20 @@ final class FilterController: ObservableObject {
             requestState = .waiting(since: Date())
             // Park on the long poll so an approval applies without the child
             // having to reopen the app.
-            await waitForPolicyChange()
             // The long poll returns on ANY policy change, which is not the same
             // as "this request was approved" — a rule for a different child, or
             // a category update, wakes it too. The backend does not yet report
             // the decision back to the device, so claiming "You're in" here would
             // be a yes the parent may never have given. Until it does, say only
             // what is known: something changed, try the page again.
-            requestState = .answered
+            //
+            // And a TIMEOUT is not a change at all. This used to set .answered
+            // unconditionally, so a request no parent ever saw showed the child a
+            // green tick and "try it again" after 25 seconds — the one lie this
+            // screen must not tell. Nothing happened, so stay waiting.
+            if await waitForPolicyChange() {
+                requestState = .answered
+            }
         } catch {
             lastError = "Request failed: \(error.localizedDescription)"
             requestState = .failed(error.localizedDescription)

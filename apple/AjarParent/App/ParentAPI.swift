@@ -124,6 +124,12 @@ enum ApprovalDuration: Hashable {
         [.once, .minutes(30), .minutes(120), .untilEndOfDay, .always]
 }
 
+/// The long-poll feed's envelope. The endpoint returns an OBJECT with a
+/// `requests` key, not a bare array — see `waitForRequests`.
+struct PendingRequests: Codable {
+    let requests: [AccessRequest]
+}
+
 struct AccessRequest: Codable, Identifiable, Equatable {
     let id: String
     let familyId: String
@@ -161,9 +167,22 @@ actor ParentAPI {
     func signIn(email: String, password: String) async throws -> String {
         let t: TokenResponse = try await send("/v1/auth/login", method: "POST",
                                               body: ["email": email, "password": password], authed: false)
+        adopt(t)
+        return t.userId
+    }
+
+    /// One place that owns "these are our tokens now" — sign-in and refresh must
+    /// not drift on whether the Keychain copy gets updated.
+    private func adopt(_ t: TokenResponse) {
         tokens = t
         TokenStore.save(t)
-        return t.userId
+    }
+
+    /// Drop the session locally, without the server round-trip `signOut()` makes.
+    /// Used when a refresh is refused: the network call would just fail too.
+    private func forgetLocally() {
+        tokens = nil
+        TokenStore.clear()
     }
 
     func restore() { tokens = TokenStore.load() }
@@ -191,9 +210,24 @@ actor ParentAPI {
     /// Long-poll: returns when the pending feed changes, or empty on timeout.
     /// The timeout is not an error — it is how a long poll ends when nothing
     /// happened, and the caller simply asks again.
-    func waitForRequests(familyId: String, timeoutSeconds: Int = 25) async throws -> [AccessRequest] {
-        try await send("/v1/families/\(familyId)/requests/wait?timeout=\(timeoutSeconds)",
-                       method: "GET", body: nil, timeout: TimeInterval(timeoutSeconds + 10))
+    /// The long-poll feed. Three things here are load-bearing and were all wrong:
+    ///
+    ///   - The endpoint returns `{ "requests": [...] }`, NOT a bare array
+    ///     (openapi.json marks `requests` required). Decoding straight to
+    ///     `[AccessRequest]` threw on every single call, and the caller's
+    ///     backoff swallowed it — a permanently stale inbox with no error shown.
+    ///   - `timeout` is MILLISECONDS server-side (api.ts clamps to 0…60000).
+    ///     Sending `25` asked for 25ms, i.e. a hot poll against production.
+    ///   - `count` must carry how many pending requests we already know about.
+    ///     The server returns immediately unless `pending.length === count`, so
+    ///     omitting it (server default -1) defeats the long poll entirely.
+    func waitForRequests(familyId: String, knownCount: Int,
+                         timeoutSeconds: Int = 25) async throws -> [AccessRequest] {
+        let ms = timeoutSeconds * 1000
+        let out: PendingRequests = try await send(
+            "/v1/families/\(familyId)/requests/wait?timeout=\(ms)&count=\(knownCount)",
+            method: "GET", body: nil, timeout: TimeInterval(timeoutSeconds + 10))
+        return out.requests
     }
 
     func decide(familyId: String, requestId: String, allow: Bool,
@@ -234,15 +268,48 @@ actor ParentAPI {
         return data
     }
 
+    /// Run a request, and on a 401 refresh the access token ONCE and retry.
+    ///
+    /// Access tokens live an hour (api.ts REFRESH/ACCESS TTLs). Without this the
+    /// app worked for sixty minutes and then failed every call forever: nothing
+    /// cleared `signedIn`, so the parent saw error text on every action with no
+    /// route back except signing out and in. The web console has always done
+    /// this (web/parent/app.js `api()`); the app is the surface that regressed.
+    ///
+    /// Refresh failure is terminal on purpose — the refresh token is revoked or
+    /// the user's tokenVersion moved, and retrying cannot help. Clearing tokens
+    /// puts the parent on the sign-in screen instead of an unexplained error.
+    private func performAuthed(_ build: () throws -> URLRequest) async throws -> Data {
+        do {
+            return try await perform(try build())
+        } catch ParentAPIError.http(401, let message) {
+            guard let refresh = tokens?.refreshToken else { throw ParentAPIError.http(401, message) }
+            do {
+                let renewed: TokenResponse = try await send(
+                    "/v1/auth/refresh", method: "POST",
+                    body: ["refreshToken": refresh], authed: false, retryOn401: false)
+                adopt(renewed)
+            } catch {
+                forgetLocally()
+                throw ParentAPIError.http(401, message)
+            }
+            return try await perform(try build())  // once, with the fresh token
+        }
+    }
+
     private func send<T: Decodable>(_ path: String, method: String, body: [String: Any]?,
-                                    authed: Bool = true, timeout: TimeInterval = 30) async throws -> T {
-        let data = try await perform(try request(path, method: method, body: body, authed: authed, timeout: timeout))
+                                    authed: Bool = true, timeout: TimeInterval = 30,
+                                    retryOn401: Bool = true) async throws -> T {
+        let build = { try self.request(path, method: method, body: body, authed: authed, timeout: timeout) }
+        let data = authed && retryOn401
+            ? try await performAuthed(build)
+            : try await perform(try build())
         return try JSONDecoder().decode(T.self, from: data)
     }
 
     @discardableResult
     private func sendNoContent(_ path: String, method: String, body: [String: Any]?,
                                timeout: TimeInterval = 30) async throws -> Data {
-        try await perform(try request(path, method: method, body: body, authed: true, timeout: timeout))
+        try await performAuthed { try self.request(path, method: method, body: body, authed: true, timeout: timeout) }
     }
 }

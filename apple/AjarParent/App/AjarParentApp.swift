@@ -77,7 +77,12 @@ final class ParentModel: ObservableObject {
             var backoff: UInt64 = 1
             while !Task.isCancelled {
                 do {
-                    let fresh = try await ParentAPI.shared.waitForRequests(familyId: familyId)
+                    // The server holds the connection open only while the count
+                    // it sees still matches what we already have, so this has to
+                    // be the CURRENT pending count or the poll returns instantly.
+                    let known = await MainActor.run { self?.pending.count ?? 0 }
+                    let fresh = try await ParentAPI.shared.waitForRequests(
+                        familyId: familyId, knownCount: known)
                     guard !Task.isCancelled else { return }
                     await MainActor.run { self?.pending = fresh.filter { $0.status == "PENDING" } }
                     backoff = 1
