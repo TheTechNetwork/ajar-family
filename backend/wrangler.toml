@@ -72,6 +72,40 @@ custom_domain = true
 pattern = "blocked.ajar.family"
 custom_domain = true
 
+# ---------------------------------------------------------------------------
+# THE HUMAN HOSTNAME. Without this route ajar.family resolves to nothing: the
+# site, the signup flow and the console were reachable only at api.ajar.family,
+# which is the hostname devices talk to and not one any parent would type.
+#
+# www redirects to the apex in worker.ts rather than serving alongside it, and
+# that is a correctness requirement, not tidiness. Signing up writes tokens to
+# localStorage, which is per-ORIGIN: sign up on www, come back later to the
+# apex, and the console finds an empty store and shows a login screen. Two
+# hostnames that both work are exactly how that happens, so only one does.
+[[routes]]
+pattern = "ajar.family"
+custom_domain = true
+
+[[routes]]
+pattern = "www.ajar.family"
+custom_domain = true
+
+# ---------------------------------------------------------------------------
+# Links inside the emails the backend sends. Not secrets — they are public URLs
+# — so they belong here rather than in `wrangler secret put`.
+#
+# Both point at the apex, the same origin the parent signed up on, for the
+# localStorage reason above. `/parent/` specifically because the console is what
+# reads `?verify=` out of the URL (web/parent/app.js).
+#
+# Unset, nothing breaks loudly: the confirmation email still carries the code and
+# simply has no link to click, and the console's ?verify= handler is never
+# reached. That is a quiet downgrade of the flow that now gates account creation,
+# which is why these are committed rather than left to be remembered.
+[vars]
+VERIFY_EMAIL_URL = "https://ajar.family/parent/"
+PASSWORD_RESET_URL = "https://ajar.family/parent/"
+
 [observability]
 enabled = true
 

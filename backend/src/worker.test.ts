@@ -73,3 +73,36 @@ test("wrangler.toml runs the Worker before the assets, which is what enforces th
   // A miss has to come back 404 so the API router still produces /blocked.
   assert.match(toml, /^not_found_handling = "none"$/m);
 });
+
+test("www redirects to the apex, keeping path and query", async () => {
+  // Not cosmetic. Signup writes tokens to localStorage, which is per-origin, so
+  // a parent who signs up on www and later types the bare domain would meet a
+  // login screen with no explanation. One hostname works; the other sends you
+  // to it.
+  const cases: Array<[string, string]> = [
+    ["https://www.ajar.family/", "https://ajar.family/"],
+    ["https://www.ajar.family/signup.html", "https://ajar.family/signup.html"],
+    // A verify link lands on the console WITH its code — dropping the query
+    // would turn a working confirmation into a silent no-op.
+    ["https://www.ajar.family/parent/?verify=abc123", "https://ajar.family/parent/?verify=abc123"],
+  ];
+  for (const [from, to] of cases) {
+    const res = await worker.fetch(new Request(from), env());
+    assert.equal(res.status, 301, `${from} did not redirect`);
+    assert.equal(res.headers.get("location"), to);
+  }
+});
+
+test("the apex serves the site; api and blocked are unchanged by the redirect", async () => {
+  // The redirect must be scoped to www exactly. Catching the apex would loop,
+  // and catching api.* would break every enrolled device, which talks to it.
+  const apex = await worker.fetch(new Request("https://ajar.family/"), env());
+  assert.equal(apex.status, 200);
+
+  const api = await worker.fetch(new Request("https://api.ajar.family/v1/health"), env());
+  assert.notEqual(api.status, 301);
+
+  // Still exactly one page on the hostname shipped iOS builds bake in.
+  const leak = await worker.fetch(new Request("https://blocked.ajar.family/parent/app.js"), env());
+  assert.equal(leak.status, 404);
+});

@@ -99,11 +99,21 @@ curl https://api.ajar.family/v1/health
 # → {"status":"ok","version":"0.0.0-alpha"}
 curl https://api.ajar.family/v1/signing-key
 # → {"publicKeyB64":"...","alg":"Ed25519"}
-curl -sI https://api.ajar.family/ | head -1
+curl -sI https://ajar.family/ | head -1
 # → HTTP/2 200        (the home page — see §4.1)
-curl -sI https://api.ajar.family/parent/ | head -1
+curl -sI https://ajar.family/parent/ | head -1
 # → HTTP/2 200        (the parent console)
+curl -sI https://www.ajar.family/ | head -2
+# → HTTP/2 301 + location: https://ajar.family/
 ```
+
+**`ajar.family` is the hostname a parent uses**; `api.ajar.family` is what
+enrolled devices talk to. Both are this one Worker, so the pages answer on either
+— but every link in the product is relative, so a parent who arrives at the apex
+stays there. `www` is a 301 to the apex rather than a fourth working hostname,
+because tokens live in localStorage and localStorage is per-origin: two
+hostnames that both work is how someone signs up on one and meets a login screen
+on the other.
 
 `GET /v1/health` and `GET /v1/signing-key` are defined in
 `backend/src/http/api.ts`. `signing-key` returning a **stable** public key

@@ -152,6 +152,18 @@ export default {
 
     const url = new URL(request.url);
 
+    // ONE HUMAN ORIGIN. www redirects to the apex before anything else looks at
+    // the request, because the alternative is two hostnames that both work — and
+    // localStorage is per-origin. A parent who signs up on www and later types
+    // the bare domain would land on the console with an empty token store and be
+    // shown a login screen, having done nothing wrong. 301 rather than 302: this
+    // is permanent, and a cached redirect is the point.
+    if (url.hostname === "www.ajar.family") {
+      const to = new URL(url.toString());
+      to.hostname = "ajar.family";
+      return Response.redirect(to.toString(), 301);
+    }
+
     // Host-based surface split. `blocked.*` exists to serve ONE page: iOS bakes
     // that hostname into shipped builds via the content filter's
     // `remediationMap`, which makes it the hardest hostname here to ever change,
