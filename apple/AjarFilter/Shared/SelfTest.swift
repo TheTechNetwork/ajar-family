@@ -38,6 +38,7 @@ public enum PolicySelfTest {
         f += bloomIndexVectors()
         f += bloomFilterVector()
         f += hostVectors()
+        f += urlNormalizeVectors()
         f += safetyFloorVectors()
         f += canonicalJSONVectors()
         f += signatureVector()
@@ -177,6 +178,60 @@ public enum PolicySelfTest {
     }
 
     // MARK: - 4. Host normalization / candidates
+
+    /// Exact-URL canonicalization and pattern matching.
+    ///
+    /// Pure functions, so they need no signed snapshot — which matters, because
+    /// every other evaluator vector here runs against one fixed pre-signed
+    /// blob and cannot be extended without re-signing it. These are the four
+    /// URL-shaped defects an outside review found, pinned on the platform that
+    /// ships.
+    private static func urlNormalizeVectors() -> [Failure] {
+        var out: [Failure] = []
+        func same(_ a: String, _ b: String, _ why: String) -> [Failure] {
+            check("normalizeExact(\(a)) == normalizeExact(\(b))",
+                  URLNormalize.normalizeExact(a) == URLNormalize.normalizeExact(b),
+                  "\(why): got \(URLNormalize.normalizeExact(a)) vs \(URLNormalize.normalizeExact(b))")
+        }
+        func differ(_ a: String, _ b: String, _ why: String) -> [Failure] {
+            check("normalizeExact(\(a)) != normalizeExact(\(b))",
+                  URLNormalize.normalizeExact(a) != URLNormalize.normalizeExact(b), why)
+        }
+
+        // Percent-encoding: `/%70age` is `/page`, and they used to be two keys
+        // for one page — so an encoded form slipped a URL block, or broke an
+        // approval a parent believed they gave.
+        out += same("https://example.com/page", "https://example.com/%70age",
+                    "unreserved escapes must decode")
+        // ...but an encoded SLASH is not a path separator, and decoding it would
+        // change what the URL means.
+        out += differ("https://example.com/a/b", "https://example.com/a%2Fb",
+                      "%2F must NOT decode — it is a different URL")
+        // Credentials in the authority: same page, two characters.
+        out += same("https://example.com/page", "https://user@example.com/page",
+                    "userinfo must not create a second key")
+        out += same("https://example.com/page", "https://user:pw@example.com/page",
+                    "userinfo with a password must not either")
+        // Already covered by the shared spec, kept so a regression here is local.
+        out += same("https://example.com/a?b=1&a=2", "https://example.com/a?a=2&b=1",
+                    "query order must not matter")
+        out += same("https://EXAMPLE.com/x", "https://www.example.com/x/",
+                    "case, www and a trailing slash must not matter")
+
+        // A wildcard pattern normalizes BOTH sides. It used to compare against
+        // the raw URL, so an allow-pattern missed and a block-pattern was evaded
+        // by one character.
+        let pat = "https://example.com/safe/*"
+        for u in ["https://EXAMPLE.com/safe/x", "https://www.example.com/safe/x",
+                  "https://example.com./safe/x", "https://example.com/safe/deep/er"] {
+            out += check("matchesPattern(\(u))", URLNormalize.matchesPattern(url: u, pattern: pat),
+                         "a normalized form of the URL did not match its own pattern")
+        }
+        out += check("matchesPattern outside the prefix",
+                     !URLNormalize.matchesPattern(url: "https://example.com/unsafe/x", pattern: pat),
+                     "a pattern matched outside its prefix")
+        return out
+    }
 
     private static func hostVectors() -> [Failure] {
         var out: [Failure] = []

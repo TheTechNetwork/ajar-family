@@ -275,7 +275,23 @@ export function evaluate(
       .sort(
         (a, b) =>
           (b.priority ?? 0) - (a.priority ?? 0) ||
-          scopeSpecificity(b.scope) - scopeSpecificity(a.scope),
+          scopeSpecificity(b.scope) - scopeSpecificity(a.scope) ||
+          // DENY WINS A TIE. Same tier, same priority, same scope used to fall
+          // through to Array#sort's stability — i.e. INSERTION ORDER, and both
+          // stores return rules in insertion order — so the OLDEST rule won and
+          // BLOCK had no precedence over ALLOW at all.
+          //
+          // What that looked like: a parent approves a site "for good", and
+          // weeks later taps "Keep <site> closed for good" on a new ask. The
+          // server writes the BLOCK, returns 200 with an Undo toast, the console
+          // lists it — and the device keeps answering ALLOW from the day-one
+          // rule, forever, with nothing in any screen to reveal it.
+          //
+          // A tie means the parent expressed two intents at the same
+          // specificity. Between "closed" and "open" with nothing to separate
+          // them, closed is the answer a parent can undo; open is the one they
+          // do not find out about.
+          (a.action === b.action ? 0 : a.action === "BLOCK" ? -1 : 1),
       );
     for (const r of inTier) {
       const hit = matchTarget(r, ctx, yt, ytKey, hosts, hostCats);
@@ -307,10 +323,37 @@ function matchTarget(
       return matchesPattern(ctx.url, r.value) ? `URL_PATTERN:${r.value}` : null;
     case "YOUTUBE_VIDEO":
       return yt.videoId && yt.videoId === r.value ? `YOUTUBE_VIDEO:${r.value}` : null;
-    case "YOUTUBE_PLAYLIST":
-      return yt.playlistId && yt.playlistId === r.value ? `YOUTUBE_PLAYLIST:${r.value}` : null;
-    case "YOUTUBE_CHANNEL":
-      return (yt.channelId === r.value || yt.channelHandle === r.value) ? `YOUTUBE_CHANNEL:${r.value}` : null;
+    case "YOUTUBE_PLAYLIST": {
+      if (!yt.playlistId || yt.playlistId !== r.value) return null;
+      // `list=` IS A QUERY PARAMETER THE CHILD TYPES. Nothing checks that the
+      // video is in the playlist — nothing can, from the URL alone. So an ALLOW
+      // on a playlist used to open EVERY video on YouTube: append
+      // `&list=<the approved playlist>` to any watch URL and the rule matched.
+      //
+      // The asymmetry is deliberate, and it is the same rule the safety floor
+      // now follows: an untrusted value may ADD a block, never an allow.
+      //   BLOCK on a playlist  → matches the playlist page AND any video
+      //                          carrying that list. Over-blocking is safe, and
+      //                          a child cannot escape a block by dropping the
+      //                          parameter — the video is still its own object.
+      //   ALLOW on a playlist  → the playlist PAGE only. Each video in it is a
+      //                          separate approval, which is what "approve one
+      //                          video" means everywhere else in this product.
+      if (r.action === "ALLOW" && yt.kind !== "playlist") return null;
+      return `YOUTUBE_PLAYLIST:${r.value}`;
+    }
+    case "YOUTUBE_CHANNEL": {
+      // Handles are case-insensitive in a YouTube URL, so a case-sensitive
+      // compare meant one keystroke defeated a channel BLOCK (/@somecreator vs
+      // /@SomeCreator) and a channel ALLOW failed on whatever casing the child's
+      // link happened to carry. Channel IDs (UC...) are case-SENSITIVE and are
+      // compared exactly; only the handle and the /c//user/ paths fold.
+      if (yt.channelId && yt.channelId === r.value) return `YOUTUBE_CHANNEL:${r.value}`;
+      if (yt.channelHandle && yt.channelHandle.toLowerCase() === r.value.toLowerCase()) {
+        return `YOUTUBE_CHANNEL:${r.value}`;
+      }
+      return null;
+    }
     case "DOMAIN":
       // Match the request host OR any CNAME-resolved canonical name, so a
       // cloaked first-party subdomain can't dodge a domain block.
@@ -331,10 +374,26 @@ export function normalizeExactUrl(raw: string): string {
     const u = new URL(raw);
     u.hostname = normalizeHost(u.hostname);
     u.hash = "";
+    // CREDENTIALS IN THE AUTHORITY. `https://user@example.com/page` is the same
+    // page as `https://example.com/page` and used to be a different key — so it
+    // slipped a URL block, or broke an approval a parent believed they gave.
+    // Two characters.
+    u.username = "";
+    u.password = "";
     // sort query params for stable comparison
     u.searchParams.sort();
     let s = u.toString();
     s = s.replace(/\/$/, ""); // drop trailing slash
+    // PERCENT-ENCODING. `/%70age` is `/page`; `URL` preserves whatever encoding
+    // it was given, so the two were different keys for one page. Decoded ONLY
+    // where it is unambiguous: a decode that reintroduces a delimiter (`/ ? #`)
+    // or produces invalid UTF-8 changes what the URL means, so those are left
+    // exactly as written rather than guessed at.
+    s = s.replace(/%[0-9A-Fa-f]{2}/g, (esc) => {
+      let ch: string;
+      try { ch = decodeURIComponent(esc); } catch { return esc; }
+      return /^[A-Za-z0-9\-._~]$/.test(ch) ? ch : esc;
+    });
     return s;
   } catch {
     return raw;
@@ -343,8 +402,27 @@ export function normalizeExactUrl(raw: string): string {
 
 /** Minimal, documented pattern support: trailing "*" prefix match only.
  *  Intentionally NOT full glob/regex — matches the constrained matching every
- *  platform primitive can honor. */
+ *  platform primitive can honor.
+ *
+ *  BOTH SIDES ARE NORMALIZED, including the wildcard branch. That branch used to
+ *  compare the pattern against the RAW ctx.url while the exact branch below
+ *  normalized — so `https://example.com/safe/*` did not match
+ *  `https://EXAMPLE.com/safe/x`, `https://www.example.com/safe/x` or
+ *  `https://example.com./safe/x`. An allow-pattern silently failed to open what
+ *  a parent opened, and a block-pattern was evaded by one character. */
 export function matchesPattern(url: string, pattern: string): boolean {
-  if (pattern.endsWith("*")) return url.startsWith(pattern.slice(0, -1));
+  if (pattern.endsWith("*")) {
+    const prefix = pattern.slice(0, -1);
+    // Normalizing a prefix through `URL` is only safe when it IS a URL; a bare
+    // scheme+host prefix survives, a truncated one would not, so fall back to
+    // the raw compare when it does not parse.
+    let np: string;
+    try { np = normalizeExactUrl(prefix); new URL(prefix); }
+    catch { return url.startsWith(prefix); }
+    // normalizeExactUrl drops a trailing slash, which a prefix legitimately
+    // carries ("https://example.com/safe/"), so compare against the normalized
+    // URL with the same treatment on both sides.
+    return normalizeExactUrl(url).startsWith(np);
+  }
   return normalizeExactUrl(url) === normalizeExactUrl(pattern);
 }

@@ -343,7 +343,7 @@ public final class PolicyStore {
             if let filters { hostCats.formUnion(filters.categories(for: h)) }
         }
 
-        func matches(target: PolicyTargetType, value: String) -> String? {
+        func matches(target: PolicyTargetType, value: String, action: RuleAction) -> String? {
             switch target {
             case .url:
                 return URLNormalize.normalizeExact(urlString) == URLNormalize.normalizeExact(value)
@@ -354,13 +354,28 @@ public final class PolicyStore {
             case .ytVideo:
                 return (yt.videoId != nil && yt.videoId == value) ? "YOUTUBE_VIDEO:\(value)" : nil
             case .ytPlaylist:
-                // Mirrors the TS exactly: `yt.playlistId && yt.playlistId === r.value`.
-                // No `kind == .playlist` guard — a video watched IN a playlist
-                // (kind == .watchWithPlaylist) still matches a playlist rule, it
-                // is just reached after the YOUTUBE_VIDEO tier.
-                return (yt.playlistId != nil && yt.playlistId == value) ? "YOUTUBE_PLAYLIST:\(value)" : nil
+                // `list=` IS A QUERY PARAMETER THE CHILD TYPES, and nothing can
+                // check from the URL that the video is in the playlist. So an
+                // ALLOW on a playlist opened EVERY video on YouTube: append
+                // `&list=<the approved playlist>` to any watch URL.
+                //
+                // An untrusted value may ADD a block, never an allow — the same
+                // rule the safety floor follows. BLOCK matches the playlist page
+                // AND a video carrying the list; ALLOW is the page only, and each
+                // video in it is its own approval.
+                guard let pid = yt.playlistId, pid == value else { return nil }
+                if action == .allow && yt.kind != .playlist { return nil }
+                return "YOUTUBE_PLAYLIST:\(value)"
             case .ytChannel:
-                return (yt.channelId == value || yt.channelHandle == value) ? "YOUTUBE_CHANNEL:\(value)" : nil
+                // Handles fold case in a YouTube URL — one keystroke used to
+                // defeat a channel block (/@somecreator vs /@SomeCreator) and a
+                // channel allow used to fail on whatever casing the child's link
+                // carried. Channel IDs (UC…) are case-SENSITIVE and compared
+                // exactly; only the handle folds.
+                if let cid = yt.channelId, cid == value { return "YOUTUBE_CHANNEL:\(value)" }
+                if let handle = yt.channelHandle,
+                   handle.lowercased() == value.lowercased() { return "YOUTUBE_CHANNEL:\(value)" }
+                return nil
             case .domain:
                 let v = Host.normalize(value)
                 return hosts.contains(where: { $0 == v || $0.hasSuffix(".\(v)") }) ? "DOMAIN:\(value)" : nil
@@ -379,12 +394,20 @@ public final class PolicyStore {
             return true
         }
         func specificity(_ s: RuleScope) -> Int { s.deviceId != nil ? 3 : (s.childId != nil ? 2 : 1) }
-        func ordered<T>(_ items: [T], _ scope: (T) -> RuleScope, _ priority: (T) -> Int?) -> [T] {
+        func ordered<T>(_ items: [T], _ scope: (T) -> RuleScope,
+                        _ priority: (T) -> Int?, _ action: (T) -> RuleAction) -> [T] {
             items.enumerated().sorted { a, b in
                 let pa = priority(a.element) ?? 0, pb = priority(b.element) ?? 0
                 if pa != pb { return pa > pb }
                 let sa = specificity(scope(a.element)), sb = specificity(scope(b.element))
                 if sa != sb { return sa > sb }
+                // DENY WINS A TIE. Same tier, same priority, same scope used to
+                // fall through to insertion order, so the OLDEST rule won and
+                // BLOCK had no precedence over ALLOW: a parent's later "keep it
+                // closed for good" was inert forever, with nothing on any screen
+                // to reveal it.
+                let aa = action(a.element), ab = action(b.element)
+                if aa != ab { return aa == .block }
                 return a.offset < b.offset   // stable, like Array.prototype.sort
             }.map { $0.element }
         }
@@ -393,8 +416,8 @@ public final class PolicyStore {
         let activeTemps = snap.temporaryRules.filter {
             scopeOK($0.scope) && now >= $0.startsAt && now < $0.expiresAt
         }
-        for t in ordered(activeTemps, { $0.scope }, { $0.priority }) {
-            if let k = matches(target: t.target, value: t.value) {
+        for t in ordered(activeTemps, { $0.scope }, { $0.priority }, { $0.action }) {
+            if let k = matches(target: t.target, value: t.value, action: t.action) {
                 return EvalResult(action: t.action,
                                   reason: "temporary:\((t.grantKind ?? .timed).rawValue)",
                                   matchedRuleId: t.id, matchedKey: k)
@@ -407,8 +430,8 @@ public final class PolicyStore {
         ]
         let applicable = snap.rules.filter { scopeOK($0.scope) }
         for tier in tierOrder {
-            for r in ordered(applicable.filter { $0.target == tier }, { $0.scope }, { $0.priority }) {
-                if let k = matches(target: r.target, value: r.value) {
+            for r in ordered(applicable.filter { $0.target == tier }, { $0.scope }, { $0.priority }, { $0.action }) {
+                if let k = matches(target: r.target, value: r.value, action: r.action) {
                     return EvalResult(action: r.action, reason: "rule:\(tier.rawValue)",
                                       matchedRuleId: r.id, matchedKey: k)
                 }

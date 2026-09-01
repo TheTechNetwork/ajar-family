@@ -34,6 +34,12 @@ public enum URLNormalize {
         c.scheme = scheme.lowercased()
         if let h = c.host { c.host = Host.normalize(h) }
         c.fragment = nil
+        // CREDENTIALS IN THE AUTHORITY. `https://user@example.com/page` is the
+        // same page as `https://example.com/page` and used to be a different
+        // key — so it slipped a URL block, or broke an approval a parent
+        // believed they gave. Two characters.
+        c.user = nil
+        c.password = nil
         // WHATWG URL drops the port when it is the scheme default.
         if let port = c.port, defaultPort(for: c.scheme ?? "") == port { c.port = nil }
         // WHATWG URL gives a special-scheme URL an empty path of "/".
@@ -54,13 +60,66 @@ public enum URLNormalize {
         }
         var s = c.string ?? raw
         if s.hasSuffix("/") { s.removeLast() }
-        return s
+        // PERCENT-ENCODING. `/%70age` is `/page`, and the two were different
+        // keys for one page. Decoded ONLY where it is unambiguous: a decode that
+        // reintroduces a delimiter (/ ? #) changes what the URL means, so those
+        // are left exactly as written rather than guessed at. Same unreserved
+        // set as the JS mirrors: A-Z a-z 0-9 - . _ ~
+        return decodeUnreservedEscapes(s)
     }
 
-    /// TS `matchesPattern`: trailing "*" is a prefix match on the RAW url;
-    /// anything else is exact-URL equality. Deliberately not glob or regex.
+    /// Replace `%XX` with its character when that character is unreserved.
+    ///
+    /// Written by hand rather than with `removingPercentEncoding`, which decodes
+    /// EVERYTHING — including `%2F`, an encoded slash that means something
+    /// different from a path separator.
+    static func decodeUnreservedEscapes(_ s: String) -> String {
+        guard s.contains("%") else { return s }
+        var out = ""
+        out.reserveCapacity(s.count)
+        var i = s.startIndex
+        while i < s.endIndex {
+            guard s[i] == "%", let a = s.index(i, offsetBy: 1, limitedBy: s.endIndex),
+                  let b = s.index(i, offsetBy: 2, limitedBy: s.endIndex),
+                  b < s.endIndex else {
+                out.append(s[i]); i = s.index(after: i); continue
+            }
+            let hex = String(s[a...b])
+            if let byte = UInt8(hex, radix: 16), isUnreserved(byte) {
+                out.append(Character(UnicodeScalar(byte)))
+                i = s.index(after: b)
+            } else {
+                out.append(s[i]); i = s.index(after: i)
+            }
+        }
+        return out
+    }
+
+    private static func isUnreserved(_ b: UInt8) -> Bool {
+        switch b {
+        case 0x41...0x5A, 0x61...0x7A, 0x30...0x39: return true   // A-Z a-z 0-9
+        case 0x2D, 0x2E, 0x5F, 0x7E: return true                  // - . _ ~
+        default: return false
+        }
+    }
+
+    /// TS `matchesPattern`: trailing "*" is a prefix match, anything else is
+    /// exact-URL equality. Deliberately not glob or regex.
+    ///
+    /// BOTH SIDES ARE NORMALIZED, including the wildcard branch. It used to
+    /// compare the pattern against the RAW url while the exact branch
+    /// normalized, so `https://example.com/safe/*` did not match
+    /// `https://EXAMPLE.com/safe/x`, `https://www.example.com/safe/x` or
+    /// `https://example.com./safe/x`: an allow-pattern silently failed to open
+    /// what a parent opened, and a block-pattern was evaded by one character.
     public static func matchesPattern(url: String, pattern: String) -> Bool {
-        if pattern.hasSuffix("*") { return url.hasPrefix(String(pattern.dropLast())) }
+        if pattern.hasSuffix("*") {
+            let prefix = String(pattern.dropLast())
+            // Normalizing a prefix is only meaningful when it parses as a URL; a
+            // truncated one falls back to the raw compare.
+            guard URLComponents(string: prefix)?.scheme != nil else { return url.hasPrefix(prefix) }
+            return normalizeExact(url).hasPrefix(normalizeExact(prefix))
+        }
         return normalizeExact(url) == normalizeExact(pattern)
     }
 

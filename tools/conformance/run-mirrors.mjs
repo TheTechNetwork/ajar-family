@@ -34,7 +34,15 @@ function stubExtensionApis() {
   globalThis.fetch = () => Promise.reject(new Error("offline in conformance run"));
 }
 
+// The SPEC ITSELF is checked first, and it is not a formality.
+//
+// A vector is supposed to state what the shared evaluator does — but a vector
+// can simply be WRONG, and until this ran only against the mirrors, a wrong one
+// looked exactly like two mirrors that had drifted. That happened: a playlist
+// vector used "PLbad" as a playlist id, which fails the id regex everywhere, so
+// both mirrors "failed" a case the spec would have failed too.
 const MIRRORS = [
+  { id: "shared (spec)", path: "../../shared/dist/policy/policy-model.js" },
   { id: "windows", path: "../../windows/extension/background.js" },
   { id: "macos", path: "../../apple/SafariExtension/Extension/background.js" },
 ];

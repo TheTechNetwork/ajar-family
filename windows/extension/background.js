@@ -276,17 +276,36 @@ function normalizeExactUrl(raw) {
     const u = new URL(raw);
     u.hostname = u.hostname.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
     u.hash = "";
+    // Credentials in the authority: same page, and it used to be a different key.
+    u.username = "";
+    u.password = "";
     u.searchParams.sort();
     let s = u.toString();
     s = s.replace(/\/$/, "");
+    // Percent-encoding, decoded ONLY where unambiguous — a decode that
+    // reintroduces a delimiter changes what the URL means.
+    s = s.replace(/%[0-9A-Fa-f]{2}/g, (esc) => {
+      let ch;
+      try { ch = decodeURIComponent(esc); } catch { return esc; }
+      return /^[A-Za-z0-9\-._~]$/.test(ch) ? ch : esc;
+    });
     return s;
   } catch {
     return raw;
   }
 }
 
+/** Both sides normalized, including the wildcard branch — it used to compare
+ *  the pattern against the RAW url while the exact branch normalized, so an
+ *  allow-pattern missed and a block-pattern was evaded by one character. */
 function matchesPattern(url, pattern) {
-  if (pattern.endsWith("*")) return url.startsWith(pattern.slice(0, -1));
+  if (pattern.endsWith("*")) {
+    const prefix = pattern.slice(0, -1);
+    let np;
+    try { np = normalizeExactUrl(prefix); new URL(prefix); }
+    catch { return url.startsWith(prefix); }
+    return normalizeExactUrl(url).startsWith(np);
+  }
   return normalizeExactUrl(url) === normalizeExactUrl(pattern);
 }
 
@@ -393,10 +412,23 @@ function matchTarget(r, ctx, yt, hosts, hostCats) {
       return matchesPattern(ctx.url, r.value) ? `URL_PATTERN:${r.value}` : null;
     case "YOUTUBE_VIDEO":
       return yt.videoId && yt.videoId === r.value ? `YOUTUBE_VIDEO:${r.value}` : null;
-    case "YOUTUBE_PLAYLIST":
-      return yt.playlistId && yt.playlistId === r.value ? `YOUTUBE_PLAYLIST:${r.value}` : null;
-    case "YOUTUBE_CHANNEL":
-      return yt.channelId === r.value || yt.channelHandle === r.value ? `YOUTUBE_CHANNEL:${r.value}` : null;
+    case "YOUTUBE_PLAYLIST": {
+      // `list=` is a query parameter the child types and nothing can verify the
+      // video is in the playlist, so an ALLOW on a playlist used to open EVERY
+      // video on YouTube. An untrusted value may ADD a block, never an allow:
+      // BLOCK matches a video carrying the list, ALLOW is the playlist page only.
+      if (!yt.playlistId || yt.playlistId !== r.value) return null;
+      if (r.action === "ALLOW" && yt.kind !== "playlist") return null;
+      return `YOUTUBE_PLAYLIST:${r.value}`;
+    }
+    case "YOUTUBE_CHANNEL": {
+      // Handles fold case in a YouTube URL; channel IDs (UC...) do not.
+      if (yt.channelId && yt.channelId === r.value) return `YOUTUBE_CHANNEL:${r.value}`;
+      if (yt.channelHandle && yt.channelHandle.toLowerCase() === r.value.toLowerCase()) {
+        return `YOUTUBE_CHANNEL:${r.value}`;
+      }
+      return null;
+    }
     case "DOMAIN":
       // Match the request host OR any CNAME-resolved canonical name (anti-cloaking).
       return hosts.some((h) => h === r.value || h.endsWith(`.${r.value}`)) ? `DOMAIN:${r.value}` : null;
@@ -470,7 +502,11 @@ export function evaluate(snapshot, ctx) {
       .sort(
         (a, b) =>
           (b.priority ?? 0) - (a.priority ?? 0) ||
-          scopeSpecificity(b.scope) - scopeSpecificity(a.scope),
+          scopeSpecificity(b.scope) - scopeSpecificity(a.scope) ||
+          // Deny wins a tie. Same tier, same priority, same scope fell through
+          // to insertion order, so the OLDEST rule won and a parent's later
+          // "keep it closed for good" was inert forever.
+          (a.action === b.action ? 0 : a.action === "BLOCK" ? -1 : 1),
       );
     for (const r of inTier) {
       const hit = matchTarget(r, ctx, yt, hosts, hostCats);
