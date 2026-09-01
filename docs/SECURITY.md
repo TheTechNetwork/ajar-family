@@ -43,8 +43,45 @@ living document for an alpha, not a completed audit.
   | Windows native-messaging host | **N/A — the host does not exist.** `windows/agent/` only writes registry policy; there is no snapshot/signature code. The extension's native branch is dead in v1 and the shipping path is the dev HTTP mode. |
   | Apple `PolicyStore.swift` | **No — verify-later TODO.** Any process with App-Group access could plant an allow-all snapshot. Must be closed before any device trial. |
 
-  Cached snapshots restored from `chrome.storage.local` / `browser.storage.local`
-  are **not** re-verified on load — only on fetch. Treated as a known gap.
+  Cached snapshots and cached category filters restored from
+  `chrome.storage.local` / `browser.storage.local` **are** re-verified on load,
+  against the pinned key, and discarded if they fail — that store is the child's
+  own profile directory, so "it was already in the cache" is not evidence of
+  where it came from. Windows already did this; macOS adopted whatever was in
+  storage until the trust-anchor work below — on that platform, writing one
+  storage key was a cheaper bypass than re-pointing the server. The signature is
+  now stored alongside the filter set so it can be re-checked at all. Apple's
+  `PolicyStore.swift` row above is unchanged.
+- **The extensions pin their trust anchor.** Verifying a signature only proves
+  "this came from the server I am configured to trust", so it is worth exactly
+  as much as control over that config. Both extensions now pin the signing key
+  and the address at first enrollment (`shared/trust/trust-anchor.ts`, mirrored
+  in `windows/extension/trust-anchor.js` and
+  `macos/safari-extension/Extension/trust-anchor.js`):
+  - the pin **survives Disconnect** — disconnecting stops enforcement on that
+    browser, it does not hand the next person the right to choose a new signer;
+  - re-connecting to the **same address with the same key** needs nothing extra
+    (a parent re-linking a wiped device); a **different address or a different
+    key** is refused unless the parent setup word checks out (PBKDF2-HMAC-SHA256,
+    210k iterations, per-device salt, verified on the device, never sent
+    anywhere). A change of *address* is refused **before** the one-time code is
+    redeemed, so a refused attempt does not cost a parent their code; a change of
+    *key* on the pinned address can only be seen after the server answers, so
+    that one does spend the code — the device config is still left untouched;
+  - policy verification reads the key **from the pin**, not from the device
+    config the options page writes, so rewriting `backendConfig.signingKeyB64`
+    alone achieves nothing;
+  - the server address is **not typeable in a shipped build**. It comes from the
+    bundle; the field appears only when `ajarDevMode` is set in extension
+    storage — the same call `web/parent/app.js resolveBackendUrl()` makes for its
+    `?api=` override, which is on only when a developer switches it on.
+
+  Held by `shared/trust/trust-vectors.ts`, run against the shared spec, both
+  hand-written mirrors, and each extension's real `backend-client.js` and
+  background worker by `tools/conformance/run-trust-anchor.mjs` (CI).
+
+  **This raises the cost of the bypass; it is not a boundary.** See the matching
+  entry under *Deferred* for what a determined child can still do.
 - **Safety floor (non-overridable).** Crisis, abuse and public-health resources
   (`shared/safety/safety-floor.ts`) resolve to ALLOW *above every tier* — above
   device rules, temporary blocks and default-deny. A parent cannot switch it off,
@@ -139,12 +176,29 @@ living document for an alpha, not a completed audit.
   parent API to an ops tool) before production.
 - **Rate limiter is per-instance.** Fine for a single node/isolate; needs a
   shared store to be effective across a fleet.
-- **The child controls the client's trust anchor.** The extension's Options page
-  is reachable by the child: Unenroll wipes cached policy, and re-enrolling
-  against an attacker-chosen `backendUrl` adopts that server's signing key, so
-  correctly-signed allow-all policy is accepted. Signature verification proves
-  "from the server I am configured to trust" — and that config is child-writable.
-  Needs the options page locked behind a parent secret + a pinned signing key.
+- **The extensions' trust anchor is only as strong as extension storage.** The
+  pin, the parent-word hash and the dev-mode flag all live in
+  `chrome.storage.local` / `browser.storage.local`, which the child can read AND
+  write from the devtools console of any extension page. Deleting the pin and the
+  word record returns the device to the state of a fresh install, where the next
+  enrollment pins whatever it is pointed at. So the bypass is now "open devtools,
+  delete two storage keys, then re-enroll against your own server" rather than
+  "click Disconnect, type a URL, click Connect". That is a real increase in cost
+  and nothing more: a page cannot defend against a debugger attached to itself,
+  and the child can in any case disable or remove the extension from the
+  browser's own extensions screen.
+
+  Closing it properly is outside the extension: hold the anchor where the browser
+  profile cannot rewrite it (the Windows LocalSystem service's registry policy;
+  the macOS containing app), ship production builds without the options page (or
+  behind a build flag), and have the backend notice and tell a parent when a
+  device unenrolls or re-enrolls unexpectedly. Tracked as redteam C2.
+
+  Two smaller consequences, stated plainly: the word hash is readable, so a short
+  setup word is open to an offline guessing attack — 210k PBKDF2 iterations makes
+  that slow, not impossible; and a parent who forgets the setup word has no
+  recovery inside the page — removing and reinstalling the extension clears its
+  storage, which is also exactly what the child can do.
 - **One approved video no longer opens all of YouTube** (fixed: the playback
   carve-out now requires a sub-resource request type and, on `www.youtube.com`,
   a true player path). Media hosts remain opaque by design — an approved video

@@ -341,8 +341,9 @@ code { font-family: var(--font-mono); font-size: var(--t-sm);
       <div class="locked">
         <h2>Disconnect this browser</h2>
         <p>
-          Disconnecting turns ajar off here and lets this browser be pointed at a
-          different server. A parent's setup word is needed to do it.
+          Disconnecting turns ajar off here. A parent's setup word is needed to
+          do it, and this browser stays set up for <code id="anchorUrl"></code>:
+          connecting it to a different address needs that word too.
         </p>
         <div id="lockSet">
           <div class="field">
@@ -365,12 +366,20 @@ code { font-family: var(--font-mono); font-size: var(--t-sm);
 
     <!-- ===================== connect ===================== -->
     <form id="form">
-      <div class="field">
+      <div id="pinnedNote" class="panel panel-info" hidden>
+        This browser is already set up for <code id="pinnedUrl"></code>. A
+        parent's setup word is needed to connect it to a different address.
+      </div>
+
+      <!-- The address comes from the build. It is editable only in dev mode
+           (storage key ajarDevMode = "1") — the same call web/parent/app.js
+           makes for its ?api= override, and off unless someone turns it on. -->
+      <p class="help" id="fixedServer">This browser connects to <code id="fixedUrl"></code>.</p>
+      <div class="field" id="serverField" hidden>
         <label for="backendUrl">ajar server address</label>
         <input id="backendUrl" type="url" inputmode="url" autocomplete="url"
-               placeholder="http://localhost:8787" value="http://localhost:8787"
-               aria-describedby="backendHelp" required />
-        <p class="help" id="backendHelp">Leave this as it is unless a parent told you to change it.</p>
+               placeholder="http://localhost:8787" aria-describedby="backendHelp" />
+        <p class="help" id="backendHelp">Dev mode is on for this browser, so the address can be changed.</p>
       </div>
 
       <div class="field">
@@ -390,7 +399,9 @@ code { font-family: var(--font-mono); font-size: var(--t-sm);
       <div class="field">
         <label for="parentWord">Parent setup word</label>
         <input id="parentWord" type="password" autocomplete="new-password"
-               aria-describedby="parentWordHelp" minlength="6" required />
+               aria-describedby="parentWordHelp" />
+        <!-- options.js rewrites this help text: a first setup asks a parent to
+             pick a word, a re-setup asks for the word they already picked. -->
         <p class="help" id="parentWordHelp">
           A parent picks this now, and needs it to disconnect this browser later.
           At least 6 characters. Do not tell the kid this browser is for.
