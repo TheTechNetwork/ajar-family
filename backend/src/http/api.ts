@@ -225,6 +225,23 @@ function escapeHtml(v: string): string {
 }
 
 /**
+ * A value safe to embed in an inline `<script>`.
+ *
+ * `JSON.stringify` escapes quotes and backslashes and stops there: `</script>`
+ * inside the string would close the element and everything after it would be
+ * markup. The one value this is used on is a parsed-and-reserialised URL, where
+ * `<` and `>` are already percent-encoded and a `<` in the host makes parsing
+ * throw — so it cannot happen today. It is escaped anyway, because "cannot
+ * happen" is doing a lot of work in a sentence about script injection, and the
+ * cost is one replace.
+ */
+function jsonForScript(value: string): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c").replace(/>/g, "\\u003e")
+    .replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+}
+
+/**
  * Pull `u` out of the block page's query string WITHOUT letting a `&` inside it
  * end the value.
  *
@@ -433,6 +450,8 @@ export function buildRouter(app: App): Router {
   .btn { display:flex; align-items:center; justify-content:center; width:100%;
          min-height:52px; background:var(--yes); color:var(--yes-ink); text-decoration:none;
          border-radius:999px; font-size:16px; font-weight:600; }
+  .btn.again { background:transparent; color:var(--accent-ink); border:1px solid var(--line);
+               margin-top:12px; }
   .foot { font-size:14px; color:var(--muted); text-align:center; margin:16px 0 0; }
 </style></head>
 <body><div class="card">
@@ -449,10 +468,55 @@ export function buildRouter(app: App): Router {
     <details><summary>Details</summary><div class="url">${shown}</div></details>
   </div>
   <a class="btn" href="${escapeHtml(deepLink)}">${askLabel}</a>
+  <a class="btn again" href="${shown}" id="again">Try the page again</a>
   <p class="foot">New sites go past a parent first.</p>`
          : `<h1>This page is closed</h1>
   <p class="sub">No address came through, so there is nothing to ask about yet.</p>`}
-</div></body></html>`);
+</div>
+${safe ? `<script>
+/* Reloading this page should land the child back on the page a parent just
+   approved — not on this page again.
+ *
+ * The block page cannot ASK whether the grant landed. It is unauthenticated and
+ * holds no device token, and an endpoint that answered "is this allowed yet?"
+ * to anyone who asked would be a policy oracle. It does not need to: navigating
+ * to the target puts the question to the filter, which is the only thing whose
+ * answer is authoritative. Allowed, the page loads. Still blocked, the filter
+ * serves this page again.
+ *
+ * WHICH IS ALSO THE TRAP. Retrying on every load is an infinite bounce — block
+ * page, target, blocked, block page, target. The guard is the navigation TYPE:
+ * only a RELOAD retries. The render the filter produces when it blocks a page is
+ * a "navigate", and so is the one that comes back from a refused retry, so a
+ * reload costs exactly one attempt and can never chain into a second.
+ *
+ * That also means a child's first block is unchanged — no bounce, no flash, the
+ * page and its buttons straight away. Only an explicit refresh, which is a child
+ * saying "I think it is unlocked now", spends a navigation on finding out.
+ *
+ * Inline, and the only script here. The no-scripts rule this page was written
+ * under is about FETCHES: an external asset can itself be blocked by the filter
+ * that put the child here, and a block page that cannot render is a child who
+ * cannot ask. Inline code fetches nothing, so the reason does not apply to it.
+ * Everything below degrades to the "Try the page again" button, which needs no
+ * script at all.
+ */
+(function () {
+  var target = ${jsonForScript(safe)};
+  var reloaded = false;
+  try {
+    var nav = performance.getEntriesByType("navigation")[0];
+    if (nav) reloaded = nav.type === "reload";
+    // performance.navigation is deprecated and still the only answer in older
+    // WebKit, which is exactly what an older iOS puts this page in.
+    else if (performance.navigation) reloaded = performance.navigation.type === 1;
+  } catch (e) { /* no timing API: never auto-retry, the button still works */ }
+  // replace(), not assign(): a child who taps back should reach where they were
+  // before, not walk back through a stack of block pages.
+  if (reloaded) location.replace(target);
+})();
+</script>` : ""}
+</body></html>`);
   });
   // Machine-readable API contract (the source of truth clients integrate against).
   r.get("/openapi.json", async () => ok(openapiDocument));

@@ -193,3 +193,50 @@ test("end to end: a multi-param page reaches the button with its query whole", a
   const carried = new URL(link!.replace(/&amp;/g, "&")).searchParams.get("u");
   assert.equal(carried, "https://example.com/article?id=123&page=2");
 });
+
+// --- getting back to the page after a parent says yes ------------------------
+
+test("the page offers a way back to the target without any script", async () => {
+  // The load-bearing path. A child whose parent has just approved needs an
+  // action that works with no JS, no storage and no policy lookup: navigating to
+  // the target puts the question to the filter, which is the only thing whose
+  // answer is authoritative.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, "/blocked?u=www.youtube.com/watch?v=abc&t=30")).body);
+
+  const again = /<a class="btn again" href="([^"]*)"/.exec(page)?.[1];
+  assert.equal(again?.replace(/&amp;/g, "&"), "https://www.youtube.com/watch?v=abc&t=30");
+});
+
+test("the auto-retry fires only on a RELOAD, which is what stops it looping", async () => {
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, "/blocked?u=www.youtube.com/")).body);
+
+  // The filter's own render is a "navigate", and so is the one that comes back
+  // from a refused retry — so the retry can never chain into a second.
+  assert.match(page, /reloaded = nav\.type === "reload"/);
+  assert.match(page, /if \(reloaded\) location\.replace\(target\)/);
+  assert.doesNotMatch(page, /setInterval|setTimeout/, "no polling, no timers");
+});
+
+test("the closed page carries no script at all", async () => {
+  // Nothing to retry, so nothing to run.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, "/blocked")).body);
+  assert.doesNotMatch(page, /<script/);
+});
+
+test("the target is escaped for a script context, not just for HTML", async () => {
+  // JSON.stringify alone would let a `</script>` in the value close the element.
+  // A parsed URL cannot carry one — `<` is percent-encoded and a `<` in the host
+  // makes parsing throw — but the escaping does not rely on that reasoning.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, `/blocked?u=${encodeURIComponent("example.com/</script><img src=x>")}`)).body);
+
+  assert.doesNotMatch(page, /<\/script><img/, "the value did not break out of the script");
+  assert.match(page, /var target = "[^"]*"/, "and it is still a plain string literal");
+});
