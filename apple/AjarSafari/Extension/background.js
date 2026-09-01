@@ -637,13 +637,28 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
 
   if (msg?.type === "EVALUATE_URL") {
     // content.js observed an in-page (pushState/replaceState/popstate) route
-    // change that never hit the network. Re-evaluate and tell it to redirect.
+    // change that never hit the network. Re-evaluate and tell it what to do.
     // A pushState route change is a real load as far as a parent is concerned,
     // even though no network navigation fired.
+    //
+    // WHICH FRAME MATTERS. The content script runs in every frame
+    // (`all_frames: true` — an embed has to be gated too), and this used to
+    // redirect the whole TAB for whatever any of them reported. So a blocked
+    // iframe on an allowed page — an ad, a widget, an embedded player — would
+    // throw the child out of the page they were allowed to be on and onto the
+    // block page for a URL they never asked for. The navigation path above has
+    // always guarded this with `details.frameId !== 0`; the message path did
+    // not.
+    //
+    // `sender.frameId` is the browser's account of where the message came from,
+    // not the page's, so a hostile frame cannot claim to be the top one.
+    const isTopFrame = sender.frameId === 0;
     const res = decide(msg.url);
     const { blocked, key, reason } = res;
-    if (!blocked) spendOnce(res);
-    if (blocked && sender.tab?.id != null) {
+    // Only a top-level load spends a one-time grant, same rule as the
+    // navigation path: a sub-resource would burn it before the page rendered.
+    if (!blocked && isTopFrame) spendOnce(res);
+    if (blocked && isTopFrame && sender.tab?.id != null) {
       try {
         // Same three arguments as the navigation path above. An SPA route change
         // is a real load to a parent, so it must not be the one that arrives
@@ -653,7 +668,11 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
         console.warn("[guard] SPA redirect failed:", e);
       }
     }
-    return { blocked };
+    // A blocked SUBFRAME gets `blocked: true` and no redirect: the frame stops
+    // its own media and empties itself (content.js), and the page around it is
+    // left alone. Blocking an embed must not be indistinguishable from blocking
+    // the page that contains it.
+    return { blocked, top: isTopFrame };
   }
 
   if (msg?.type === "REQUEST_ACCESS") {

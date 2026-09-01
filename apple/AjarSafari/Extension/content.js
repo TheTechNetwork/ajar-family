@@ -25,11 +25,21 @@
     if (url === lastUrl) return;
     lastUrl = url;
     try {
-      // Ask the background worker to evaluate. It redirects the tab to
-      // blocked.html if the new route is blocked; we don't need the reply, but
-      // as a belt-and-suspenders stop we blank the media element meanwhile.
+      // Ask the background worker to evaluate.
+      //
+      // TOP FRAME: it redirects the tab to blocked.html; stopping playback here
+      // is a belt-and-braces cover for the window before the redirect lands.
+      //
+      // SUBFRAME: it deliberately does NOT redirect — throwing the child off an
+      // allowed page because an embed on it is blocked is its own bug — so this
+      // frame is what closes itself. Stop the media and empty the document, and
+      // the surrounding page carries on.
       browser.runtime.sendMessage({ type: "EVALUATE_URL", url }).then((res) => {
-        if (res && res.blocked) hardStopPlayback();
+        if (!res || !res.blocked) return;
+        hardStopPlayback();
+        // `res.top` is the background worker's reading of sender.frameId, not
+        // this frame's own claim about itself.
+        if (res.top === false) closeThisFrame();
       });
     } catch (e) {
       // Background worker may be briefly unloaded (Safari); the next route
@@ -51,6 +61,26 @@
       } catch {
         /* ignore */
       }
+    }
+  }
+
+  /**
+   * Blank a blocked SUBFRAME in place.
+   *
+   * No block page and no Request-Access here: the page around this frame is
+   * allowed, an ask filed from an invisible ad frame is not something a parent
+   * could make sense of, and a full block page rendered inside a 300x250 box is
+   * not a thing a child can read or use. It goes quiet instead. If the child
+   * wants the embedded thing, they open it, and that is a top-level navigation
+   * with a block page and a button.
+   */
+  function closeThisFrame() {
+    try {
+      document.documentElement?.replaceChildren();
+      // Stop whatever the frame was still fetching for itself.
+      window.stop?.();
+    } catch {
+      /* ignore — a cross-origin or already-torn-down frame */
     }
   }
 
