@@ -173,6 +173,35 @@
       <p class="errline" id="pkErr"></p>
     </section>
 
+    <!-- ================= Closing the account ================= -->
+    <section class="card hide" id="dangerCard" aria-labelledby="dangerH">
+      <div class="cardhead">
+        <h2 id="dangerH">Close your account</h2>
+      </div>
+      <p class="help" id="dangerWhat">
+        This deletes your account and everything in it. If you are the only grown-up on a family,
+        that family goes too — children, their devices, every rule and every request. It cannot be undone.
+      </p>
+      <p class="help">
+        Devices already set up will stop receiving updates. They keep enforcing the last rules they
+        were given until they are removed from the device.
+      </p>
+      <div class="actions">
+        <button type="button" class="btn-ghost" id="btnCloseAccount">Close my account…</button>
+      </div>
+      <form id="closeForm" class="hide" novalidate>
+        <div class="field">
+          <label for="closePw">Type your password to confirm</label>
+          <input id="closePw" type="password" autocomplete="current-password" />
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn-primary" id="btnCloseConfirm">Delete everything</button>
+          <button type="button" class="btn-ghost" id="btnCloseCancel">Keep my account</button>
+        </div>
+      </form>
+      <p class="errline" id="closeErr"></p>
+    </section>
+
     <!-- ================= 1. THE JOB: asks ================= -->
     <section class="card hide" id="requestsCard" aria-labelledby="asksH">
       <div class="cardhead">

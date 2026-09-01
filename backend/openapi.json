@@ -2410,6 +2410,80 @@
       }
     },
     "/v1/me": {
+      "delete": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Close this account and erase it",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Re-authenticates with the current password: this is the most destructive call in the API and a live session on a shared computer is not enough. A family where somebody else is also an OWNER survives, minus this membership; a family where this account was the last OWNER is erased with it — children, devices, rules, grants, requests, decisions, enrollment codes and the audit log. Devices of an erased family stop authenticating and keep enforcing the last policy they hold, exactly as they do offline.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "password"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "const": true
+                    },
+                    "familiesDeleted": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "familiesDeleted"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "tags": [
           "auth"

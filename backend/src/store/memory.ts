@@ -172,6 +172,49 @@ export class MemoryStore implements Repository {
     }
   }
 
+  async deleteFamilyCascade(familyId: string) {
+    for (const c of [...this.children.values()]) {
+      if (c.familyId === familyId) await this.deleteChildCascade(familyId, c.id);
+    }
+    // Devices, rules and grants scoped to the FAMILY rather than to any child
+    // survive deleteChildCascade, so they are swept explicitly. A family-scoped
+    // rule left behind would be a dangling permission with nothing to check it
+    // against.
+    for (const [id, d] of [...this.devices]) if (d.familyId === familyId) this.devices.delete(id);
+    for (const [id, r] of [...this.rules]) if (r.scope.familyId === familyId) this.rules.delete(id);
+    for (const [id, t] of [...this.tempRules]) if (t.scope.familyId === familyId) this.tempRules.delete(id);
+    for (const [id, r] of [...this.requests]) if (r.familyId === familyId) this.requests.delete(id);
+    for (const [id, d] of [...this.decisions]) if (d.familyId === familyId) this.decisions.delete(id);
+    for (const [id, e] of [...this.enrollments]) if (e.familyId === familyId) this.enrollments.delete(id);
+    for (const [id, m] of [...this.memberships]) if (m.familyId === familyId) this.memberships.delete(id);
+    for (const k of [...this.defaults.keys()]) if (k.startsWith(`${familyId}:`)) this.defaults.delete(k);
+    for (const k of [...this.versions.keys()]) if (k.startsWith(`${familyId}:`)) this.versions.delete(k);
+    // The audit log goes too. It is a record OF this family — who approved what
+    // for which child — so keeping it after an erasure request would keep the
+    // most sensitive thing we hold about them.
+    this.audit = this.audit.filter((a) => a.familyId !== familyId);
+    this.families.delete(familyId);
+  }
+
+  async deleteUserCascade(userId: string) {
+    for (const [id, s] of [...this.sessions]) if (s.userId === userId) this.sessions.delete(id);
+    for (const [id, c] of [...this.credentials]) if (c.userId === userId) this.credentials.delete(id);
+    for (const [k, c] of [...this.challenges]) if (c.userId === userId) this.challenges.delete(k);
+    for (const [id, e] of [...this.endpoints]) if (e.userId === userId) this.endpoints.delete(id);
+    for (const [k, t] of [...this.resetTokens]) if (t.userId === userId) this.resetTokens.delete(k);
+    for (const [k, t] of [...this.verifyTokens]) if (t.userId === userId) this.verifyTokens.delete(k);
+    for (const [id, m] of [...this.memberships]) if (m.userId === userId) this.memberships.delete(id);
+    const user = this.users.get(userId);
+    // A pending sign-up for the same address would otherwise outlive the account
+    // and let it be recreated by a link from before the deletion.
+    if (user) {
+      for (const [k, p] of [...this.pendingRegistrations]) {
+        if (p.email === user.email) this.pendingRegistrations.delete(k);
+      }
+    }
+    this.users.delete(userId);
+  }
+
   async deleteDeviceCascade(familyId: string, deviceId: string) {
     for (const [id, r] of [...this.rules])
       if (r.scope.familyId === familyId && r.scope.deviceId === deviceId) this.rules.delete(id);

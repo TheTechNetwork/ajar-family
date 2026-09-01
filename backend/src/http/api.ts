@@ -58,6 +58,7 @@ const bodies = {
   verify: v.object({ token: v.str({ max: 512 }) }, { token: "confirmation code" }),
   changePassword: v.object({ currentPassword: password(), newPassword: password() },
     { currentPassword: "current password", newPassword: "new password" }),
+  deleteAccount: v.object({ password: password() }, { password: "password" }),
   dataset: v.object({ categories: v.dict(v.arrayOf(v.str({ max: 253 }))) }),
   family: v.object({ name: v.str({ max: 120 }) }, { name: "family name" }),
   addParent: v.object({
@@ -550,6 +551,21 @@ export function buildRouter(app: App): Router {
     const userId = await requireUser(app, req);
     await app.passkeys.remove(userId, req.params.id!);
     return ok({ ok: true });
+  });
+
+  /**
+   * Close this account. Re-authenticates first — this is the most destructive
+   * thing the API can do and a live session on a shared computer is not enough.
+   *
+   * DELETE with a body is unusual and deliberate: the alternative is a password
+   * in the query string, which lands in access logs and browser history.
+   */
+  r.del("/v1/me", async (req) => {
+    const capped = limited(authLimiter, req); if (capped) return capped;
+    const userId = await requireUser(app, req);
+    const b = await v.readBody(req, bodies.deleteAccount);
+    const out = await app.auth.deleteAccount(userId, b.password);
+    return ok({ deleted: true, familiesDeleted: out.familiesDeleted });
   });
 
   // Sign out THIS device (revoke the current session only).

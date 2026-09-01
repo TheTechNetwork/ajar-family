@@ -154,3 +154,57 @@ test("SqlStore: erasure cascades leave nothing behind", async () => {
   const m = (await app2.repo.getMembership(fam.id, guardian.id))!;
   assert.deepEqual(m.assignedChildIds, [keep.id], "the guardian no longer points at a deleted child");
 });
+
+test("SqlStore: closing an account erases it from the DATABASE, not just from memory", async () => {
+  // The MemoryStore tests (http/account-deletion.test.ts) prove the RULES —
+  // whose family survives, whose does not. They cannot prove the erasure, because
+  // a Map that forgets a key and a SQL table with a row still in it are the same
+  // thing from the domain's point of view. "Erasure that erases nothing" is the
+  // exact failure this project has already found in itself more than once, so
+  // this reopens the file and looks.
+  const kp = await generateSigningKeyPair();
+  const file = join(tmpdir(), `cf-${randomUUID()}.sqlite`);
+  const cfg = { authSecret: "t", signingPublicKeyB64: kp.publicKeyB64, signingPrivateKeyB64: kp.privateKeyB64 };
+
+  const store = await SqlStore.create(await createNodeSqlite(file));
+  const app = await App.create({ repo: store, config: cfg });
+
+  const owner = await app.auth.register("gone@x.com", "correct-horse", "Owner");
+  const fam = await app.family.createFamily("Fam", owner.id);
+  const child = await app.family.addChild(fam.id, owner.id, "Jane");
+  const tokRec = await app.enrollment.createToken(fam.id, owner.id, child.id, "IOS");
+  const device = await app.enrollment.redeem(tokRec.code, "pk", "iPhone");
+  await app.repo.createWebAuthnCredential({
+    id: "cred", userId: owner.id, publicKeyCose: "AAAA", alg: -7, signCount: 0,
+    label: "iPhone", backedUp: true, createdAt: new Date().toISOString(),
+  });
+  const req = await app.approvals.createRequest({
+    familyId: fam.id, childId: child.id, deviceId: device.id,
+    targetType: "YOUTUBE_VIDEO", targetValue: ALLOWED, url: yt(ALLOWED),
+  });
+  await app.approvals.decide({
+    familyId: fam.id, requestId: req.id, decidedBy: owner.id,
+    decision: "ALLOW", scope: "THIS_VIDEO", duration: { kind: "MINUTES", minutes: 30 }, policy: app.policy,
+  });
+  assert.ok((await app.repo.listAuditEvents(fam.id)).length > 0, "there is something to erase");
+
+  await app.auth.deleteAccount(owner.id, "correct-horse");
+
+  // A FRESH connection over the same file: nothing here can be an artefact of
+  // one connection's cache.
+  const reopened = await SqlStore.create(await createNodeSqlite(file));
+  assert.equal(await reopened.getUser(owner.id), null);
+  assert.equal(await reopened.getUserByEmail("gone@x.com"), null);
+  assert.equal(await reopened.getFamily(fam.id), null);
+  assert.equal(await reopened.getChild(child.id), null);
+  assert.equal(await reopened.getDevice(device.id), null);
+  assert.equal(await reopened.getAccessRequest(req.id), null);
+  assert.deepEqual(await reopened.listRules(fam.id), []);
+  assert.deepEqual(await reopened.listTemporaryRules(fam.id), []);
+  assert.deepEqual(await reopened.listMemberships(fam.id), []);
+  assert.deepEqual(await reopened.listSessionsForUser(owner.id), []);
+  assert.deepEqual(await reopened.listWebAuthnCredentials(owner.id), []);
+  assert.deepEqual(await reopened.listNotificationEndpoints(owner.id), []);
+  assert.deepEqual(await reopened.listAuditEvents(fam.id), [],
+    "the record of what a named child was told they could not look at goes too");
+});

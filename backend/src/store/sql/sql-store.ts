@@ -297,6 +297,45 @@ export class SqlStore implements Repository {
     }
   }
 
+  async deleteFamilyCascade(familyId: string) {
+    for (const c of await this.listChildren(familyId)) {
+      await this.deleteChildCascade(familyId, c.id);
+    }
+    // Rows scoped to the FAMILY rather than to any child survive the loop above,
+    // so they are swept explicitly. A family-scoped rule left behind would be a
+    // dangling permission with nothing to check it against.
+    await this.db.run("DELETE FROM devices WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM rules WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM temp_rules WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM access_requests WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM approval_decisions WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM enrollment_tokens WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM memberships WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM default_policy WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM policy_versions WHERE family_id=?", [familyId]);
+    // The audit log goes too. It is a record OF this family — who approved what
+    // for which child — so keeping it after an erasure request would keep the
+    // most sensitive thing we hold about them.
+    await this.db.run("DELETE FROM audit_events WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM families WHERE id=?", [familyId]);
+  }
+
+  async deleteUserCascade(userId: string) {
+    // Read the address before the row goes: a pending sign-up for the same
+    // address would otherwise outlive the account and let a link from before the
+    // deletion recreate it.
+    const user = await this.getUser(userId);
+    await this.db.run("DELETE FROM sessions WHERE user_id=?", [userId]);
+    await this.db.run("DELETE FROM webauthn_credentials WHERE user_id=?", [userId]);
+    await this.db.run("DELETE FROM webauthn_challenges WHERE user_id=?", [userId]);
+    await this.db.run("DELETE FROM notification_endpoints WHERE user_id=?", [userId]);
+    await this.db.run("DELETE FROM password_reset_tokens WHERE user_id=?", [userId]);
+    await this.db.run("DELETE FROM email_verification_tokens WHERE user_id=?", [userId]);
+    await this.db.run("DELETE FROM memberships WHERE user_id=?", [userId]);
+    if (user) await this.db.run("DELETE FROM pending_registrations WHERE email=?", [user.email]);
+    await this.db.run("DELETE FROM users WHERE id=?", [userId]);
+  }
+
   async deleteDeviceCascade(familyId: string, deviceId: string) {
     await this.db.run("DELETE FROM rules WHERE family_id=? AND scope_device_id=?", [familyId, deviceId]);
     await this.db.run("DELETE FROM temp_rules WHERE family_id=? AND scope_device_id=?", [familyId, deviceId]);

@@ -97,6 +97,23 @@ export interface Repository {
    *  device-scoped rules, grants and requests. Nothing is left dangling. */
   deleteChildCascade(familyId: string, childId: string): Promise<void>;
   deleteDeviceCascade(familyId: string, deviceId: string): Promise<void>;
+  /**
+   * Erase a whole family: every child (and so every device), every rule,
+   * grant, request, decision, enrollment code, audit row and membership.
+   * Used when the last owner closes their account — see AuthService.deleteAccount.
+   */
+  deleteFamilyCascade(familyId: string): Promise<void>;
+  /**
+   * Erase everything that belongs to ONE person: sessions, passkeys and their
+   * pending challenges, notification endpoints, outstanding reset and
+   * verification tokens, memberships, and the user row.
+   *
+   * Deliberately NOT families. Whether a family goes with its member is a
+   * domain question — it depends on who else owns it — and answering it here
+   * would either strand co-parents or delete their children's policy under
+   * them. AuthService decides; this erases.
+   */
+  deleteUserCascade(userId: string): Promise<void>;
 
   // enrollment
   createEnrollmentToken(t: EnrollmentToken): Promise<EnrollmentToken>;

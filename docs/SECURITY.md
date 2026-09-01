@@ -208,9 +208,29 @@ living document for an alpha, not a completed audit.
   the key that verifies every policy the device enforces.
 - **Erasure.** `DELETE` a child or a device cascades their rules, temporary
   grants, access requests, default policy, and any `LIMITED_GUARDIAN`
-  assignment naming them. A device token is now checked against a live device
-  row on every request, so a removed device's long-lived token stops working
-  immediately instead of surviving until expiry.
+  assignment naming them. A device token is checked against a live device row on
+  every request, so a removed device's long-lived token stops working immediately
+  instead of surviving until expiry.
+
+  **`DELETE /v1/me` closes a whole account**, re-authenticating with the current
+  password first — this is the most destructive call in the API and a live
+  session on a shared computer is not enough for it. What goes with it is a
+  decision, not a cascade: a family where somebody ELSE is also an `OWNER`
+  survives minus this membership, so a co-parent keeps their children and nothing
+  on a child's device changes; a family where this account was the last `OWNER`
+  is erased with it — children, devices, rules, grants, requests, decisions,
+  enrollment codes, memberships **and the audit log**, which is the record of
+  what a named child was told they could not look at and so the last thing that
+  should survive an erasure request.
+
+  Two limits, stated rather than implied. The devices of an erased family cannot
+  be reached: they stop authenticating (every request checks the device row) and
+  keep enforcing the last policy they hold, exactly as they do when the network
+  is down. There is no remote wipe, and a filter that failed OPEN on deletion
+  would be the worse answer. And erasure is verified against a reopened SQLite
+  file (`store/sql/sql-store.test.ts`) rather than only against the in-memory
+  store, because a Map that forgets a key and a table with a row still in it look
+  identical from the domain's side.
 - **Request dedupe.** An identical still-`PENDING` request from the same
   (child, device, target) is returned rather than re-created, so a reloading
   blocked page can no longer mint dozens of rows and dozens of notifications for

@@ -402,6 +402,66 @@ function promptForPasskey() {
   announce("Your account has no passkey yet. Add one to protect it.");
 }
 
+// ---------------------------------------------------------------------------
+// closing the account
+//
+// Required to exist: an app that lets you create an account has to let you
+// delete it from inside the app (App Store 5.1.1(v)). Required to be careful:
+// for the last owner of a family it takes the children, their devices and every
+// rule with it, and nothing here can undo that.
+//
+// Two deliberate frictions, and no more than two. Revealing the form is one act
+// and typing the password is another, which is enough to make it hard to do by
+// accident — while "type DELETE to confirm" would only teach a parent to type
+// DELETE. The password is the same re-authentication the server insists on.
+// ---------------------------------------------------------------------------
+
+$("btnCloseAccount").onclick = () => {
+  $("closeForm").classList.remove("hide");
+  $("btnCloseAccount").classList.add("hide");
+  $("closePw").focus();
+};
+
+$("btnCloseCancel").onclick = () => {
+  $("closeForm").classList.add("hide");
+  $("btnCloseAccount").classList.remove("hide");
+  $("closePw").value = "";
+  $("closeErr").textContent = "";
+  $("btnCloseAccount").focus();
+};
+
+$("closeForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("closeErr").textContent = "";
+  const password = $("closePw").value;
+  if (!password) { $("closeErr").textContent = "Type your password to confirm."; $("closePw").focus(); return; }
+
+  const btn = $("btnCloseConfirm");
+  btn.setAttribute("aria-disabled", "true");
+  announce("Closing your account…");
+  try {
+    await api("/v1/me", { method: "DELETE", body: { password } });
+    // Nothing to sign out of any more — the session went with the account. Clear
+    // the tokens before reloading or the console comes back trying to use them.
+    clearTokens();
+    localStorage.removeItem("cf_family");
+    document.body.innerHTML =
+      '<main class="wrap"><section class="card"><h2>Your account is closed</h2>'
+      + '<p>Everything has been deleted. If any devices are still set up, remove Ajar from them '
+      + 'when you get the chance — they can no longer be managed from here.</p></section></main>';
+  } catch (err) {
+    // The 401 here means "that password is wrong", not "your session ended", so
+    // the generic status copy would actively mislead.
+    $("closeErr").textContent = isAuthError(err)
+      ? "That password is not right."
+      : friendly(err);
+    announceAlert($("closeErr").textContent);
+    $("closePw").focus();
+  } finally {
+    btn.removeAttribute("aria-disabled");
+  }
+});
+
 $("signout").onclick = async () => {
   try { await api("/v1/auth/logout", { method: "POST" }); } catch { /* revoke best-effort */ }
   clearTokens();
@@ -416,6 +476,7 @@ async function afterLogin() {
   $("authCard").classList.add("hide");
   $("familyCard").classList.remove("hide");
   $("passkeysCard").classList.remove("hide");
+  $("dangerCard").classList.remove("hide");
   loadPasskeys();
   renderFamilyPick(me.families);
   if (!state.familyId && me.families[0]) await selectFamily(me.families[0].familyId);
