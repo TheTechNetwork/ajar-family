@@ -73,6 +73,15 @@ jobs:
       - name: Swift theme matches the canonical tokens
         run: node apple/check-theme-tokens.mjs
 
+      # The Safari extension's native handler reads AjarFilter's policy out of a
+      # shared App Group, and it cannot import PolicyStore — different Xcode
+      # project — so it keeps its own copy of the group name and four key names.
+      # A drifted copy compiles, runs, reads nothing, and looks exactly like a
+      # device the parent never enrolled, which is the one state that allows
+      # everything. Nothing but this catches it.
+      - name: App Group and its keys match across targets
+        run: node apple/check-app-group.mjs
+
       # The OpenAPI document is the client contract; fail if the committed file
       # drifts from the one the code generates.
       - name: OpenAPI is in sync

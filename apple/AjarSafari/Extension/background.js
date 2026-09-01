@@ -21,7 +21,7 @@
  */
 
 import { normalizeYouTube, youTubePolicyKey } from "./youtube-normalize.js";
-import { getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest, consumeGrant, getAnswers } from "./backend-client.js";
+import { adoptSigningKeyIfUnset, getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest, consumeGrant, getAnswers } from "./backend-client.js";
 import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
 import { makeResolver } from "./cname-resolve.js";
 
@@ -30,6 +30,13 @@ const CNAME = makeResolver();
 
 const STORAGE_KEY = "devicePolicySnapshot";
 const BLOCKED_PAGE = "blocked.html";
+
+/** "Has this device ever been enrolled?" — mirrors PolicyStore.isProvisioned.
+ *  It is what separates a browser this product was never set up on (allow: we
+ *  claim to filter nothing) from one that was set up and has since lost its
+ *  policy (block: something is wrong and the child must not profit from it). */
+const PROVISIONED_KEY = "ajarProvisioned";
+let provisioned = false;
 
 /** Policy source: backend HTTP mode (dev, enrolled via the options page) vs the
  *  native-host mode (production child agent). Selected at startup. */
@@ -57,8 +64,9 @@ let snapshot = null;
  */
 export async function restoreCachedPolicy() {
   try {
-    const got = await browser.storage.local.get([STORAGE_KEY, "categoryFilters"]);
+    const got = await browser.storage.local.get([STORAGE_KEY, "categoryFilters", PROVISIONED_KEY]);
     const key = await getVerifyingKey();
+    provisioned = got?.[PROVISIONED_KEY] === true;
 
     if (got?.[STORAGE_KEY] && key && await verifySnapshotSignature(got[STORAGE_KEY], key)) {
       snapshot = got[STORAGE_KEY];
@@ -78,7 +86,8 @@ export async function restoreCachedPolicy() {
       await browser.storage.local.remove("categoryFilters");
     }
   } catch (e) {
-    // Fail closed for YouTube gating if we can't read policy (see evaluate()).
+    // No policy. decide() decides what that means — and it is not a
+    // YouTube-specific question (see the no-snapshot branch there).
     console.warn("[guard] could not load snapshot:", e);
     snapshot = null;
   }
@@ -118,51 +127,132 @@ browser.storage.onChanged.addListener((changes, area) => {
 });
 
 // ---------------------------------------------------------------------------
-// Native messaging host (child agent) — signed snapshot in, access requests out
+// Native messaging — the containing app hands over the signed snapshot
 // ---------------------------------------------------------------------------
 //
 // Safari routes native messaging through the containing app's
-// SafariWebExtensionHandler. Connection reliability across service-worker
-// unloads is an OPEN QUESTION (B4/B5): we reconnect on demand and also rely on
-// storage as the durable cache. In production the native host verifies the
-// Ed25519 signature on the DevicePolicySnapshot (ADR-010) before it is stored.
+// SafariWebExtensionHandler, which reads the snapshot AjarFilter's app already
+// wrote to the shared App Group. Safari unloads the service worker aggressively
+// (B4/B5), so nothing is held open across unloads: every read is a fresh
+// one-shot message, and browser.storage is the durable cache in between.
+//
+// Signature verification happens HERE, not natively (ADR-010): the App Group is
+// writable by anything holding that entitlement, so the native side passing the
+// bytes along is not evidence about who produced them.
 
-let nativePort = null;
+/**
+ * Ask the containing app for this device's policy.
+ *
+ * SAFARI DOES NOT IMPLEMENT `runtime.connectNative`. This code used to open a
+ * long-lived port to "com.example.youtubeguard.host" — a Chrome/Firefox idiom
+ * pointing at a placeholder host id that was never going to exist — and then
+ * waited for POLICY_SNAPSHOT messages that could not arrive. In Safari the
+ * channel is one-shot `sendNativeMessage`, routed to the containing app's
+ * `SafariWebExtensionHandler`; there is no port and nothing pushes.
+ *
+ * So the extension asks, on worker start and on a slow timer. The application
+ * id argument is required by the signature and ignored by Safari, which always
+ * routes to the extension's own container.
+ *
+ * FAIL CLOSED: the containing app is inside our App Group, but so is anything
+ * else with that entitlement, so the snapshot it hands back is verified against
+ * the pinned Ed25519 key here, exactly like the backend path. The native side
+ * passes bytes; it does not vouch for them.
+ */
+const NATIVE_APP_ID = "family.ajar.safari.Extension";
 
-function connectNative() {
+/** How often to re-ask the app for policy in native mode. An approval must land
+ *  in seconds, and this is the only pull there is, so it is deliberately short;
+ *  it is a local IPC read of a UserDefaults key, not a network call. */
+const NATIVE_POLL_MS = 5000;
+
+let nativeTimer = null;
+
+async function nativeGetPolicy() {
   try {
-    nativePort = browser.runtime.connectNative("com.example.youtubeguard.host");
-    nativePort.onMessage.addListener(async (msg) => {
-      if (msg?.type === "POLICY_SNAPSHOT" && msg.snapshot) {
-        // Fail closed: verify the Ed25519 signature before trusting a snapshot
-        // from the native host (a local process could otherwise inject an
-        // allow-all policy). Same check as the backend path in backend-client.js.
-        const key = await getVerifyingKey();
-        if (!key || !(await verifySnapshotSignature(msg.snapshot, key))) {
-          console.warn("[guard] rejected native snapshot: missing key or bad signature");
-          return;
-        }
-        await browser.storage.local.set({ [STORAGE_KEY]: msg.snapshot });
-        snapshot = msg.snapshot;
-      }
-    });
-    nativePort.onDisconnect.addListener(() => {
-      nativePort = null; // let the next send lazily reconnect
-    });
+    return await browser.runtime.sendNativeMessage(NATIVE_APP_ID, { type: "GET_POLICY" });
   } catch (e) {
-    console.warn("[guard] native host unavailable:", e);
-    nativePort = null;
+    // The container is not installed, or this build is not in the App Group.
+    console.warn("[ajar] native policy unavailable:", e);
+    return null;
   }
 }
 
-/** Round-trip a blocked canonical id to the app/backend as an AccessRequest (B2). */
-function sendAccessRequest(req) {
-  if (!nativePort) connectNative();
-  try {
-    nativePort?.postMessage({ type: "ACCESS_REQUEST", request: req });
-  } catch (e) {
-    console.warn("[guard] failed to send access request:", e);
+/**
+ * Adopt whatever the app has, if it verifies.
+ *
+ * `provisioned` is stored even when there is no snapshot to adopt: it is what
+ * separates "this device was never set up" from "this device was set up and its
+ * policy is missing", and `decide()` treats those opposite ways.
+ */
+async function syncFromNative() {
+  const res = await nativeGetPolicy();
+  if (!res || res.ok !== true) return;
+
+  await browser.storage.local.set({ [PROVISIONED_KEY]: res.provisioned === true });
+  provisioned = res.provisioned === true;
+
+  // The key the app enrolled with. Adopted only when this profile has no
+  // pinned anchor and no configured key of its own — a native answer must not
+  // be able to REPLACE a pin, or App-Group write access would become the way to
+  // re-point trust. Same refusal as PolicyStore.enrollSigningKey.
+  if (res.signingKeyB64) {
+    const existing = await getVerifyingKey();
+    if (!existing) {
+      await adoptSigningKeyIfUnset(res.signingKeyB64);
+    } else if (existing !== res.signingKeyB64) {
+      console.warn("[ajar] native signing key differs from the pinned one; keeping the pin");
+    }
   }
+
+  if (!res.snapshotJSON) return;
+  let next = null;
+  try { next = JSON.parse(res.snapshotJSON); } catch { next = null; }
+  if (!next) {
+    console.warn("[ajar] native snapshot did not parse");
+    return;
+  }
+  const key = await getVerifyingKey();
+  if (!key || !(await verifySnapshotSignature(next, key))) {
+    console.warn("[ajar] rejected native snapshot: missing key or bad signature");
+    return;
+  }
+  // Anti-replay, matching PolicyStore's high-water mark: a validly-signed OLD
+  // snapshot must not restore an expired grant or undo a new block.
+  if (snapshot && Number(next.version) < Number(snapshot.version)) {
+    console.warn("[ajar] ignoring a rolled-back native snapshot");
+    return;
+  }
+  snapshot = next;
+  await browser.storage.local.set({ [STORAGE_KEY]: next });
+}
+
+function startNativeSync() {
+  // No channel, no poll. Safari has sendNativeMessage; a plain browser loading
+  // these files (the conformance harness, a dev run in Chrome) does not, and a
+  // timer that can only ever log a failure is worse than none.
+  if (typeof browser?.runtime?.sendNativeMessage !== "function") {
+    console.warn("[ajar] no native messaging here; policy must come from the options page");
+    return;
+  }
+  syncFromNative();
+  if (nativeTimer == null) {
+    nativeTimer = setInterval(syncFromNative, NATIVE_POLL_MS);
+    // Browsers return a number and ignore this; Node returns a Timeout, and
+    // without it a harness that imports this module never exits.
+    nativeTimer?.unref?.();
+  }
+}
+
+/** Round-trip a blocked canonical id to the app as an AccessRequest (B2).
+ *
+ *  NOT BUILT: the containing app serves GET_POLICY and nothing else, so this
+ *  says so instead of posting into a void. The block page falls back to the
+ *  backend path, and `REQUEST_ACCESS` below reports the failure to it rather
+ *  than telling a child their parent was asked when nobody was.
+ */
+async function sendAccessRequest(_req) {
+  return { ok: false, error: "native-request-not-implemented" };
 }
 
 // ---------------------------------------------------------------------------
@@ -427,10 +517,27 @@ function decide(url) {
   try { scheme = new URL(url).protocol; } catch { return { blocked: false }; }
   if (scheme !== "http:" && scheme !== "https:") return { blocked: false };
 
+  // NO POLICY. This used to fail CLOSED for YouTube and OPEN for everything
+  // else, which made the fail path a statement about one website rather than
+  // about the product: on a device that was enrolled and has since lost its
+  // policy, every site but YouTube was wide open, and deleting the cached
+  // snapshot was the bypass. The question "what does the absence of policy
+  // mean?" has nothing to do with which site is being visited.
+  //
+  // Answered the same way the native filter answers it (PolicyStore.state()):
+  //   never enrolled  -> ALLOW. We do not claim to filter this device, and a
+  //                      browser that blocks everything before setup is broken,
+  //                      not safe.
+  //   enrolled, no policy -> BLOCK. The snapshot went missing or would not
+  //                      verify; treating that as "allow" makes tampering with
+  //                      the cache the whole attack.
   if (!snapshot) {
-    return yt.isYouTube
-      ? { blocked: true, key: youTubePolicyKey(yt), reason: "no-policy:fail-closed" }
-      : { blocked: false, reason: "no-policy:fail-open" };
+    if (!provisioned) return { blocked: false, reason: "no-policy:not-enrolled" };
+    return {
+      blocked: true,
+      key: yt.isYouTube ? youTubePolicyKey(yt) : `URL:${url}`,
+      reason: "no-policy:enrolled-fail-closed",
+    };
   }
 
   const host = (() => { try { return new URL(url).hostname; } catch { return ""; } })();
@@ -563,12 +670,14 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
         return { ok: false, error: String(e) };
       }
     }
-    // Native-host mode: hand the blocked canonical id to the app/backend bridge.
-    sendAccessRequest({
+    // Native mode. The containing app serves policy and nothing else yet, so
+    // this reports the failure rather than returning ok — the block page tells a
+    // child their parent has been asked, and it must not say that when no
+    // request was sent anywhere.
+    return await sendAccessRequest({
       canonicalKey: key, url: msg.url, reason: msg.reason || "",
       childId: snapshot?.childId, deviceId: snapshot?.deviceId, requestedAt: new Date().toISOString(),
     });
-    return { ok: true };
   }
 
   // What the parent decided, asked for by the block page. The page used to work
@@ -605,6 +714,9 @@ getConfig().then((cfg) => {
       await browser.storage.local.set({ categoryFilters: { set, signature: signature ?? "" } });
     });
   } else {
-    connectNative();
+    // Apple: the containing app is the policy source, over one-shot native
+    // messaging. This is the path a real install takes — the backend mode above
+    // is the development one, enrolled by hand through the options page.
+    startNativeSync();
   }
 });

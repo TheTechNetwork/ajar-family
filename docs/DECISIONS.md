@@ -608,3 +608,41 @@ be the product, which is why it keeps coming up short.
 - Nothing here changes the on-device posture: every layer above evaluates the
   signed snapshot locally. No design in this ADR sends a URL anywhere.
 
+### Amendment (2026-09-01) — packaged is not installed, and installed is not working
+
+Two corrections after the target existed:
+
+**The extension had no way to get policy.** `SafariWebExtensionHandler` answered
+every message with `native-host-not-implemented`, and `background.js` reached for
+`runtime.connectNative("com.example.youtubeguard.host")` — a Chrome/Firefox
+long-lived port, aimed at a placeholder id, **in a browser that does not
+implement `connectNative` at all**. The only working policy source was the
+options-page backend enrollment, which on a real install would mean enrolling one
+device twice and holding two device identities for one child. So the extension
+would install, hold no policy, and answer every request from the no-policy
+fallback. "Compiles and is installable" was not "working".
+
+Fixed by making the containing app the policy source over Safari's one-shot
+`sendNativeMessage`: the handler reads the signed snapshot `AjarFilter`'s app
+already wrote to the shared App Group `group.family.ajar.filter`, and the
+JavaScript re-verifies the Ed25519 signature before trusting a field of it. One
+enrollment, one device identity, one snapshot, two enforcement surfaces. The
+native side passes bytes; it does not vouch for them, and it cannot replace a
+pinned key. `apple/check-app-group.mjs` runs in CI because the handler cannot
+import `PolicyStore` and therefore duplicates the group name and four key names,
+and every way of drifting them is silent — a drifted copy reads nothing and looks
+exactly like a device nobody enrolled, which is the one state that allows
+everything.
+
+**The no-policy fallback was shaped like YouTube.** It failed CLOSED for YouTube
+and OPEN for everything else, so on an enrolled device that had lost its policy
+every site but one was wide open and deleting the cached snapshot was the bypass.
+What the absence of policy means has nothing to do with which site is being
+visited. It now mirrors `PolicyStore.state()`: never enrolled → allow (we do not
+claim to filter this device); enrolled and policy missing or unverifiable →
+block.
+
+Still true, and still the honest limit: CI compiles this target, it does not run
+Safari. Whether iOS Safari honours the `webNavigation` + content-script approach
+is unmeasured and needs a device.
+

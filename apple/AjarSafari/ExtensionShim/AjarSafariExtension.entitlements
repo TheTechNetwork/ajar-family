@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Extension entitlements. Same App Group as the container and as AjarFilter:
+  this is the process that actually reads the snapshot (policyPayload()), so
+  omitting the group here fails at runtime with "app-group-unavailable" rather
+  than at build time.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.family.ajar.filter</string>
+    </array>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+</dict>
+</plist>

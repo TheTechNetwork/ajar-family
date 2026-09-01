@@ -75,13 +75,17 @@ targets:
     type: application
     supportedDestinations: [iOS, macOS]
     sources:
+      # The entitlements file is named by CODE_SIGN_ENTITLEMENTS below; listing
+      # it as a source too would only risk it being copied INTO the bundle.
       - path: App
+        excludes: ["*.entitlements"]
     dependencies:
       - target: AjarSafariExtension
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: family.ajar.safari
         PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_SAFARI_APP)
+        CODE_SIGN_ENTITLEMENTS: App/AjarSafari.entitlements
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
@@ -108,6 +112,7 @@ targets:
     supportedDestinations: [iOS, macOS]
     sources:
       - path: ExtensionShim
+        excludes: ["*.entitlements"]
       # The MV3 resources, copied in whole rather than listed file by file — a
       # new .js added to the extension must not need a project edit to ship.
       - path: Extension
@@ -117,6 +122,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: family.ajar.safari.Extension
         PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_SAFARI_EXT)
+        CODE_SIGN_ENTITLEMENTS: ExtensionShim/AjarSafariExtension.entitlements
     info:
       path: ExtensionShim/Info.plist
       properties:

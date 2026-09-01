@@ -34,6 +34,23 @@ export async function clearConfig() {
   await store.remove(CFG_KEY);
 }
 
+/**
+ * Record the signing key the containing app enrolled with (Apple native path).
+ *
+ * Deliberately a no-op when this profile already trusts a key: a native answer
+ * must never be able to REPLACE a pin, or App-Group write access would become
+ * the way to re-point trust. Same refusal as PolicyStore.enrollSigningKey, and
+ * the reason a change of trust anchor still needs the parent setup word.
+ *
+ * @returns {Promise<boolean>} true if this call is what set the key.
+ */
+export async function adoptSigningKeyIfUnset(spkiB64) {
+  if (!spkiB64) return false;
+  if (await getVerifyingKey()) return false;
+  await setConfig({ signingKeyB64: spkiB64 });
+  return true;
+}
+
 function b64(bytes) {
   let s = "";
   const u = new Uint8Array(bytes);
