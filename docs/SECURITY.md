@@ -153,14 +153,33 @@ living document for an alpha, not a completed audit.
   is never silently running with zero endpoints. Message bodies are deliberately
   terse (a notification about a blocked page discloses what a child tried to
   reach, and inboxes are often read on shared screens).
-- **"Just once" is single use.** A `grantKind: "ONCE"` approval was an ordinary
-  5-minute temporary rule with unlimited replays inside the window — the
-  narrowest option a parent could pick was materially wider than advertised. The
-  device now reports consumption
-  (`POST /v1/devices/{deviceId}/grants/{ruleId}/consume`); the grant is marked
-  spent server-side, the policy version bumps, and it is absent from every later
-  snapshot. Consumption state never travels to devices, so the signed wire shape
+- **"Just once" is single use — in the browser extensions.** A `grantKind:
+  "ONCE"` approval was an ordinary 5-minute temporary rule with unlimited replays
+  inside the window: the narrowest option a parent could pick was materially
+  wider than advertised. `POST /v1/devices/{deviceId}/grants/{ruleId}/consume`
+  marks it spent, bumps the policy version, and drops it from every later
+  snapshot; consumption state never travels to devices, so the signed wire shape
   is unchanged.
+
+  **This entry was written when the endpoint existed and no client called it.**
+  That is the defect class this document keeps finding in itself — a documented
+  safety that nothing implements — so read the scope carefully:
+
+  - **Windows and macOS Safari: enforced.** The extensions spend the grant on the
+    first top-level navigation, keep it spent locally while the new snapshot is
+    in flight, and report it. Only a top-level navigation counts: a favicon would
+    otherwise burn the grant before the page the parent approved had rendered.
+    Sub-resources of that one load still see the grant, which is what lets the
+    approved page finish loading.
+  - **iOS: NOT enforced. `ONCE` is still the 5-minute window there**, and the two
+    reasons are structural rather than unfinished work. `NEFilterFlow` does not
+    distinguish a top-level navigation from a sub-resource, so a filter that
+    spent the grant on the first flow it saw would spend it on the page's own
+    scripts and the approved video would not play. And the data provider
+    deliberately holds no device token — it is app-only precisely so the two
+    extensions cannot talk to the backend — so it has nothing to report with.
+    Solving it needs a way to identify a page load inside the filter; until then
+    an iOS "just once" is honestly a "just now".
 - **Local-time approvals.** `UNTIL_END_OF_DAY` expired at **UTC** midnight, i.e.
   5pm in California (the child was cut off after school on a grant the parent
   thought lasted until bedtime) and 9am the following morning in UTC+10 (most of

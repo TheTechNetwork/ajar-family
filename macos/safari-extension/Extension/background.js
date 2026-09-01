@@ -21,7 +21,7 @@
  */
 
 import { normalizeYouTube, youTubePolicyKey } from "./youtube-normalize.js";
-import { getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest } from "./backend-client.js";
+import { getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest, consumeGrant } from "./backend-client.js";
 import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
 import { makeResolver } from "./cname-resolve.js";
 
@@ -340,7 +340,9 @@ export function evaluate(snap, ctx) {
     );
   for (const t of temps) {
     const hit = matchTarget(t, ctx, yt, hosts, hostCats);
-    if (hit) return { action: t.action, reason: `temporary:${t.grantKind}`, matchedKey: hit };
+    // matchedRuleId is what makes a "just once" grant spendable: the caller has
+    // to be able to name the grant it is about to use up.
+    if (hit) return { action: t.action, reason: `temporary:${t.grantKind}`, matchedRuleId: t.id, matchedKey: hit };
   }
 
   const tierOrder = [
@@ -440,12 +442,55 @@ function decide(url) {
     resolvedHosts: CNAME.chainFor(host),
   };
   if (host) CNAME.prime(host); // fills the cache for subsequent navigations
-  const res = evaluate(snapshot, ctx);
+  // Top-level navigations see a policy with this device's already-spent one-time
+  // grants removed. decide() itself stays pure — spending is a side effect of an
+  // actual navigation, and the caller says when that is.
+  // Forget grants the policy no longer carries, so the set cannot grow for the
+  // life of the worker. Done here rather than at each `snapshot = ...` site
+  // because there are four of those and one of them will be missed.
+  for (const id of SPENT) {
+    if (!(snapshot.temporaryRules ?? []).some((t) => t.id === id)) SPENT.delete(id);
+  }
+  const view = SPENT.size > 0
+    ? { ...snapshot, temporaryRules: (snapshot.temporaryRules ?? []).filter((t) => !SPENT.has(t.id)) }
+    : snapshot;
+  const res = evaluate(view, ctx);
   return {
     blocked: res.action === "BLOCK",
     key: res.matchedKey || (yt.isYouTube ? youTubePolicyKey(yt) : `URL:${url}`),
     reason: res.reason,
+    ruleId: res.matchedRuleId,
   };
+}
+
+// ---------------------------------------------------------------------------
+// "Just once"
+//
+// The server hands out a signed snapshot and hears nothing until the next poll,
+// so it cannot know when the one allowed load happened — the device reports it.
+// Until this existed, "just once" meant "as many times as you like for five
+// minutes", five minutes being the backstop TTL.
+//
+// Only a top-level navigation spends it; sub-resources would burn the grant
+// before the approved page had rendered. Consumption is client-attested and
+// best-effort — see ApprovalService.consumeGrant for the residual risk, which is
+// bounded by that same TTL.
+// ---------------------------------------------------------------------------
+
+/** Grant ids this device has spent, pending the next snapshot. */
+const SPENT = new Set();
+
+function spendOnce(res) {
+  if (!res || res.blocked || res.reason !== "temporary:ONCE" || !res.ruleId) return;
+  if (SPENT.has(res.ruleId)) return;
+  SPENT.add(res.ruleId);
+  if (!BACKEND_MODE) return; // native-host mode has no channel for this yet
+  consumeGrant(res.ruleId).then((done) => {
+    // A failure leaves it in SPENT: this device stops re-using it either way and
+    // the server's TTL closes the window. Retrying could spend a grant the child
+    // never got to use.
+    if (!done) console.warn("[guard] could not report a spent one-time grant");
+  });
 }
 
 function blockedPageUrl(originalUrl, key) {
@@ -459,7 +504,9 @@ function blockedPageUrl(originalUrl, key) {
 browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
   if (details.frameId !== 0) return; // top-level only for redirects
   if (!snapshot) await restoreCachedPolicy();
-  const { blocked, key } = decide(details.url);
+  const res = decide(details.url);
+  const { blocked, key } = res;
+  if (!blocked) spendOnce(res);
   if (blocked) {
     try {
       await browser.tabs.update(details.tabId, { url: blockedPageUrl(details.url, key) });
@@ -479,7 +526,11 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
   if (msg?.type === "EVALUATE_URL") {
     // content.js observed an in-page (pushState/replaceState/popstate) route
     // change that never hit the network. Re-evaluate and tell it to redirect.
-    const { blocked, key } = decide(msg.url);
+    // A pushState route change is a real load as far as a parent is concerned,
+    // even though no network navigation fired.
+    const res = decide(msg.url);
+    const { blocked, key } = res;
+    if (!blocked) spendOnce(res);
     if (blocked && sender.tab?.id != null) {
       try {
         await browser.tabs.update(sender.tab.id, { url: blockedPageUrl(msg.url, key) });

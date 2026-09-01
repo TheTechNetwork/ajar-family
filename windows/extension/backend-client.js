@@ -173,6 +173,34 @@ export async function startCategoryFilterSync(onFilters) {
   }
 }
 
+/**
+ * Report that a single-use ("just once") grant has been spent.
+ *
+ * WHY IT MATTERS: without this call `grantKind: "ONCE"` is an unlimited-replay
+ * window that happens to be five minutes long, because the five-minute TTL is
+ * only the server's BACKSTOP — the grant is meant to end at the first load. The
+ * endpoint has existed since the grant semantics landed and nothing called it,
+ * which made "just once" the option in the console that did not do what it said.
+ *
+ * Best-effort by construction: consumption is client-attested (see
+ * ApprovalService.consumeGrant), so a failure here costs at most the rest of the
+ * backstop window and must never stop the page the parent just approved.
+ */
+export async function consumeGrant(ruleId) {
+  const cfg = await getConfig();
+  if (!cfg.backendUrl || !cfg.deviceToken || !cfg.deviceId) return false;
+  try {
+    const res = await fetch(
+      `${cfg.backendUrl}/v1/devices/${encodeURIComponent(cfg.deviceId)}/grants/${encodeURIComponent(ruleId)}/consume`,
+      { method: "POST", headers: { authorization: `Bearer ${cfg.deviceToken}` } });
+    // 410 GONE means somebody already spent it — the outcome we wanted, so it is
+    // a success from here.
+    return res.ok || res.status === 410;
+  } catch {
+    return false;
+  }
+}
+
 /** Post an access request from the block page. */
 export async function postAccessRequest({ targetType, targetValue, title, url, reason }) {
   const cfg = await getConfig();
