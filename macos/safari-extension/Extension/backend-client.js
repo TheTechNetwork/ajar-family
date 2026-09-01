@@ -6,8 +6,16 @@
  * (`chrome`). In production on macOS the child agent / native host is the policy
  * source and this HTTP path is for development; either way every snapshot is
  * Ed25519-verified (policy-verify.js) before it is trusted (fail closed).
+ *
+ * WHICH key is the whole question, so it is no longer read from this module's
+ * own config: it comes from the PINNED trust anchor (trust-anchor.js) when one
+ * exists, and enroll() will not move that pin without the parent setup word.
  */
 import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
+import {
+  BUNDLED_BACKEND_URL, TrustError, checkParentWord, decideEnrollment, isAllowedBackendUrl,
+  isDevMode, normalizeBackendUrl, pinTrustAnchor, readTrustAnchor, trustMessage,
+} from "./trust-anchor.js";
 
 const ext = globalThis.browser ?? globalThis.chrome;
 const store = ext.storage.local;
@@ -33,24 +41,67 @@ function b64(bytes) {
   return btoa(s);
 }
 
-export async function enroll(backendUrl, code, displayName) {
+/**
+ * The key this device verifies policy with.
+ *
+ * The pinned anchor wins over the config copy whenever one exists, so rewriting
+ * `backendConfig.signingKeyB64` alone buys an attacker nothing.
+ */
+export async function getVerifyingKey() {
+  const pin = await readTrustAnchor();
+  if (pin) return pin.signingKeyB64;
+  return (await getConfig()).signingKeyB64;
+}
+
+/**
+ * Enroll this browser as a device using a one-time code from the parent app.
+ *
+ * `opts.parentWord` is checked against the stored setup word, and is what makes
+ * a change of trust anchor a deliberate act. Enrollment is refused — leaving the
+ * existing config untouched — when the anchor says no.
+ */
+export async function enroll(backendUrl, code, displayName, opts = {}) {
+  const url = normalizeBackendUrl(backendUrl);
+  const pin = await readTrustAnchor();
+  // The address a build ships with, plus the one this device is already pinned
+  // to — a device enrolled by an older build must still be able to re-link to
+  // its own server without dev mode.
+  const allowed = !!url && (url === normalizeBackendUrl(pin?.backendUrl)
+    || isAllowedBackendUrl(url, { bundledUrl: BUNDLED_BACKEND_URL, devMode: await isDevMode() }));
+  if (!allowed) throw new TrustError("bad-url", trustMessage("bad-url"));
+
+  const unlocked = (await checkParentWord(opts.parentWord)) === true;
+
+  // PRE-FLIGHT, before the one-time code is spent: an attempt we already know we
+  // will refuse must not cost the parent their code.
+  const pre = decideEnrollment({ pin, backendUrl: url, signingKeyB64: null, unlocked });
+  if (!pre.ok) throw new TrustError(pre.reason, trustMessage(pre.reason));
+
   const kp = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
   const spki = await crypto.subtle.exportKey("spki", kp.publicKey);
-  const res = await fetch(`${backendUrl}/v1/enroll/redeem`, {
+  const res = await fetch(`${url}/v1/enroll/redeem`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ code, devicePublicKey: b64(spki), displayName }),
   });
   if (!res.ok) throw new Error(`enroll failed: ${res.status} ${await res.text()}`);
   const body = await res.json();
+
+  // The server has now named its signing key, so decide again. A server that
+  // answers with a key this device never pinned does not become trusted merely
+  // by having answered.
+  const post = decideEnrollment({ pin, backendUrl: url, signingKeyB64: body.signingPublicKeyB64, unlocked });
+  if (!post.ok) throw new TrustError(post.reason, trustMessage(post.reason));
+
   await setConfig({
-    backendUrl,
+    backendUrl: url,
     deviceToken: body.deviceToken,
     deviceId: body.device.id,
     childId: body.device.childId,
     signingKeyB64: body.signingPublicKeyB64,
     version: 0,
   });
+  await pinTrustAnchor(url, body.signingPublicKeyB64);
   return body.device;
 }
 
@@ -68,7 +119,7 @@ export async function startPolicySync(onSnapshot) {
       const body = await res.json();
       if (body && body.upToDate) continue;
       if (body && typeof body.version === "number") {
-        if (!(await verifySnapshotSignature(body, cfg.signingKeyB64))) { await sleep(2000); continue; }
+        if (!(await verifySnapshotSignature(body, await getVerifyingKey()))) { await sleep(2000); continue; }
         await setConfig({ version: body.version });
         onSnapshot(body, serverNowMs);
       }
@@ -83,16 +134,19 @@ export async function startPolicySync(onSnapshot) {
 export async function startCategoryFilterSync(onFilters) {
   for (;;) {
     const cfg = await getConfig();
-    if (!cfg.backendUrl || !cfg.deviceToken || !cfg.signingKeyB64) { await sleep(5000); continue; }
+    const key = await getVerifyingKey();
+    if (!cfg.backendUrl || !cfg.deviceToken || !key) { await sleep(5000); continue; }
     try {
       const res = await fetch(`${cfg.backendUrl}/v1/categories/filters?since=${cfg.filterVersion ?? -1}`,
         { headers: { authorization: `Bearer ${cfg.deviceToken}` } });
       if (res.ok) {
         const body = await res.json();
         if (body && body.set && body.signature &&
-            await verifyCanonicalSignature(body.set, body.signature, cfg.signingKeyB64)) {
+            await verifyCanonicalSignature(body.set, body.signature, key)) {
           await setConfig({ filterVersion: body.set.version });
-          onFilters(body.set);
+          // The signature travels with the set: the cache it is written to is
+          // child-writable, so it has to be re-checkable on the next load.
+          onFilters(body.set, body.signature);
         }
       }
     } catch { /* keep cached set */ }

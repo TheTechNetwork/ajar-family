@@ -39,7 +39,12 @@ end-to-end over HTTP (approval delivered to a parked long-poll in single-digit m
    (`xcrun safari-web-extension-converter Extension/`), build, and enable it in
    **Safari → Settings → Extensions** (grant host access to YouTube + your backend).
 3. Create a family/child + enrollment code (parent web console `web/parent/` or the API).
-4. Extension **Options** → backend URL + six-digit code → enroll.
+4. Extension **Options** → the one-time code + a parent setup word → enroll. The
+   address is fixed to the one in the bundle (`trust-anchor.js
+   BUNDLED_BACKEND_URL`, `http://localhost:8787` today); to point it somewhere
+   else, turn on dev mode from the options page console:
+   `browser.storage.local.set({ ajarDevMode: "1" })`, then reload the page. The
+   signing key is pinned at this first enrollment — see `docs/SECURITY.md`.
 5. Open a YouTube video → blocked → **Request Access** → approve from the parent
    console → the extension's long-poll applies the signed policy within seconds and
    the exact video plays; others stay blocked; the grant auto-expires.

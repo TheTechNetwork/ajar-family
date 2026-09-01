@@ -34,7 +34,12 @@ sources can populate it, selected automatically at startup:
 3. `chrome://extensions` → **Developer mode** → **Load unpacked** → select
    `windows/extension/`. (Loading unpacked grants blocking `webRequest` for dev, the
    same capability force-install grants in production.)
-4. Open the extension **Options**, enter the backend URL + the one-time code → enroll.
+4. Open the extension **Options**, enter the one-time code and a parent setup word
+   → enroll. The address is fixed to the one in the bundle
+   (`trust-anchor.js BUNDLED_BACKEND_URL`, `http://localhost:8787` today); to point
+   it somewhere else, turn on dev mode from the options page console:
+   `chrome.storage.local.set({ ajarDevMode: "1" })`, then reload the page.
+   The signing key is pinned at this first enrollment — see `docs/SECURITY.md`.
 5. Browse to a YouTube video → it's blocked (default-deny) → **Request Access** →
    approve it from the parent side (`POST /v1/families/:id/requests/:reqId/decide`
    with `scope:"THIS_VIDEO"`, `duration:{kind:"MINUTES",minutes:30}`) → the extension's

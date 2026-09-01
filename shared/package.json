@@ -20,6 +20,10 @@
       "types": "./dist/safety/safety-floor.d.ts",
       "default": "./dist/safety/safety-floor.js"
     },
+    "./trust": {
+      "types": "./dist/trust/trust-anchor.d.ts",
+      "default": "./dist/trust/trust-anchor.js"
+    },
     "./net": {
       "types": "./dist/net/cname.d.ts",
       "default": "./dist/net/cname.js"
