@@ -54,6 +54,8 @@
      visitor that coral means "a tick" before they ever meet the button. Teal
      wash reads as affirmative here without borrowing the action colour. */
   .no { background: var(--surface-2); color: var(--muted); }
+  /* A third verdict, because two forced a measured "mostly" to round to yes. */
+  .part { background: var(--warn-wash); color: var(--warn); }
   .yes { background: var(--accent-wash); color: var(--accent-ink); }
 
   ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 0; display: grid; gap: 1.25rem; }
@@ -130,11 +132,26 @@
       <div class="card">
         <h3>Ajar</h3>
         <div class="row"><span class="verdict yes">yes</span><span class="k">Open just that video</span></div>
-        <div class="row"><span class="verdict yes">yes</span><span class="k">Keep the rest of YouTube closed</span></div>
+        <!-- "yes" was measured false on iOS (ADR-001, on hardware 2026-08-31,
+             re-reported 2026-09-01). Not a YouTube quirk: in-page navigation on
+             ANY single-page app arrives as socket flows carrying a hostname and
+             no URL, so within such a site the filter enforces at HOST level. A
+             top-level navigation IS still checked, and the Windows/macOS
+             extensions have no gap — they see every request with its full URL.
+             "mostly" with the caveat named, rather than an unqualified yes. -->
+        <div class="row"><span class="verdict part">mostly</span><span class="k">Keep the rest of YouTube closed</span></div>
         <div class="row"><span class="verdict yes">yes</span><span class="k">Have it close again on its own</span></div>
         <p class="sub" style="margin:1rem 0 0">
           Ajar reads the whole address, so a yes can be as small as one video,
           for thirty minutes, and nothing else moves.
+        </p>
+        <p class="sub" style="margin:.75rem 0 0">
+          One gap we will not paper over, and it is not only YouTube: on an
+          iPhone or iPad we check every address you go to, but a site that loads
+          new things without changing pages — YouTube, Reddit, most social apps —
+          can move on from an approved page without asking us again. Typing an
+          address or opening a link in a new tab is always checked. On Windows
+          and Mac there is no gap.
         </p>
       </div>
     </div>

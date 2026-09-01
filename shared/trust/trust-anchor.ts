@@ -20,7 +20,7 @@
  *     not hand the next person the right to pick a new signer.
  *
  * This file is the SPEC. windows/extension/trust-anchor.js and
- * macos/safari-extension/Extension/trust-anchor.js are hand-written mirrors of
+ * apple/AjarSafari/Extension/trust-anchor.js are hand-written mirrors of
  * it (the extensions have no build step and cannot import from here), and
  * tools/conformance/run-trust-anchor.mjs runs shared/trust/trust-vectors.ts against
  * all three, so they cannot silently disagree.

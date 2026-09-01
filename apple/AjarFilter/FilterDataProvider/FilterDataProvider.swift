@@ -104,6 +104,26 @@ final class FilterDataProvider: NEFilterDataProvider {
         completionHandler()
     }
 
+    /// PER FLOW, NOT PER REQUEST — and that is the product's largest enforcement
+    /// gap, measured on device 2026-09-01.
+    ///
+    /// An approved video's page opens a connection to www.youtube.com and this
+    /// method allows it. Clicking another video from that page is a pushState
+    /// route change plus an XHR to /youtubei/v1/player carried over THAT SAME
+    /// connection — so no new flow is created, this method is never called
+    /// again, and the second video's id (which lives in the request body) never
+    /// reaches the filter at all. A fresh navigation in a new tab is still
+    /// caught, because that is a main-frame load and does produce a browser
+    /// flow.
+    ///
+    /// The browser extensions do not have this gap: they see a `requestType`,
+    /// so a main-frame load can never be mistaken for player plumbing, and a
+    /// content script catches the route change. Neither is available here.
+    ///
+    /// Closing it means returning `.filterDataVerdict(...)` and implementing
+    /// `handleOutboundData` to inspect each request on a connection — a
+    /// different class of filter, with real performance cost and a dependency on
+    /// YouTube's private InnerTube shape. Not a patch; see docs/UX_PLAN.md.
     override func handleNewFlow(_ flow: NEFilterFlow) -> NEFilterNewFlowVerdict {
         // WebKit browser flow → full URL available.
         if let browser = flow as? NEFilterBrowserFlow, let url = browser.url {
@@ -146,7 +166,46 @@ final class FilterDataProvider: NEFilterDataProvider {
     /// worth asking the control provider to resolve one first.
     private func verdict(forURL urlString: String, host: String, remediable: Bool) -> NEFilterNewFlowVerdict {
         let cached = cnameCache.chain(for: host)          // nil == not looked up yet
-        let decision = store.evaluate(urlString, resolvedHosts: cached ?? [])
+        var decision = store.evaluate(urlString, resolvedHosts: cached ?? [])
+
+        // THE PLAYBACK CHAIN, tied to the grant.
+        //
+        // `*.googlevideo.com`, `i.ytimg.com` and the rest carry an approved
+        // video's bytes and are not YouTube hosts, so they fell through to
+        // `webDefault: ALLOW` — reachable permanently, approved video or not.
+        // The support-host list existed in YouTubeNormalize.swift and NOTHING
+        // referenced it. So the media CDN for a default-denied service was
+        // simply open, and the one thing the whole product is built to gate was
+        // gated only at the watch page.
+        //
+        // Now: open while a video grant is live, shut otherwise. That is the
+        // rule shared/youtube/youtube-normalize.ts writes down and the browser
+        // extensions already implement.
+        //
+        // `pathIsKnown` is `remediable` — a browser flow has the full URL, a
+        // socket flow has a hostname and nothing else. That distinction is
+        // load-bearing on `www.youtube.com`: without a path we cannot tell
+        // `/youtubei/v1/player` from `/watch?v=…`, so the page host does not
+        // qualify for a socket flow and one approved video cannot open all of
+        // YouTube through the carve-out meant to keep it shut.
+        let path = remediable ? URLComponents(string: urlString)?.path : nil
+        if YouTube.isPlaybackSupport(host: host, path: path, pathIsKnown: remediable) {
+            // Only ever overrides a DEFAULT. An explicit rule is a parent's
+            // decision and outranks a carve-out — if someone has deliberately
+            // blocked a support host, this must not quietly undo it. The safety
+            // floor carries its own reason and is untouched either way.
+            let fromDefault = decision.reason.hasPrefix("default:")
+            if fromDefault, store.hasActiveVideoGrant() {
+                decision = EvalResult(action: .allow, reason: "playback-support",
+                                      matchedRuleId: nil, matchedKey: "PLAYBACK:\(Host.normalize(host))")
+            } else if fromDefault, decision.action == .allow, decision.reason == "default:web" {
+                // No grant, and the ONLY thing letting this through was the web
+                // default. Shut it: this is YouTube's plumbing, and the family
+                // asked for YouTube to be opt-in.
+                decision = EvalResult(action: .block, reason: "playback-support:no-grant",
+                                      matchedRuleId: nil, matchedKey: "PLAYBACK:\(Host.normalize(host))")
+            }
+        }
 
         // Only log when the decision is reportable: a safety-floor hit must never
         // be recorded (shared/safety/safety-floor.ts — "a floor that is

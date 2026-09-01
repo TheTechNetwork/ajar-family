@@ -150,7 +150,7 @@ reaches the parent contextless and the card's quote block is dead weight), and
 the loop never closes because the device is never told the decision.
 
 ### A9. macOS calls every blocked page "This video"
-`macos/safari-extension/Extension/blocked.html:413-419` maps `NOUN` for
+`apple/AjarSafari/Extension/blocked.html:413-419` maps `NOUN` for
 YouTube types only and falls back to `"This video"` — so a blocked news site
 announces itself as *"This video"* in 18px semibold. Windows covers `DOMAIN`
 and `URL` too and falls back to the hostname. Same file: `requestBtn` awaits
@@ -305,55 +305,116 @@ Button radius follows the same pattern: 10px, 999px, 12px, and `Capsule()`.
 
 ---
 
-## Enforcement: "once a URL is allowed the whole site works"
+## Enforcement: inside a single-page app, iOS filters by host, not by URL
 
-Reported from a real device, 2026-09-01, on iOS, reproduced BOTH by clicking
-through from the approved page and by typing a fresh URL on the same site.
+Reported from a real device, iOS, 2026-09-01, and then narrowed by the reporter
+to the behaviour that matters: **from an approved video's page, clicking any
+other video plays it — but opening a different video in a NEW TAB is correctly
+blocked.**
+
+That second half is the important half. A fresh navigation IS caught and
+remediated, so the filter, the rules and the matching all work. Only in-page
+navigation leaks.
 
 **Ruled out by reading the code.** Nothing widens a URL rule:
 
-| Layer | Checked | Result |
+| Layer | Where | Result |
 |---|---|---|
 | Rule minted by an approval | `services.ts` `mapScope` | `THIS_URL` → `URL` rule with the exact URL. Correct. |
-| Reference evaluator | `policy-model.ts` `matchTarget` | `URL` matches only on exact normalised equality. Correct. |
-| On-device matcher | `PolicyStore.swift` `matches` | Identical to the TS. Correct. |
+| Reference evaluator | `policy-model.ts` `matchTarget` | Matches only on exact normalised equality. Correct. |
+| On-device matcher | `PolicyStore.swift` `matches` | Behaviourally identical to the TS. Correct. |
 | URL normalisation | `URLNormalize.normalizeExact` | Careful mirror; preserves the path. Correct. |
+| YouTube default | `policy-model.ts` tier 9 | Any unmatched youtube.com URL → `default:youtube` BLOCK. Correct. |
 
-**What is actually wrong, and it is enforcement, not policy.**
+**The actual chain, and every link is in the code.**
 
-1. **`handleNewFlow` fails open, silently.** Its terminal `return .allow()`
-   catches a browser flow whose `url` is nil *and* a socket flow whose
-   `remoteHostname` is nil or empty — the latter being routine for a connection
-   to an already-resolved address. Those flows reach the network having never
-   been compared to a rule. Fail-open is defensible (with no host there is no
-   way to apply the safety floor either, so dropping would deny a child a crisis
-   line to enforce a policy we cannot read) — but it was invisible, omitted from
-   the very flow log someone would use to debug this. Now recorded as
-   `unpoliced:unidentifiable`, an action no rule can produce.
+1. The approved video's page loads as a WebKit browser flow and is allowed by
+   its rule. A connection to `www.youtube.com` is now open and allowed.
+2. Clicking another video is a `pushState` route change plus XHR to
+   `/youtubei/v1/player` — carried over **that already-open connection**.
+   `handleNewFlow` fires per flow, so no new flow is created and **nothing is
+   evaluated at all**. The video id for the second video never reaches the
+   provider: it is in the POST body of a request on a connection that was
+   approved for something else.
+3. Were a new connection opened, it would arrive as a socket flow, and
+   `FilterDataProvider.swift:168-172` returns `.allow()` for **any** socket flow
+   blocked by `default:youtube` — `applyYouTubeDefaultToSocketFlows` is `false`.
+4. The video bytes come from `*.googlevideo.com`, which is not a YouTube host,
+   so `webDefault: ALLOW` allows it. The hostname carries no video id, so there
+   is nothing to match on even in principle.
 
-2. **Socket flows bypass the YouTube default by design.**
-   `applyYouTubeDefaultToSocketFlows = false` returns `.allow()` for any socket
-   flow blocked by `default:youtube`, and `webDefault` is `ALLOW`, so every
-   socket connection to a YouTube host is allowed before and after any approval.
-   The file states the cost plainly: the YouTube native app is socket-only and
-   therefore unfiltered by this provider.
+**Why the browser extensions do not have this bug.** They see a `requestType`,
+so `isPlaybackSupportUrl` can allow the player plumbing while a main-frame load
+"NEVER qualifies, or one approved video opens all of YouTube"
+(`windows/extension/background.js`) — and a `content.js` catches `pushState` and
+re-asks the worker. `NEFilterDataProvider` has neither: no request type, and no
+way to run script in the page.
 
-3. **Per-URL control exists only for flows iOS reports as WebKit browser
-   flows.** An SPA route change produces none — which is exactly why the Windows
-   and macOS extensions ship a `content.js` that catches `pushState` and
-   re-asks the worker. `NEFilterDataProvider` has no equivalent hook.
+**Half of it was not a limitation at all — it was an unused list.**
+`YouTube.playbackSupportHosts` existed in `YouTubeNormalize.swift` and NOTHING
+referenced it. `*.googlevideo.com`, `i.ytimg.com` and the rest are not YouTube
+hosts, so they fell through to `webDefault: ALLOW` and were reachable
+**permanently, approved video or not** — the media CDN of a default-denied
+service, simply open. Now gated: the chain opens while a video grant is live and
+is blocked otherwise, which is the rule
+`shared/youtube/youtube-normalize.ts` writes down and the browser extensions
+already implement. On `www.youtube.com` the carve-out is restricted to player
+paths and never applies to a socket flow, where there is no path to check —
+without that guard one approved video would open all of YouTube through the very
+carve-out meant to keep it shut. It only ever overrides a DEFAULT, so an explicit
+parent rule still wins.
 
-**Unexplained and still open: the typed-URL case.** A fresh navigation to a
-different URL on the same host should produce a browser flow carrying that URL
-and be blocked. That it was not is not explained by any of the above, and is
-the thing to chase next — with the flow log, which will now show the unpoliced
-flows it was hiding.
+**What that does NOT fix, and this is the honest part:** with video A approved
+the chain is open, and a media request carries nothing saying which video it is
+for, so clicking video B on the same page still plays. Tying the chain to the
+grant is as far as the URL data allows. Stopping B means gating the InnerTube
+request per-video, which means reading its body.
 
-**This contradicts a shipped claim.** `web/site/index.html`'s comparison table
-answers "Keep the rest of YouTube closed" with **yes**. On iOS today that holds
-only for Safari navigations that surface as browser flows. Until the typed-URL
-case is understood, that row overstates what the product does — the same defect
-class as the two platform claims corrected in `711cb54`.
+**The remaining fix — and the one proposed for it here was WRONG.** See
+`docs/DECISIONS.md` ADR-018. Returning `.filterDataVerdict(...)` and inspecting
+each request with `handleOutboundData` **cannot recover a URL from a socket
+flow**: those bytes are TLS ciphertext, and reading them needs TLS interception,
+which ARCHITECTURE.md rules out unconditionally on Apple. It is not a smaller
+version of the right answer; it is the wrong answer, proposed twice before
+anyone checked what those bytes contain.
+
+The mechanism that meets "handle each request, on device" in Safari is a
+**Safari Web Extension on iOS** — supported since iOS 15, already shipped for
+macOS in this repository, evaluating the cached signed snapshot locally with no
+per-request network call. ARCHITECTURE.md considers Safari extensions for macOS
+only; iOS was never considered, and that omission is why the iOS design has no
+mechanism that meets the standard.
+
+It still leaves a native app host-level, which ADR-018 answers with
+ManagedSettings application policy — named in the code and in ADR-014, never
+built. The content filter is the backstop, not the product; today it is being
+asked to be the product, which is why it keeps coming up short.
+
+**IT IS NOT A YOUTUBE PROBLEM, and framing it as one is how it survived.**
+ADR-001 recorded this on hardware on 2026-08-31 — before it was reported again —
+and wrote it up as a YouTube qualification. The load-bearing sentence in it has
+no YouTube in it: *nothing that only sees browser flows can enforce per-URL
+policy across in-app navigation.* That applies to Reddit, X, Instagram, TikTok,
+Google Search and most modern news sites just as much. Approve one page on any
+of them and the site's own in-page navigation moves on unasked. ADR-001 now
+states it in the general form.
+
+The general statement:
+
+> On iOS, per-URL enforcement applies to **top-level navigations**. Content a
+> page fetches for itself arrives as socket flows carrying a hostname and
+> nothing else, so within a single-page app the product enforces at HOST level,
+> not URL level.
+
+The Windows and macOS extensions do not share this: they see every request with
+its full URL and a `requestType`. So the product's defining capability is
+materially weaker on iOS than on the other two platforms — for every SPA, not
+for one site.
+
+**This contradicts a shipped claim, and the claim has been corrected.**
+`web/site/index.html`'s comparison table answered "Keep the rest of YouTube
+closed" with an unqualified **yes**. On iOS that holds for a fresh navigation
+and does not hold inside the YouTube app's own page.
 
 ---
 

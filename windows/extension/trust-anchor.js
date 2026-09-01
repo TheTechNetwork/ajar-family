@@ -9,7 +9,7 @@
  * shared/trust/trust-vectors.ts against this file and its macOS twin on every
  * CI run, so drift fails the build instead of shipping.
  *
- * Kept in lockstep with macos/safari-extension/Extension/trust-anchor.js. The
+ * Kept in lockstep with apple/AjarSafari/Extension/trust-anchor.js. The
  * only intended difference between the two is the namespace shim on the next
  * few lines.
  *

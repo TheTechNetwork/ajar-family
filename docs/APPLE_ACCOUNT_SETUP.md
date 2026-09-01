@@ -310,7 +310,7 @@ No `FC`, no `NE`: the parent device enforces nothing. The App ID **is**
 registered up front with Push and Sign in with Apple enabled (§4); only its App
 Store Connect record waits for a binary.
 
-**D. macOS child app — `macos/safari-extension/` (loose JS, NO Xcode project)**
+**D. macOS child app — `apple/AjarSafari/` (loose JS, NO Xcode project)**
 
 A Safari Web Extension cannot ship standalone; it lives in a container app.
 
@@ -693,7 +693,7 @@ record is permanent):
 
 | Future identifier | Blocked on | Note |
 |---|---|---|
-| macOS container app + `…​.Extension` | `macos/safari-extension/` is loose JS with no Xcode project, container app or `Info.plist` | a Safari Web Extension cannot ship standalone; it needs a container app plus the native messaging host |
+| ~~macOS container app + `…​.Extension`~~ | **BUILT 2026-09-01** — `apple/AjarSafari/project.yml` adds the container app (`family.ajar.safari`) and the extension (`family.ajar.safari.Extension`), one target across iOS **and** macOS, with `SafariWebExtensionHandler` as the principal class. This row was right for months: the resources existed and nothing packaged them, so neither platform had an installable extension. See ADR-018. |
 
 **Decide before the first macOS upload:** one bundle id can span iOS **and**
 macOS under a *single* App Store Connect record. The macOS child app can

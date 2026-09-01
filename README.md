@@ -78,7 +78,7 @@ patch to the content filter.
 | `apple/AjarFilter/` | **Ajar Filter** — the app on the filtered device (iOS, iPadOS, macOS) plus its two content-filter extensions. Per-video enforcement measured on hardware; see ADR-001. |
 | `apple/poc-urlfilter/` | PoC D scaffold (NEURLFilter + Bloom builder + PIR server config). |
 | `apple/AjarParent/` | **Ajar Parent** — the app a parent approves from (iOS, iPadOS, macOS). |
-| `macos/safari-extension/` | Safari Web Extension — enforcing client, backend-wired (same client modules as Windows; Safari gates via webNavigation + content-script since it lacks blocking webRequest). |
+| `apple/AjarSafari/` | **Ajar for Safari** — per-request URL enforcement inside Safari on iPhone, iPad and Mac, from one target (ADR-018). Container app + Safari Web Extension; decides locally against the cached signed snapshot, no per-request network call. This is the only Apple mechanism that sees each request: the content filter is asked once per flow, so inside a single-page app it enforces at host level. |
 | `windows/agent/`, `windows/extension/` | PoC C skeleton (service + MV3 extension). |
 
 ## Enforcement, per platform (research summary)

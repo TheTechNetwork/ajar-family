@@ -55,6 +55,29 @@ Resolving it needs a different lever — blocking the YouTube web app outright a
 approving videos through an owned surface, or app-level policy — and that
 belongs in a follow-up ADR before anything ships.
 
+**GENERALISED 2026-09-01, after the same behaviour was reported again from a
+device.** Everything above was written about YouTube, and reads as a YouTube
+qualification. It is not one. The sentence that matters — *nothing that only
+sees browser flows can enforce per-URL policy across in-app navigation* — has
+nothing to do with YouTube in it, and the limitation applies to **every site
+that loads content without a page change**: Reddit, X, Instagram, TikTok, Google
+Search, and most modern news sites. Approve one page on any of them and the
+site's own in-page navigation moves on without the filter being asked again.
+
+Stated without the YouTube framing, so nobody has to rediscover it a third time:
+
+> On iOS, per-URL enforcement applies to **top-level navigations** — typing an
+> address, opening a link in a new tab, following a link that causes a real page
+> load. Content a page fetches for itself arrives as socket flows carrying a
+> hostname and nothing else, so within a single-page app the product enforces at
+> HOST level, not URL level.
+
+The browser extensions on Windows and macOS do not share this limitation: they
+see every request with its full URL and a `requestType`, and a content script
+catches in-page route changes. So the product's defining capability is
+materially weaker on iOS than on the other two platforms, for every SPA rather
+than for one site — which is a claim question as much as an engineering one.
+
 A second decision falls out of the same experiment. `youTubeDefault: BLOCK`
 cannot be applied to socket flows: they carry no video id, so enforcing it there
 made `www.youtube.com` unreachable at connection level and an ALLOWED video
@@ -501,3 +524,87 @@ and a browser that cannot do WebAuthn can skip enrolment at sign-up. Refusing
 either would lock people out with no way in to fix it. Both are stated in
 `docs/SECURITY.md` rather than papered over — "every parent has a second factor"
 is not a claim this project makes.
+
+## ADR-018 — Per-request enforcement on iOS needs a Safari Web Extension, not data inspection
+
+**Status:** Proposed. This is the follow-up ADR that ADR-001 said was required
+"before anything ships", written after the same behaviour was reported from a
+device on 2026-09-01.
+
+**The standard, stated by the product owner:** *if we don't handle each request
+it's not a real filter*, and *the goal of this product is to handle the
+decisions on device*. Both are right, and together they rule out most of the
+options.
+
+### What is true today
+
+`NEFilterDataProvider` is asked once per FLOW. A top-level navigation arrives as
+a `NEFilterBrowserFlow` carrying the full URL and is enforced per-URL. Everything
+a page fetches for itself arrives as a socket flow carrying a hostname and
+nothing else (ADR-001, measured on hardware). So inside any single-page app —
+Reddit, X, Instagram, TikTok, Google Search, YouTube — the product enforces at
+**host** level. That is not URL filtering, and calling it that would be a claim
+the code does not support.
+
+### The fix that does NOT work, and was proposed twice before being checked
+
+Returning `.filterDataVerdict(...)` from `handleNewFlow` and implementing
+`handleOutboundData` to inspect each request **cannot recover a URL from a
+socket flow**. Those bytes are TLS ciphertext. Reading them requires TLS
+interception, and this architecture rules that out unconditionally
+(ARCHITECTURE.md: "**No TLS interception** anywhere on Apple") — a commitment
+worth keeping, because the alternative is installing a root CA on a child's
+device and becoming a man in the middle of their entire life online.
+
+Data inspection is therefore not a smaller version of the right answer. It is
+the wrong answer, and proposing it twice without checking what those bytes
+contain is the mistake this entry exists to stop being repeated.
+
+### The mechanism that can
+
+**A Safari Web Extension on iOS.** Supported since iOS 15. The repository had
+the web resources for one — and, it turned out, no packaging on EITHER platform:
+no Xcode project, no `Info.plist`, no `SFSafariWebExtensionHandler`, so nothing
+was installable anywhere. `docs/APPLE_ACCOUNT_SETUP.md` had recorded that gap
+and it had simply never been closed. It is now `apple/AjarSafari`, one target
+across both platforms, doing exactly this job:
+`webNavigation.onBeforeNavigate` for navigations, a content script for
+`pushState` route changes, `tabs.update` to redirect a blocked navigation to our
+own block page. It evaluates **locally**, against the cached signed snapshot,
+with no per-request network call — which is the on-device requirement, not a
+compromise against it.
+
+ARCHITECTURE.md considers Safari Web Extensions **only for macOS**. iOS was
+never considered, and that omission is why the iOS design has no mechanism that
+can meet the standard. The content filter is not that mechanism and cannot be
+made into one.
+
+### What this still does not give, stated plainly
+
+A Safari Web Extension covers **Safari**. A native app — the YouTube app, any
+app with its own network stack — produces socket flows only and stays
+host-level. There is no mechanism on iOS that gives per-request enforcement
+inside a native app without a VPN or TLS interception, both of which this
+architecture excludes.
+
+So the coherent iOS design is three layers, and two of them do not exist:
+
+| Layer | Gives | Status |
+|---|---|---|
+| Safari Web Extension | per-request, on-device, in Safari | **BUILT** — `apple/AjarSafari`, one target for iOS + macOS |
+| ManagedSettings application policy | a native app blocked outright, so "host-level inside it" stops mattering | **missing** — named as the answer in FilterDataProvider.swift and ADR-014, never built |
+| `NEFilterDataProvider` | host-level backstop for everything else, plus the safety floor | exists |
+
+The content filter is the backstop, not the product. Today it is being asked to
+be the product, which is why it keeps coming up short.
+
+### Consequences
+
+- The claim "URL-level filtering" is true on iOS **for top-level navigations**
+  and inside Safari once the extension exists. It is not true inside a native
+  app, and the marketing must keep saying so.
+- PoC B (macOS Safari Web Extension) should be re-scoped to cover iOS as well,
+  since one extension target can serve both.
+- Nothing here changes the on-device posture: every layer above evaluates the
+  signed snapshot locally. No design in this ADR sends a URL anywhere.
+
