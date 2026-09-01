@@ -105,12 +105,15 @@ custom_domain = true
 [vars]
 VERIFY_EMAIL_URL = "https://ajar.family/parent/"
 PASSWORD_RESET_URL = "https://ajar.family/parent/"
-# The From address on every message Ajar sends. Its DOMAIN must be onboarded to
-# Email Service (Email > Domains in the dashboard) or every send fails with
-# E_SENDER_NOT_VERIFIED — per-send, not at startup, so the first symptom is a
-# parent waiting for a code that never arrives. Change this to whichever domain
-# or subdomain you actually onboarded.
-MAIL_FROM = "no-reply@ajar.family"
+# The From address on every message Ajar sends. `app.ajar.family` is the
+# subdomain actually onboarded to Email Service; the apex is NOT, and this said
+# `no-reply@ajar.family` until a live signup proved it. A sender whose domain is
+# not onboarded fails per-send with E_SENDER_NOT_VERIFIED — never at startup — so
+# the first symptom is a parent waiting for a code that was never sent.
+#
+# Change this only alongside Email > Domains in the dashboard. The two have to
+# agree and nothing in CI can check that they do.
+MAIL_FROM = "noreply@app.ajar.family"
 
 # ---------------------------------------------------------------------------
 # EMAIL. Cloudflare Email Sending, called as env.EMAIL.send() from worker.ts.

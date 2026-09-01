@@ -397,3 +397,49 @@ what shipping a compiled filter to a device is.
 
 See `docs/DATA_LICENSES.md` for the full table and the standing rules.
 \n
+---
+
+## ADR-016 — An ask is a push, not an email
+
+**Status:** accepted, 2026-09-01.
+
+**Context.** `createRequest` fanned a child's access request out to every
+notification endpoint the parent had, and the only endpoint kind with a real
+transport is EMAIL. So in practice "your child asked for something" was an email.
+
+Three things are wrong with that, and they compound:
+
+1. **It misses the promise.** The product is "say yes faster", measured in
+   seconds, before the impulse wins (`docs/BRAND.md` §5). Email lands in a pile,
+   carries no receipt, and arrives whenever the provider gets to it.
+2. **It does not survive use.** One message per ask is how an inbox becomes
+   something a parent stops opening — which is the same as no notification at
+   all, only noisier. A blocked page that retries its sub-resources made this
+   concrete enough that request DEDUPE already exists to protect the inbox.
+3. **It coupled the core loop to a mail provider.** Not hypothetical: an
+   unverified sending domain made a child pressing "Ask to unlock" return a 500
+   in production.
+
+**Decision.** Requests do not go by email. `createRequest` skips EMAIL endpoints
+— the exact inverse of the rule the password-reset path already applied, and for
+the same reason: *a reset link belongs in an inbox, not a push banner*, so an ask
+belongs in a push, not an inbox.
+
+Email keeps the account lifecycle, which genuinely wants an inbox: confirming an
+address, and resetting a password. Those are one-off, credential-adjacent, and
+not measured in seconds.
+
+**What this costs, stated plainly.** The real-time channel is the hub notify that
+every parent client long-polls, and it is implemented and fast. APNs and Web Push
+are the transports that would reach a parent whose client is closed, and they are
+documented adapters rather than implementations (`docs/SECURITY.md`). Until they
+land, **a parent is reached while a client is open and not otherwise.**
+
+That is a real gap and it is smaller than it looks — the parent iOS app long-polls
+in the background — but it is a gap, and naming it is better than filling it with
+a channel that does not fit. Implementing APNs is the work that closes it.
+
+**Consequence for the mail-outage work.** `BestEffortNotifier` stays as defence in
+depth, but it is no longer what protects the core loop. A request path that never
+touches mail cannot fail because mail is down, which is a better property than
+catching the error.

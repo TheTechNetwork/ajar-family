@@ -258,6 +258,12 @@ living document for an alpha, not a completed audit.
   asking per load, which breaks offline enforcement — the product's core
   requirement. The TTL is the real bound; treat `ONCE` as "one short window",
   not as a cryptographic guarantee.
+- **Asks are not emailed at all** (ADR-016). A child's access request goes to the
+  real-time feed every parent client long-polls, never to an inbox: the promise
+  is measured in seconds, one message per ask is how an inbox stops being read,
+  and it kept the core loop hostage to a mail provider. Until APNs / Web Push are
+  implemented, a parent is reached **while a client is open and not otherwise** —
+  a real gap, named rather than papered over.
 - **Email delivery is best-effort.** A provider outage is logged and swallowed
   rather than failing the request that triggered it (a child's access request
   must not 500 because the mail provider is down), so a notification can be lost
