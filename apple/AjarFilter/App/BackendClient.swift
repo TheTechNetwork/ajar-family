@@ -145,6 +145,52 @@ final class BackendClient {
         return decoded.device
     }
 
+    /// Renew the device token before it expires.
+    ///
+    /// Device tokens last 30 days and NOTHING renewed them. The endpoint has
+    /// existed since device tokens were introduced and no client called it, so
+    /// on day 31 a child's device stopped syncing policy — silently, weeks after
+    /// anyone last touched it — and the only recovery was a parent re-enrolling
+    /// by hand. Enforcement quietly stops being updated while the app still
+    /// looks enrolled, which is the worst shape a failure can take here.
+    ///
+    /// It has to be PROACTIVE. `/token/refresh` authenticates with the token it
+    /// is replacing, so a device that waits for a 401 has already lost: an
+    /// expired token cannot mint its successor. Asking a third of the way
+    /// through the lifetime leaves twenty days of failed attempts before
+    /// anything actually breaks.
+    ///
+    /// A device enrolled before this existed has no recorded issue date and is
+    /// treated as due immediately. Refreshing a healthy token costs one request;
+    /// guessing "probably fine" costs a device that stops filtering.
+    ///
+    /// Silent by design: it is called from the sync paths, and a renewal that
+    /// could not happen is not something to interrupt a child's browsing over.
+    @discardableResult
+    func refreshTokenIfDue() async -> Bool {
+        guard let base = Self.baseURL,
+              let (token, deviceId) = DeviceCredentials.load() else { return false }
+        guard DeviceCredentials.isTokenDueForRenewal() else { return false }
+
+        var req = URLRequest(url: base.appendingPathComponent("v1/devices/\(deviceId)/token/refresh"))
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let data = try? await send(req, authenticated: false),
+              let decoded = try? JSONDecoder().decode(TokenRefreshResponse.self, from: data),
+              !decoded.deviceToken.isEmpty else { return false }
+
+        // The signing key that comes back is deliberately IGNORED.
+        // `enrollSigningKey` is write-once and this is a routine unattended
+        // call; honouring a key here would make "wait for a renewal" a way to
+        // swap the key that verifies every policy this device enforces.
+        DeviceCredentials.save(token: decoded.deviceToken, deviceId: deviceId)
+        return true
+    }
+
+    private struct TokenRefreshResponse: Decodable {
+        let deviceToken: String
+    }
+
     /// The signing key on its own, for a device that needs to (re)learn it.
     func fetchSigningKey() async throws -> String {
         guard let base = Self.baseURL else { throw BackendError.noBaseURL }
@@ -170,6 +216,9 @@ final class BackendClient {
     /// backend — which is what tells a parent the device is alive.
     @discardableResult
     func syncPolicy() async throws -> Bool {
+        // Renew first, so the request below uses whatever token the renewal may
+        // have just replaced. Silent and best-effort — see refreshTokenIfDue().
+        await refreshTokenIfDue()
         let (_, deviceId) = try credentials()
         guard let base = Self.baseURL else { throw BackendError.noBaseURL }
 
@@ -192,6 +241,10 @@ final class BackendClient {
     /// the server's park so the server, not URLSession, decides when to answer.
     @discardableResult
     func waitForPolicyChange(timeoutMs: Int = 25_000) async throws -> Bool {
+        // Also here, not only in syncPolicy(): a device can sit in this long-poll
+        // for days without a policy change, which is exactly the device whose
+        // token quietly runs out.
+        await refreshTokenIfDue()
         let (_, deviceId) = try credentials()
         guard let base = Self.baseURL else { throw BackendError.noBaseURL }
 
@@ -290,6 +343,7 @@ enum DeviceCredentials {
     private static let service = "family.ajar.filter.deviceToken"
     private static let account = "device"
     private static let deviceIdKey = "backend_device_id"
+    private static let tokenIssuedKey = "backend_device_token_issued_at"
 
     static func save(token: String, deviceId: String) {
         let query: [String: Any] = [
@@ -306,6 +360,22 @@ enum DeviceCredentials {
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(add as CFDictionary, nil)
         UserDefaults(suiteName: PolicyStore.defaultAppGroup)?.set(deviceId, forKey: deviceIdKey)
+        // WHEN, not the token itself. The date is not a credential — it is the
+        // only thing that lets renewal happen before the token dies rather than
+        // after — so it lives beside the device id rather than in the Keychain.
+        UserDefaults(suiteName: PolicyStore.defaultAppGroup)?
+            .set(Date().timeIntervalSince1970, forKey: tokenIssuedKey)
+    }
+
+    /// Device tokens last 30 days; renew a third of the way through. A device
+    /// enrolled before the issue date was recorded reads 0 and is due now, which
+    /// is the safe direction: one extra request against a device that silently
+    /// stops filtering.
+    private static let tokenTTL: TimeInterval = 30 * 24 * 60 * 60
+    static func isTokenDueForRenewal() -> Bool {
+        let issued = UserDefaults(suiteName: PolicyStore.defaultAppGroup)?
+            .double(forKey: tokenIssuedKey) ?? 0
+        return Date().timeIntervalSince1970 - issued >= tokenTTL / 3
     }
 
     static func load() -> (token: String, deviceId: String)? {
@@ -334,6 +404,7 @@ enum DeviceCredentials {
             kSecAttrAccount as String: account,
         ] as CFDictionary)
         UserDefaults(suiteName: PolicyStore.defaultAppGroup)?.removeObject(forKey: deviceIdKey)
+        UserDefaults(suiteName: PolicyStore.defaultAppGroup)?.removeObject(forKey: tokenIssuedKey)
     }
 }
 

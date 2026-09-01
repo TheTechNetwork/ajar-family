@@ -189,9 +189,23 @@ living document for an alpha, not a completed audit.
   and the version the device actually pulled;
   `GET /v1/families/{id}/devices` reports both plus a `stale` flag, so a parent
   can see that protection stopped running rather than assume it is fine. Device
-  tokens (30 days) can be renewed at
+  tokens (30 days) are renewed at
   `POST /v1/devices/{deviceId}/token/refresh` — previously they simply expired
   and the device went silent with no recovery short of re-enrollment.
+
+  **The endpoint shipped and nothing called it**, which meant every enrolled
+  device was still on the day-31 cliff. All three clients now renew a third of
+  the way through the lifetime, from inside the loop they already run. Renewal
+  has to be PROACTIVE: `/token/refresh` authenticates with the token it is
+  replacing, so a client that waits for its first 401 has already lost. Asking
+  at ten days leaves twenty days of failed attempts before anything breaks.
+
+  A device enrolled before the issue date was recorded reads no date and renews
+  immediately — one extra request, against the alternative of a device that
+  silently stops filtering. **The signing key returned by a renewal is ignored
+  on every client**: `enrollSigningKey` is write-once and this is a routine
+  unattended call, so honouring it would make "wait for a renewal" a way to swap
+  the key that verifies every policy the device enforces.
 - **Erasure.** `DELETE` a child or a device cascades their rules, temporary
   grants, access requests, default policy, and any `LIMITED_GUARDIAN`
   assignment naming them. A device token is now checked against a live device

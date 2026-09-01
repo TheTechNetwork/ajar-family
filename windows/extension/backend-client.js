@@ -101,6 +101,7 @@ export async function enroll(backendUrl, code, displayName, opts = {}) {
   await setConfig({
     backendUrl: url,
     deviceToken: body.deviceToken,
+    tokenIssuedAt: Date.now(),
     deviceId: body.device.id,
     childId: body.device.childId,
     signingKeyB64: body.signingPublicKeyB64,
@@ -108,6 +109,52 @@ export async function enroll(backendUrl, code, displayName, opts = {}) {
   });
   await pinTrustAnchor(url, body.signingPublicKeyB64);
   return body.device;
+}
+
+/**
+ * Device tokens last 30 days and NOTHING renewed them.
+ *
+ * The renewal endpoint has existed since device tokens were introduced and no
+ * client called it, so on day 31 a child's device stopped syncing policy —
+ * silently, weeks after anyone touched it — and the only recovery was a parent
+ * re-enrolling the device by hand. That is the worst shape a failure can take
+ * in this product: enforcement quietly stops being updated while the app still
+ * looks enrolled.
+ *
+ * Renewal has to be PROACTIVE. `/token/refresh` authenticates with the token
+ * being replaced, so a device that waits for a 401 has already lost: an expired
+ * token cannot mint its successor. The loop below asks a third of the way
+ * through the lifetime, which leaves twenty days of failed attempts before
+ * anything breaks.
+ *
+ * A device enrolled before this existed has no issue date recorded. It is
+ * treated as due immediately: refreshing a healthy token costs one request, and
+ * guessing "probably fine" costs a device that stops filtering.
+ */
+const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TOKEN_REFRESH_AFTER_MS = TOKEN_TTL_MS / 3;
+
+export async function refreshDeviceTokenIfDue() {
+  const cfg = await getConfig();
+  if (!cfg.backendUrl || !cfg.deviceToken || !cfg.deviceId) return false;
+  const issued = typeof cfg.tokenIssuedAt === "number" ? cfg.tokenIssuedAt : 0;
+  if (Date.now() - issued < TOKEN_REFRESH_AFTER_MS) return false;
+  try {
+    const res = await fetch(
+      `${cfg.backendUrl}/v1/devices/${encodeURIComponent(cfg.deviceId)}/token/refresh`,
+      { method: "POST", headers: { authorization: `Bearer ${cfg.deviceToken}` } });
+    if (!res.ok) return false; // keep the old token; it may still have weeks left
+    const body = await res.json();
+    if (!body || typeof body.deviceToken !== "string") return false;
+    // The signing key is NOT re-pinned here. Renewal is a routine, unattended
+    // call; letting it change the trust anchor would make "wait for a refresh"
+    // a way to swap the key that verifies every policy this device enforces.
+    // Anchor changes stay a deliberate act at enrollment (trust-anchor.js).
+    await setConfig({ deviceToken: body.deviceToken, tokenIssuedAt: Date.now() });
+    return true;
+  } catch {
+    return false; // offline; the old token keeps working and we retry next loop
+  }
 }
 
 /**
@@ -123,6 +170,10 @@ export async function startPolicySync(onSnapshot) {
       await sleep(3000);
       continue;
     }
+    // Renew before polling, and re-read: the poll below must use the token the
+    // refresh may have just replaced, or the first request after a renewal
+    // would be the one that fails.
+    if (await refreshDeviceTokenIfDue()) cfg = await getConfig();
     try {
       const url = `${cfg.backendUrl}/v1/devices/${cfg.deviceId}/policy/wait?since=${cfg.version ?? 0}&timeout=25000`;
       const res = await fetch(url, { headers: { authorization: `Bearer ${cfg.deviceToken}` } });
