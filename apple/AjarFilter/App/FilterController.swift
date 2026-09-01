@@ -1,4 +1,5 @@
 import Foundation
+import os
 import FamilyControls
 import NetworkExtension
 import ManagedSettings
@@ -57,12 +58,19 @@ final class FilterController: ObservableObject {
 
     /// Request FamilyControls `.child` authorization. On an unsupervised device
     /// this unlocks the content filter (TN3134); a parent must approve on-device.
-    func requestChildAuthorization() async {
+    /// Returns whether authorization was actually granted, so a caller does not
+    /// charge on into `enableFilter()` after a refusal — which failed a second
+    /// time for an unrelated-looking reason and overwrote the first message with
+    /// the less useful one.
+    @discardableResult
+    func requestChildAuthorization() async -> Bool {
         do {
             try await AuthorizationCenter.shared.requestAuthorization(for: .child)
             authorizationStatus = AuthorizationCenter.shared.authorizationStatus
+            return authorizationStatus == .approved
         } catch {
-            lastError = "Authorization failed: \(error.localizedDescription)"
+            fail("This device would not let Ajar turn on. Ask a parent to try again.", error)
+            return false
         }
     }
 
@@ -76,13 +84,16 @@ final class FilterController: ObservableObject {
                 cfg.filterBrowsers = true   // WebKit flow URLs (full URL) — the point
                 cfg.filterSockets = true
                 mgr.providerConfiguration = cfg
-                mgr.localizedDescription = "ParentFilter PoC"
+                // What the CHILD sees in Settings next to the filter. It said
+                // "ParentFilter PoC" — the pre-rename name, and the word PoC on
+                // a shipped device.
+                mgr.localizedDescription = "Ajar"
             }
             mgr.isEnabled = true
             try await mgr.saveToPreferences()
             filterEnabled = mgr.isEnabled
         } catch {
-            lastError = "Enable filter failed: \(error.localizedDescription)"
+            fail("Ajar could not start filtering. Try turning it on again.", error)
         }
     }
 
@@ -192,6 +203,31 @@ final class FilterController: ObservableObject {
     /// A human label for the thing being asked about — never the raw URL, which
     /// reads as a system fault rather than a request (UX_PRINCIPLES §4).
     @Published var requestTarget: String = ""
+    private static let uiLog = Logger(subsystem: "family.ajar.filter", category: "ui")
+
+    /// Show a human sentence, log the machine detail.
+    ///
+    /// `lastError` and `backendStatus` are rendered by the PRODUCT screens, not
+    /// only by the debug harness, and they carried raw diagnostics into a
+    /// shipped build: "Enroll failed: The operation couldn\u{2019}t be completed.
+    /// (AjarFilter.BackendError error 3.)" on the setup screen a child is
+    /// looking at, and "Enrolled as dev_a1b2 (child chd_c3d4)" on success. That
+    /// is what makes an app read as an unfinished internal tool. The detail is
+    /// still wanted — it goes to the unified log, which is where someone
+    /// debugging is actually looking.
+    private func fail(_ message: String, _ underlying: Error? = nil) {
+        if let underlying { Self.uiLog.error("\(message, privacy: .public): \(String(describing: underlying), privacy: .public)") }
+        else { Self.uiLog.error("\(message, privacy: .public)") }
+        lastError = message
+    }
+
+    /// The URL that label stands for, so the app can OFFER TO OPEN IT.
+    ///
+    /// It used to be computed, used for the label, and dropped. The child was
+    /// then told "try example.com again" by a screen with no way to get there:
+    /// the page is in Safari, the child is in this app, and nothing here could
+    /// take them back. Shown to nobody — it is a destination, not copy.
+    @Published var requestURL: URL?
 
     var baseURLString: String { BackendClient.baseURL?.absoluteString ?? "" }
     var policyVersion: Int? { store.current()?.version }
@@ -205,7 +241,17 @@ final class FilterController: ObservableObject {
     /// Redeem a parent-issued enrollment code. On success the device holds a
     /// token AND the backend's signing key, which is what lets it move off the
     /// DEBUG unsigned path onto verified snapshots.
+    /// True while a redeem is in flight. The setup code is SINGLE USE, so a
+    /// second tap on a slow network spends it: the first request succeeds, the
+    /// second is refused, and the child is left looking at an error for a device
+    /// that actually enrolled. The button reads this rather than relying on the
+    /// child not tapping twice.
+    @Published var enrolling = false
+
     func enroll(code: String, displayName: String) async {
+        if enrolling { return }
+        enrolling = true
+        defer { enrolling = false }
         do {
             // Same normalisation both extension options pages already do
             // (`.toUpperCase().replace(/[^A-Z0-9]/g, "")`): the server matches the
@@ -214,11 +260,14 @@ final class FilterController: ObservableObject {
             let normalized = code.uppercased().filter { $0.isLetter || $0.isNumber }
             let device = try await backend.enroll(code: normalized, displayName: displayName)
             isEnrolled = true
-            backendStatus = "Enrolled as \(device.id) (child \(device.childId))."
+            // Not the ids. A child reads this screen, and "dev_a1b2 (child
+            // chd_c3d4)" tells them nothing and looks like a fault.
+            _ = device
+            backendStatus = "This device is set up."
             await syncPolicy()
         } catch {
             backendStatus = nil
-            lastError = "Enroll failed: \(error.localizedDescription)"
+            fail("That setup code did not work. Check it with a parent — codes are used once and they expire.", error)
         }
     }
 
@@ -234,7 +283,7 @@ final class FilterController: ObservableObject {
                 : "Already up to date (v\(store.current()?.version ?? -1))."
             reloadExtensionRules()
         } catch {
-            lastError = "Policy sync failed: \(error.localizedDescription)"
+            fail("Could not reach Ajar just now. It keeps using the rules it already has.", error)
         }
     }
 
@@ -293,6 +342,7 @@ final class FilterController: ObservableObject {
         // one would be worse than naming the site honestly.
         let host = URL(string: blocked)?.host?.replacingOccurrences(of: "www.", with: "")
         requestTarget = yt.videoId != nil ? "a video on YouTube" : (host ?? "this page")
+        requestURL = URL(string: blocked)
         requestState = .sending
         do {
             try await backend.createRequest(targetType: targetType, targetValue: targetValue, url: blocked)
@@ -315,8 +365,8 @@ final class FilterController: ObservableObject {
                 requestState = .answered
             }
         } catch {
-            lastError = "Request failed: \(error.localizedDescription)"
-            requestState = .failed(error.localizedDescription)
+            fail("That request did not send. Try again in a moment.", error)
+            requestState = .failed("That request did not send. Try again in a moment.")
         }
     }
 

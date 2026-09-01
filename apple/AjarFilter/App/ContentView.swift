@@ -106,11 +106,14 @@ struct SetUpView: View {
                 .background(RoundedRectangle(cornerRadius: 10).fill(Ajar.accentWash))
                 .padding(.bottom, 24)
 
-                Button("Set up") {
+                Button(controller.enrolling ? "Setting up…" : "Set up") {
                     Task { await controller.enroll(code: code, displayName: deviceName.isEmpty ? "This device" : deviceName) }
                 }
                 .buttonStyle(PrimaryButton())
-                .disabled(code.isEmpty)
+                // The code is single use. Without this a second tap on a slow
+                // network spends it: the first redeem succeeds and the second is
+                // refused, leaving an error on a device that did enrol.
+                .disabled(code.isEmpty || controller.enrolling)
 
                 if let status = controller.backendStatus {
                     Text(status).font(.system(size: 14)).foregroundStyle(Ajar.muted)
@@ -150,8 +153,13 @@ struct TurnOnView: View {
 
             Button("Turn on") {
                 Task {
-                    await controller.requestChildAuthorization()
-                    await controller.enableFilter()
+                    // Only if authorization was actually GRANTED. Running on
+                    // regardless produced a second failure for an unrelated-
+                    // looking reason, which overwrote the message that said what
+                    // had really happened.
+                    if await controller.requestChildAuthorization() {
+                        await controller.enableFilter()
+                    }
                 }
             }
             .buttonStyle(PrimaryButton()).frame(maxWidth: 360)
@@ -220,6 +228,14 @@ struct RequestStatusView: View {
             Text(message).font(.system(size: 16)).foregroundStyle(Ajar.ink2)
                 .multilineTextAlignment(.center)
             Spacer()
+            // The way BACK to the page. "Try example.com again" used to be the
+            // end of the road: the page is in Safari, the child is here, and
+            // nothing on this screen could take them there. Only offered once
+            // something has changed — before that there is nothing to try.
+            if controller.requestState == .answered, let url = controller.requestURL {
+                Link("Open the page", destination: url)
+                    .buttonStyle(PrimaryButton()).frame(maxWidth: 360).padding(.bottom, 12)
+            }
             Button("Done") { dismiss() }.buttonStyle(SecondaryButton()).frame(maxWidth: 360)
         }
         .padding(24)
@@ -274,7 +290,7 @@ struct RequestStatusView: View {
         switch controller.requestState {
         case .sending:  return "Asking about \(controller.requestTarget)."
         case .waiting:  return "Nothing else to do — it’s on their phone now."
-        case .answered: return "Try \(controller.requestTarget) again."
+        case .answered: return "Open \(controller.requestTarget) and see."
         case .failed(let why): return why
         case .idle:     return ""
         }
