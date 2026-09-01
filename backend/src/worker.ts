@@ -27,6 +27,7 @@ import { buildRouter } from "./http/api.js";
 import { corsHeaders, type HttpRequest, type Router } from "./http/router.js";
 import { createD1, type D1Like } from "./store/sql/database.js";
 import { SqlStore } from "./store/sql/sql-store.js";
+import { WorkersEmailSender, type EmailBinding } from "./push/mail.js";
 
 export interface Env {
   AUTH_SECRET?: string;
@@ -53,6 +54,13 @@ export interface Env {
    * without the block still has to build and serve the API.
    */
   ASSETS?: { fetch(request: Request): Promise<Response> };
+  /**
+   * Cloudflare Email Sending (`[[send_email]]` in wrangler.toml). Typed
+   * structurally rather than from workers-types so the backend keeps zero
+   * dependencies. Optional because the Node server has no such binding and a
+   * Worker deployed from a config without the block must still serve the API.
+   */
+  EMAIL?: EmailBinding;
 }
 
 /**
@@ -90,8 +98,39 @@ async function getRouter(env: Env): Promise<Router> {
     appPromise = (async () => {
       // Prefer durable D1 when bound; otherwise per-isolate in-memory (demo only).
       const repo = env.DB ? await SqlStore.create(createD1(env.DB)) : undefined;
+
+      // Cloudflare Email Sending when it is bound, in preference to posting to a
+      // third-party provider with a long-lived MAIL_TOKEN. Both paths stay: the
+      // Node server has no binding, and a self-hosted deployment may not be on
+      // Cloudflare at all.
+      //
+      // MAIL_FROM is required for this path rather than defaulted. The address
+      // must belong to a domain onboarded to Email Service, so a guess here does
+      // not fail at startup — it fails per-send with E_SENDER_NOT_VERIFIED, once
+      // a parent is already waiting for a code they will never receive.
+      //
+      // An explicitly configured MAIL_ENDPOINT wins over the binding. The
+      // binding is AMBIENT — present merely because wrangler.toml declares it —
+      // while an endpoint and token are something a person deliberately set, so
+      // the deliberate thing takes precedence. This is not hypothetical: adding
+      // [[send_email]] made workerd simulate a binding, that binding beat the
+      // test's local mail sink, and the confirm-then-sign-in test failed with
+      // two more cascading off it. The suite caught a silent change of delivery
+      // path — exactly the failure a person would have met as "sign-up stopped
+      // working", with no error anywhere.
+      let mail;
+      if (env.EMAIL && !env.MAIL_ENDPOINT) {
+        if (env.MAIL_FROM) {
+          mail = new WorkersEmailSender(env.EMAIL, env.MAIL_FROM);
+        } else {
+          console.error("[mail] EMAIL binding present but MAIL_FROM is unset — "
+            + "falling back. Set MAIL_FROM to an address on a domain onboarded to Email Service.");
+        }
+      }
+
       return App.create({
         repo,
+        mail,
         config: {
           authSecret: env.AUTH_SECRET!, // guaranteed present: fetch() rejects when unset
           signingPublicKeyB64: env.SIGNING_PUBLIC_KEY_B64,

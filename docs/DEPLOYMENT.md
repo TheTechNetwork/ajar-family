@@ -164,7 +164,29 @@ needs two more to authenticate to Cloudflare.
 | `AUTH_SECRET` | `wrangler secret put` | HMAC secret for bearer tokens (`backend/src/auth/tokens.ts`) |
 | `SIGNING_PUBLIC_KEY_B64` | `wrangler secret put` | Ed25519 **public** key (SPKI DER, base64) — served at `/v1/signing-key`, shipped to devices |
 | `SIGNING_PRIVATE_KEY_B64` | `wrangler secret put` | Ed25519 **private** key (PKCS8 DER, base64) — signs `DevicePolicySnapshot`s (ADR-010) |
-| `MAIL_ENDPOINT` + `MAIL_TOKEN` | `wrangler secret put` | Outbound email. **Required for anyone to sign up** — creating an account means opening a link that only arrives by email (`docs/SECURITY.md`). Without them the Worker runs, and no parent can register. |
+| `MAIL_ENDPOINT` + `MAIL_TOKEN` | `wrangler secret put` | Outbound email via a third-party provider. **Only needed if you are NOT using the `EMAIL` binding** (below) — an explicitly set endpoint takes precedence over it. |
+| `MAIL_FROM` | `[vars]` in `wrangler.toml` | The From address. Its **domain must be onboarded to Email Service**, or every send fails with `E_SENDER_NOT_VERIFIED`. |
+
+**Email is what gates sign-up.** Creating an account means redeeming a code that
+only arrives by email, so with no working sender the Worker runs happily and no
+parent can register.
+
+The default path is **Cloudflare Email Sending** — the `[[send_email]]` binding
+in `wrangler.toml`, called as `env.EMAIL.send()`. It needs no API token at all,
+which is the point: `MAIL_TOKEN` is a long-lived bearer credential held by a
+company that can read every subject line, and every subject line here concerns a
+specific child. Two things to do once, in the dashboard:
+
+1. **Onboard the sending domain** under Email → Domains, and set `MAIL_FROM` to
+   an address on it. Cloudflare will suggest a subdomain such as
+   `app.ajar.family`; whichever you pick, `MAIL_FROM` must match.
+2. **Confirm the account is on the Workers paid plan.** Email Sending has been
+   in public beta since 2026-04-16 and is a paid-plan feature.
+
+`wrangler dev` **simulates** this binding: it logs the message and writes the
+body to a temp file instead of sending. A green local run proves the call shape
+and nothing whatsoever about deliverability. Add `remote = true` to the binding
+to send for real from a local run.
 | `CLOUDFLARE_API_TOKEN` | GitHub Actions repo secret | CI deploy auth (Workers Scripts:Edit) |
 | `CLOUDFLARE_ACCOUNT_ID` | GitHub Actions repo secret | CI deploy target account |
 

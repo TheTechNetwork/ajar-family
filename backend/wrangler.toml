@@ -105,6 +105,34 @@ custom_domain = true
 [vars]
 VERIFY_EMAIL_URL = "https://ajar.family/parent/"
 PASSWORD_RESET_URL = "https://ajar.family/parent/"
+# The From address on every message Ajar sends. Its DOMAIN must be onboarded to
+# Email Service (Email > Domains in the dashboard) or every send fails with
+# E_SENDER_NOT_VERIFIED — per-send, not at startup, so the first symptom is a
+# parent waiting for a code that never arrives. Change this to whichever domain
+# or subdomain you actually onboarded.
+MAIL_FROM = "no-reply@ajar.family"
+
+# ---------------------------------------------------------------------------
+# EMAIL. Cloudflare Email Sending, called as env.EMAIL.send() from worker.ts.
+#
+# This replaces posting to a third-party provider with MAIL_TOKEN, and the
+# reason is not convenience. MAIL_TOKEN is a long-lived bearer credential held
+# by a company that can read every subject line we send — and every subject
+# line here is about a specific child. The binding has no token: it is
+# authorised by being bound, so there is nothing to leak and nothing to rotate.
+#
+# NO destination restriction on purpose. `destination_address` and
+# `allowed_destination_addresses` exist and are right for a Worker that alerts
+# its own operator; this one emails whichever parent signed up, so an allowlist
+# would silently deliver to nobody. The SENDER is what is constrained, by
+# Email Service requiring the domain to be onboarded.
+#
+# Requires the Workers PAID plan (Email Sending, public beta since 2026-04-16).
+# `wrangler dev` SIMULATES this binding — it logs the message and writes the body
+# to a temp file rather than sending — so a green local run proves the call shape
+# and nothing about deliverability. Add `remote = true` to send for real.
+[[send_email]]
+name = "EMAIL"
 
 [observability]
 enabled = true
