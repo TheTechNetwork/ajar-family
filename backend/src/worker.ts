@@ -257,6 +257,7 @@ export default {
       method: request.method,
       path: url.pathname,
       query: url.searchParams,
+      rawQuery: url.search.replace(/^\?/, ""),
       headers,
       params: {},
       json: async () => (rawBody ? JSON.parse(rawBody) : {}),

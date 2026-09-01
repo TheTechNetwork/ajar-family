@@ -77,12 +77,23 @@ final class FilterControlProvider: NEFilterControlProvider {
                 // system's, not ours.
                 //
                 // The substitution is also NOT percent-encoded, so a flow URL
-                // carrying its own query arrives with live `&`s: `?u=…/watch?v=X
-                // &t=30` parses as `u=…/watch?v=X` plus a stray `t=30`. The `v`
-                // survives — it is before the first `&` — so the canonical video
-                // id, which is the only part an approval is keyed on, is intact.
-                // Extra params are lost. Left as-is deliberately: recovering
-                // them would mean guessing which stray params belonged to `u`.
+                // carrying its own query arrives with live `&`s. The server
+                // therefore reads `u` from the RAW query string, to the end of
+                // it (`blockedTargetParam` in backend/src/http/api.ts) — which
+                // makes the ordering a contract:
+                //
+                //   *** u MUST BE THE LAST PARAMETER IN THIS URL ***
+                //
+                // Anything added here goes BEFORE it. Put a parameter after `u`
+                // and it is swallowed into the target.
+                //
+                // Reading only up to the first `&` looked survivable because the
+                // one case that survives it is YouTube: `v` sits before the `&`,
+                // so the video id came through. Every other site did not. A
+                // non-YouTube block becomes a URL rule for the exact string, so
+                // `example.com/a?id=1&page=2` was approved as `…?id=1` and the
+                // page the child was actually on never matched the rule — an
+                // approval that silently did nothing.
                 "requestAccess": "\(Self.blockPageBase)?u=\(NEFilterProviderRemediationURLFlowURL)" as NSString
             ],
             NEFilterProviderRemediationMapRemediationButtonTexts: [

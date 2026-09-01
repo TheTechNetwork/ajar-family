@@ -6,6 +6,20 @@ export interface HttpRequest {
   method: string;
   path: string;
   query: URLSearchParams;
+  /**
+   * The query string exactly as it arrived, without the leading `?` — parsed by
+   * nobody, decoded by nobody.
+   *
+   * `query` is right for every route but one. The iOS content filter builds the
+   * block page's URL by substituting the blocked flow URL into `?u=…` WITHOUT
+   * percent-encoding it (the substitution is the system's, not ours), so a
+   * target carrying its own query arrives with live `&`s and `URLSearchParams`
+   * splits it into pieces. See `/blocked` in http/api.ts.
+   *
+   * Optional because a test harness constructing an HttpRequest by hand has no
+   * raw string to give; the one route that needs it falls back to `query`.
+   */
+  rawQuery?: string;
   headers: Record<string, string>;
   json<T = unknown>(): Promise<T>;
   params: Record<string, string>;
