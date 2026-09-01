@@ -79,7 +79,15 @@ jobs:
           mkdir -p "$stage/web"
           cp "backend/dist/${{ matrix.bin }}" "$stage/"
           cp -r web/parent "$stage/web/parent"
-          cp docs/INSTALL.md "$stage/README.txt" 2>/dev/null || true
+          # web/site TOO. It holds signup.html — where an account is actually
+          # created, and where VERIFY_EMAIL_URL points — plus legal.html. Shipping
+          # only the console meant a self-hoster had a sign-in page and nowhere to
+          # sign UP, and no privacy notice or terms to link to.
+          cp -r web/site "$stage/web/site"
+          # NOT `|| true`. This is the install guide, in the zip that tells a
+          # parent to run an elevated .exe; if it goes missing the release ships
+          # with no instructions and the step used to stay green about it.
+          cp docs/INSTALL.md "$stage/README.txt"
       - name: Zip (unix)
         if: runner.os != 'Windows'
         shell: bash

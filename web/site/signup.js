@@ -391,6 +391,24 @@ $("skipCode").addEventListener("click", () => {
 });
 
 // Entry: a confirmation link resumes the flow; anything else starts it.
+// The code, typed rather than clicked. Same path as the link — `resumeFromEmail`
+// is the one place that knows what a confirmation means — so the two routes
+// cannot answer differently. Tolerates a parent pasting the whole URL, which is
+// what people actually do when a link "doesn't work".
+const pasteForm = document.getElementById("sPaste");
+if (pasteForm) pasteForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const el = document.getElementById("verifyCode");
+  let code = (el.value || "").trim();
+  if (code.includes("verify=")) {
+    try { code = new URL(code, location.origin).searchParams.get("verify") || code; }
+    catch { /* not a URL after all; use it as typed */ }
+  }
+  if (!code) { el.setAttribute("aria-invalid", "true"); el.focus(); return; }
+  el.removeAttribute("aria-invalid");
+  resumeFromEmail(code);
+});
+
 const verifyCode = new URLSearchParams(location.search).get("verify");
 if (verifyCode) {
   // Strip the code from the address bar before doing anything with it: it is a

@@ -96,6 +96,49 @@ Point the service's `-BackendUrl` at this host instead of the cloud URL.
 | `SIGNING_PUBLIC_KEY_B64` / `SIGNING_PRIVATE_KEY_B64` | Stable policy-signing keypair (else a dev key is generated each boot). |
 | `PORT` | Listen port (default `8787`). |
 
+### Email, and why nothing works without it
+
+**Set these or nobody can create an account.** Creating one needs a confirmation
+code that arrives by email, and with no mail configured the server accepts the
+sign-up, answers `202`, tells the parent to check their inbox, and drops the
+message. The console then waits for ever with no error on any screen. The server
+says so at boot — *"NOBODY CAN SIGN UP: creating an account needs the
+confirmation link we cannot send"* — and this table used not to mention mail at
+all, so anyone following it hit exactly that.
+
+| Env var | What it does |
+|---|---|
+| `MAIL_ENDPOINT` | HTTPS endpoint the server POSTs each message to (see `backend/src/push/mail.ts` for the JSON envelope). |
+| `MAIL_TOKEN` | Bearer token for that endpoint. |
+| `MAIL_FROM` | The From address. |
+| `VERIFY_EMAIL_URL` | Where the confirmation **link** points, e.g. `https://your-host/signup.html`. The emailed link is `<base>?verify=<code>`. |
+| `PASSWORD_RESET_URL` | Same idea for a reset, e.g. `https://your-host/parent/`; the link is `<base>?token=<code>`. |
+
+Leave `VERIFY_EMAIL_URL` unset and the email carries a bare code with no link.
+That still works — the "Check your email" screen has a **paste the code** field —
+but a link is what most people expect, so set it.
+
+### Everything else the server reads
+
+| Env var | What it does |
+|---|---|
+| `ALLOWED_ORIGIN` | Locks CORS to one origin. Unset is permissive — set it once the console has a real address. |
+| `ALLOW_INSECURE_AUTH` | `1` lets a **durable** deployment start without `AUTH_SECRET`. It refuses otherwise, on purpose: the default secret is published in this repository, so every token would be forgeable. Local testing only. |
+| `TRUST_PROXY_HEADERS` | `1` only when a reverse proxy **you control** rewrites `x-forwarded-for` on every inbound request. Left unset, rate limiting uses one shared bucket rather than a value a client can rotate — which is what a header-keyed limit really is. Never set this on a server reachable directly from the internet. |
+| `CATEGORY_ADMIN_TOKEN` | Ops secret gating the global category-dataset import. Unset disables that endpoint. |
+| `PARENT_UI_DIR` | Override where the static console is served from. Empty string disables static serving. Auto-discovered otherwise. |
+
+### Passkeys, if you are not on `ajar.family`
+
+A passkey ceremony is refused by the browser when the page's origin does not
+match what the server claims, and these cannot be changed after parents have
+enrolled passkeys — a changed `PASSKEY_RP_ID` invalidates every existing one.
+
+| Env var | What it does |
+|---|---|
+| `PASSKEY_RP_ID` | Your domain, e.g. `example.com`. Defaults to localhost, which is why passkeys silently fail on a self-host that skips this. |
+| `PASSKEY_ORIGIN` | The full origin, e.g. `https://example.com`. |
+
 ---
 
 ## 5. Parent: approve in seconds
