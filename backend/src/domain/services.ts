@@ -120,6 +120,65 @@ export class AuthService {
     return user;
   }
 
+
+  /**
+   * Send a message the CALLER is waiting on, turning a delivery failure into an
+   * honest 503 instead of an unhandled throw.
+   *
+   * Live evidence for why this exists: with the sending domain not yet onboarded
+   * to Email Service, `POST /v1/auth/register` answered
+   * `{"error":"internal error","code":"INTERNAL"}` — a generic 500 that tells a
+   * parent nothing and an operator nothing either, for what is a one-line
+   * configuration fix. Every route that sent mail 500'd; every route that
+   * returned before sending was fine.
+   *
+   * ONLY for flows where the email IS the deliverable. Notifications stay
+   * best-effort and swallowed (docs/SECURITY.md): a child's access request must
+   * not fail because the mail provider is down.
+   */
+  private async sendOrFail(msg: { to: string; subject: string; text: string }): Promise<void> {
+    if (!this.mail) return;
+    try {
+      await this.mail.send(msg);
+    } catch (e) {
+      // The cause belongs in the log, where it names the real problem
+      // (E_SENDER_NOT_VERIFIED means the domain is not onboarded), and never in
+      // the response, which would disclose our provider and configuration.
+      // eslint-disable-next-line no-console
+      console.error("[mail] delivery FAILED on a path that depends on it —"
+        + " check MAIL_FROM's domain is onboarded to Email Service:", e);
+      throw new DomainError(
+        "We could not send the confirmation email just now. Please try again in a few minutes.",
+        "SERVICE_UNAVAILABLE",
+      );
+    }
+  }
+
+  /**
+   * Send a message NOBODY is waiting on, swallowing any failure.
+   *
+   * This is not laziness, it is the non-enumeration contract. `requestPasswordReset`
+   * and `requestEmailVerification` return early and send nothing for an address
+   * that has no account, and always answer 202. If a send failure propagated
+   * from those, then while mail was broken 202 would mean "no such account" and
+   * 503 would mean "that account exists" — turning an outage into an oracle over
+   * every address in the database. So they lose the mail and say nothing, and
+   * the operator gets the log.
+   *
+   * `requestRegistration` is different and uses sendOrFail: BOTH of its branches
+   * send, so failing is symmetric and discloses nothing — and a registration
+   * that cannot deliver its code has not happened at all.
+   */
+  private async sendBestEffort(msg: { to: string; subject: string; text: string }): Promise<void> {
+    if (!this.mail) return;
+    try {
+      await this.mail.send(msg);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("[mail] delivery failed (swallowed to preserve the always-202 contract):", e);
+    }
+  }
+
   /** Idempotently ensure this user has an EMAIL endpoint for their address. */
   async registerEmailEndpoint(user: User): Promise<NotificationEndpoint | null> {
     if (!looksLikeEmail(user.email)) return null;
@@ -161,7 +220,7 @@ export class AuthService {
 
     if (existing) {
       // The one place the truth is told, and only to the mailbox that owns it.
-      await this.mail?.send({
+      await this.sendOrFail({
         to: email,
         subject: VERIFY_SUBJECT,
         text: "Someone asked to create an Ajar account with this address, and it already has one.\n\n"
@@ -179,7 +238,7 @@ export class AuthService {
       createdAt: now(),
     };
     await this.repo.createPendingRegistration(pending);
-    await this.mail?.send({ to: email, subject: VERIFY_SUBJECT, text: verifyText(raw, opts.verifyUrlBase) });
+    await this.sendOrFail({ to: email, subject: VERIFY_SUBJECT, text: verifyText(raw, opts.verifyUrlBase) });
   }
 
   /**
@@ -199,7 +258,7 @@ export class AuthService {
       createdAt: now(),
     };
     await this.repo.createEmailVerificationToken(token);
-    await this.mail?.send({ to: user.email, subject: VERIFY_SUBJECT, text: verifyText(raw, opts.verifyUrlBase) });
+    await this.sendBestEffort({ to: user.email, subject: VERIFY_SUBJECT, text: verifyText(raw, opts.verifyUrlBase) });
   }
 
   /**

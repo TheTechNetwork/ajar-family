@@ -4,7 +4,7 @@
  */
 import type { Repository } from "./store/repository.js";
 import { MemoryStore } from "./store/memory.js";
-import { ConsoleNotifier, EmailNotifier, HubNotifier, type Notifier } from "./push/notifier.js";
+import { BestEffortNotifier, ConsoleNotifier, EmailNotifier, HubNotifier, type Notifier } from "./push/notifier.js";
 import { FetchMailSender, NullMailSender, type MailSender } from "./push/mail.js";
 import { EventHub } from "./push/hub.js";
 import { generateSigningKeyPair } from "./domain/signing.js";
@@ -102,8 +102,11 @@ export class App {
     // EMAIL endpoints go through the mail sender; every other kind falls back to
     // the console notifier (APNs / Web Push are documented adapters, not stubs).
     const base = opts.notifier ?? new EmailNotifier(mail, new ConsoleNotifier());
-    // Wrap the base notifier so device nudges wake long-poll waiters on the hub.
-    const notifier = new HubNotifier(base, hub);
+    // BestEffort INSIDE Hub, and the order is load-bearing: HubNotifier awaits
+    // the sender before waking the long-poll, so a swallow that sat outside it
+    // would still let a mail outage skip the device wake — turning a mail
+    // problem into a policy-propagation problem.
+    const notifier = new HubNotifier(new BestEffortNotifier(base), hub);
     let pub = opts.config.signingPublicKeyB64;
     let priv = opts.config.signingPrivateKeyB64;
     if (!pub || !priv) {

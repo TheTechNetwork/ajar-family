@@ -137,8 +137,14 @@ function match(routeParts: string[], reqParts: string[]): Record<string, string>
 /** Codes a handler may deliberately surface to a client. Anything outside this
  *  set is treated as a bug and answered with a generic 500 — see the catch in
  *  `handle`. Keep in step with `DomainError`'s codes. */
+// Codes whose MESSAGE is safe and useful to show a caller. Mostly client
+// errors; SERVICE_UNAVAILABLE is the exception and is deliberate — it says a
+// dependency of ours is down, which is our fault, but "we could not send the
+// email, try again shortly" is worth infinitely more to a parent than the
+// generic 500 they used to get.
 const CLIENT_FACING_CODES = new Set([
   "BAD_REQUEST", "UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND", "CONFLICT", "GONE",
+  "SERVICE_UNAVAILABLE",
 ]);
 
 function codeToStatus(code?: string): number {
@@ -148,6 +154,7 @@ function codeToStatus(code?: string): number {
     case "CONFLICT": return 409;
     case "GONE": return 410;
     case "UNAUTHORIZED": return 401;
+    case "SERVICE_UNAVAILABLE": return 503;
     default: return 400;
   }
 }

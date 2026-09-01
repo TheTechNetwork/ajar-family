@@ -38,6 +38,36 @@ export class HubNotifier implements Notifier {
   }
 }
 
+/**
+ * Makes notification delivery genuinely best-effort: log a failure, do not
+ * propagate it.
+ *
+ * docs/SECURITY.md has claimed this all along — "a provider outage is logged and
+ * swallowed rather than failing the request that triggered it (a child's access
+ * request must not 500 because the mail provider is down)". Nothing implemented
+ * it. There was no `catch` anywhere on the path, so with mail down a child
+ * pressing "Ask to unlock" got a 500, and a parent asking for a password reset
+ * got one too — the latter ALSO an enumeration oracle, since an unknown address
+ * returns before sending and still answered 202.
+ *
+ * It goes INSIDE HubNotifier deliberately. HubNotifier awaits the base sender
+ * before waking the long-poll, so an email failure used to skip the device wake
+ * as well: a mail outage silently became a policy-propagation outage, which is
+ * the one thing this product is for.
+ */
+export class BestEffortNotifier implements Notifier {
+  constructor(private base: Notifier) {}
+  async send(endpoint: NotificationEndpoint, msg: PushMessage): Promise<void> {
+    try {
+      await this.base.send(endpoint, msg);
+    } catch (e) {
+      // Endpoint KIND, not its token: a token is an address or a device id.
+      // eslint-disable-next-line no-console
+      console.error(`[notify] ${endpoint.kind} delivery failed (swallowed):`, e);
+    }
+  }
+}
+
 /** Records sent messages; used by tests and local dev. */
 export class InMemoryNotifier implements Notifier {
   public sent: Array<{ endpoint: NotificationEndpoint; msg: PushMessage }> = [];
