@@ -265,4 +265,26 @@ export async function postAccessRequest({ targetType, targetValue, title, url, r
   return res.json();
 }
 
+/**
+ * What the parent actually decided, for this device's child.
+ *
+ * The block page used to INFER a refusal from a temporary BLOCK rule sitting in
+ * the snapshot — and a refusal writes a grant that expires after five minutes,
+ * which the backend then drops. So a refused child saw the answer briefly and
+ * then the page went back to "waiting on a parent" for up to a week. This is
+ * the server saying what happened instead.
+ *
+ * Grants nothing and is consulted by no enforcement path: `decide()` still
+ * reads only the signed snapshot. This endpoint exists to make a SCREEN honest.
+ */
+export async function getAnswers() {
+  const cfg = await getConfig();
+  if (!cfg.backendUrl || !cfg.deviceToken) throw new Error("not enrolled");
+  const res = await fetch(`${cfg.backendUrl}/v1/devices/${encodeURIComponent(cfg.deviceId)}/answers`,
+    { headers: { authorization: `Bearer ${cfg.deviceToken}` } });
+  if (!res.ok) throw new Error(`answers failed: ${res.status}`);
+  const body = await res.json();
+  return Array.isArray(body?.answers) ? body.answers : [];
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

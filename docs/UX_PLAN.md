@@ -309,18 +309,29 @@ Button radius follows the same pattern: 10px, 999px, 12px, and `Capsule()`.
 
 Carried forward so they are not lost between tranches:
 
-- **The device is never told the decision.** The block pages infer an answer
-  from whether a rule happens to exist right now, rather than being told what
-  the parent chose. Everything in A8, the neutral `.answered` styling, and the
-  "no answer here yet" copy above is compensation for this, not a fix.
+- **The device is never told the decision.** ***Fixed.***
+  `GET /v1/devices/{deviceId}/answers` reports what the parent actually decided
+  for the device's own child, and all three surfaces prefer it over the old
+  inference:
 
-  The shape of the real fix: the device already holds an authenticated channel
-  (the device token) and already long-polls. The decision is recorded server-side
-  (`ApprovalDecision`) and is simply never delivered. Sending it — as part of the
-  sync response, keyed by request id — collapses every piece of compensation
-  above into one honest sentence, and is the single highest-value thing left in
-  this document.
-- **Ask TTL vs grant TTL disagree.** *Mitigated, not fixed.* A "Not now" writes
+  - The extensions ask their worker, which asks the endpoint. The cached
+    snapshot is still consulted first, because it paints an approval with no
+    round trip, and it remains the fallback when the network or the native-host
+    path cannot answer — so an offline device is never worse off than before.
+  - iOS turns a policy-version bump into an actual verdict: `RequestState` has
+    `.opened` and `.closed` alongside the old `.answered`, which is now the
+    degraded case rather than the ceiling. A refusal gets its own screen, styled
+    as an answer and not a fault, with "Ask again" on it.
+
+  What is deliberately NOT delivered: the scope, the duration, and who decided.
+  A child needs to know they were answered and which way; a parent who says yes
+  to the whole family forever should not have that read off their child's
+  screen. The test pins the payload's key list exactly.
+
+  The endpoint grants nothing and no filter consults it. Enforcement is still
+  only the signed snapshot — this exists to make a sentence true.
+- **Ask TTL vs grant TTL disagree.** *Root cause now fixed — see the next item.
+  The time-based honesty below stays as the offline fallback.* A "Not now" writes
   a temporary BLOCK grant that expires after `ONCE_GRANT_TTL_MS` (five minutes),
   and the block pages can only infer "declined" while that rule is LIVE —
   the backend drops expired temporary rules before it signs a snapshot. So a

@@ -21,7 +21,7 @@
  */
 
 import { normalizeYouTube, youTubePolicyKey } from "./youtube-normalize.js";
-import { getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest, consumeGrant } from "./backend-client.js";
+import { getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest, consumeGrant, getAnswers } from "./backend-client.js";
 import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
 import { makeResolver } from "./cname-resolve.js";
 
@@ -569,6 +569,23 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
       childId: snapshot?.childId, deviceId: snapshot?.deviceId, requestedAt: new Date().toISOString(),
     });
     return { ok: true };
+  }
+
+  // What the parent decided, asked for by the block page. The page used to work
+  // this out from a temporary BLOCK rule in the cached snapshot, and a refusal's
+  // grant expires after five minutes and is then dropped — so the answer
+  // vanished and the page went back to "waiting on a parent" for up to a week.
+  //
+  // Backend mode only. The native-host path has no equivalent route yet, and
+  // returning an empty list there would be indistinguishable from "nobody has
+  // decided", so it says so and the page keeps its time-based fallback.
+  if (msg?.type === "GET_ANSWERS") {
+    if (!BACKEND_MODE) return { ok: false, error: "not available in native-host mode" };
+    try {
+      return { ok: true, answers: await getAnswers() };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
   }
 });
 

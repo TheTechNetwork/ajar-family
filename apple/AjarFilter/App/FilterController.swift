@@ -197,6 +197,14 @@ final class FilterController: ObservableObject {
         case sending
         case waiting(since: Date)
         case answered
+        /// The parent said yes. Distinct from `.answered`, which only ever meant
+        /// "the policy changed" — the long poll wakes on any version bump, and a
+        /// refusal bumps it too, so the screen could not tell a child which had
+        /// happened. `.answered` is now the fallback for when the server cannot
+        /// be reached, not the only thing this screen can say.
+        case opened
+        /// The parent said not this time. An answer, never a fault.
+        case closed
         case failed(String)
     }
     @Published var requestState: RequestState = .idle
@@ -249,6 +257,26 @@ final class FilterController: ObservableObject {
     /// to cover an attentive parent, short enough that a child is not told a
     /// story for an afternoon.
     static let waitRounds = 24
+
+    /// Turn a policy change into what the parent actually decided.
+    ///
+    /// Falls back to `.answered` — the old, vaguer state — when the server
+    /// cannot be reached or has nothing on file. That copy is written to be true
+    /// without knowing the answer, so degrading to it is safe; claiming a yes we
+    /// could not confirm would not be.
+    private func decision(targetType: String, targetValue: String) async -> RequestState {
+        do {
+            guard let a = try await backend.answer(targetType: targetType, targetValue: targetValue) else {
+                return .answered
+            }
+            return a.answer == "opened" ? .opened : .closed
+        } catch {
+            // Deliberately not surfaced as an error: the ask itself succeeded and
+            // something DID change. Logged, then the vaguer honest state.
+            Self.uiLog.debug("answer lookup failed: \(error.localizedDescription, privacy: .public)")
+            return .answered
+        }
+    }
 
     /// Send the same ask again. No-op when there is nothing to resend, so the
     /// button can be bound without a second nil check at the call site.
@@ -415,7 +443,9 @@ final class FilterController: ObservableObject {
             var rounds = 0
             while rounds < Self.waitRounds {
                 if await waitForPolicyChange() {
-                    requestState = .answered
+                    // Which way. The bump alone does not say — a rule for a
+                    // sibling or a category refresh moves the version too.
+                    requestState = await decision(targetType: targetType, targetValue: targetValue)
                     return
                 }
                 rounds += 1

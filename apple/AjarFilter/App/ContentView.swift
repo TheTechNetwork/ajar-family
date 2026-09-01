@@ -256,14 +256,24 @@ struct RequestStatusView: View {
             // the page puts the question to the filter, which is the only thing
             // whose answer is authoritative.
             if let url = controller.requestURL,
-               controller.requestState == .answered || controller.waitedWithoutAnswer {
+               controller.requestState == .answered || controller.requestState == .opened
+                 || controller.waitedWithoutAnswer {
                 Link("Open the page", destination: url)
                     .buttonStyle(PrimaryButton()).frame(maxWidth: 360).padding(.bottom, 12)
             }
-            // The retry the refresh icon has always promised. A failed ask used
-            // to offer "Done" alone, so the only way forward was back to Safari
-            // to start the whole thing over — on the one screen a child reaches
-            // by being told no by the network.
+            // "No" is not the end of the road. Both extension block pages have
+            // always let a child ask again after a refusal, and UX_PRINCIPLES §2
+            // names dead ends specifically. Secondary rather than primary: the
+            // parent has just answered, and a coral "Ask again" would invite
+            // pestering the moment the answer lands.
+            if controller.requestState == .closed, controller.lastIncoming != nil {
+                Button("Ask again") { Task { await controller.retryLastRequest() } }
+                    .buttonStyle(SecondaryButton()).frame(maxWidth: 360).padding(.bottom, 12)
+            }
+
+            // The retry the refresh icon has always promised on a send failure.
+            // A failed ask used to offer "Done" alone, so the only way forward
+            // was back to Safari to start the whole thing over.
             if case .failed = controller.requestState, controller.lastIncoming != nil {
                 Button("Try again") { Task { await controller.retryLastRequest() } }
                     .buttonStyle(PrimaryButton()).frame(maxWidth: 360).padding(.bottom, 12)
@@ -293,6 +303,12 @@ struct RequestStatusView: View {
     // Neutral until the device can be told the actual decision.
     private var circleFill: Color {
         switch controller.requestState {
+        case .opened:   return Ajar.okWash
+        // A refusal is an ANSWER, not a fault. Surface-2 and ink, never the
+        // error colour and never red: the extension block pages settled this
+        // ("An answer, not a fault") and the child app now has the same state
+        // to style.
+        case .closed:   return Ajar.surface2
         case .answered: return Ajar.surface2
         case .failed:   return Ajar.surface2
         default:        return Ajar.warnWash
@@ -300,6 +316,8 @@ struct RequestStatusView: View {
     }
     private var symbolColor: Color {
         switch controller.requestState {
+        case .opened:   return Ajar.ok
+        case .closed:   return Ajar.ink2
         case .answered: return Ajar.ink2
         case .failed:   return Ajar.muted
         default:        return Ajar.warn
@@ -307,6 +325,8 @@ struct RequestStatusView: View {
     }
     private var symbol: String {
         switch controller.requestState {
+        case .opened:   return "checkmark"
+        case .closed:   return "hand.raised"
         case .answered: return "arrow.clockwise"
         case .failed:   return "arrow.clockwise"
         default:        return "clock"
@@ -323,9 +343,13 @@ struct RequestStatusView: View {
         case .waiting:  return controller.waitedWithoutAnswer
             ? "Sent. No answer here yet."
             : "Sent. Waiting on a parent."
-        // NOT "You're in": the long poll returns on any policy change, and the
-        // backend does not report the decision to the device yet. Claiming a yes
-        // the parent may not have given is worse than saying what is known.
+        case .opened:   return "You’re in"
+        case .closed:   return "Not this one"
+        // The fallback, kept because it is still reachable: the server could not
+        // be asked which way it went. It used to be the ONLY thing this screen
+        // could say, because the long poll wakes on any version bump and the
+        // decision was never sent to the device. It is now what we degrade to,
+        // not the ceiling.
         case .answered: return "There’s an answer"
         case .failed:   return "Couldn’t send it"
         case .idle:     return ""
@@ -338,6 +362,11 @@ struct RequestStatusView: View {
         case .waiting:  return controller.waitedWithoutAnswer
             ? "If a parent has answered, opening \(controller.requestTarget) will show it."
             : "Nothing else to do — it is with a parent now."
+        case .opened:   return "A parent said yes. It may close again later on its own."
+        // Word for word the extension block pages, which is the copy the whole
+        // product argued its way to: an answer, a reason to try again, and a
+        // person to go to — not a wall.
+        case .closed:   return "A parent said not this time. You can ask again with a note, or go ask them in person."
         case .answered: return "Open \(controller.requestTarget) to see what it is."
         case .failed(let why): return why
         case .idle:     return ""

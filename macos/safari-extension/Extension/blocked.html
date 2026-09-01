@@ -714,11 +714,61 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
       }
     });
 
+    /**
+     * The parent's ANSWER, from the server, for the thing this page is about.
+     *
+     * Preferred over `answerIn` because it is the decision itself rather than an
+     * inference from whether a rule happens to still exist. The inference stays
+     * as the fallback: it needs no network, so it still works offline and in
+     * native-host mode, and it paints an approval instantly from the cached
+     * snapshot without waiting for a round trip.
+     */
+    async function serverAnswer() {
+      let answers;
+      try {
+        const timedOut = Symbol("timeout");
+        const res = await Promise.race([
+          ext.runtime.sendMessage({ type: "GET_ANSWERS" }),
+          new Promise((resolve) => setTimeout(() => resolve(timedOut), 12000)),
+        ]);
+        if (res === timedOut || !res || !res.ok || !Array.isArray(res.answers)) return null;
+        answers = res.answers;
+      } catch { return null; }
+
+      // Match on the canonical target the ask was filed under. `canonicalKey` is
+      // what this page was redirected with; the URL is the fallback for a
+      // non-YouTube block, which is filed as URL:<the exact string>.
+      const keyType = canonicalKey ? canonicalKey.split(":")[0] : null;
+      const keyValue = canonicalKey ? canonicalKey.slice(canonicalKey.indexOf(":") + 1) : null;
+      const mine = answers.filter((a) =>
+        (keyType && a.targetType === keyType && a.targetValue === keyValue) ||
+        (a.targetType === "URL" && originalUrl && a.targetValue === originalUrl));
+      if (!mine.length) return null;
+
+      // Newest wins: a child who asked, was refused, and asked again should see
+      // the second answer, not the first.
+      mine.sort((a, b) => Date.parse(b.askedAt || 0) - Date.parse(a.askedAt || 0));
+      return mine[0].answer === "opened" ? "approved" : "declined";
+    }
+
     async function refreshFromSnapshot() {
       if (mode === "approved" || mode === "declined") return;
-      const answer = answerIn(await readSnapshot(), askedAtMs || Date.now());
-      if (answer === "approved") showApproved();
-      else if (answer === "declined" && askedAtMs) showDeclined();
+
+      // The snapshot first: already cached, so an approval paints without a
+      // round trip. It can only ever say "approved" reliably — a refusal's grant
+      // expires after five minutes and is then dropped, which is why the server
+      // is asked below.
+      const local = answerIn(await readSnapshot(), askedAtMs || Date.now());
+      if (local === "approved") { showApproved(); return; }
+
+      // Then the decision itself, which does not expire.
+      const remote = await serverAnswer();
+      if (remote === "approved") { showApproved(); return; }
+      if (remote === "declined") { showDeclined(); return; }
+
+      // Neither knows. Fall back to the local inference for the window where it
+      // is still valid, so an offline device is no worse off than before.
+      if (local === "declined" && askedAtMs) showDeclined();
     }
 
     (async function boot() {

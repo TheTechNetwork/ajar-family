@@ -162,6 +162,52 @@ function ruleHitsThisPage(rule) {
   }
 }
 
+/**
+ * The parent's ANSWER, from the server, for the thing this page is about.
+ *
+ * Preferred over `answerIn` below in every case, because it is the decision
+ * itself rather than an inference from whether a rule happens to still exist.
+ * The inference stays as the fallback: it needs no network, so it still works
+ * offline and in native-host mode, and it is what shows an approval instantly
+ * from the cached snapshot without waiting for a round trip.
+ *
+ * @returns {Promise<"approved"|"declined"|null>}
+ */
+async function serverAnswer() {
+  let answers;
+  try {
+    const res = await sendToWorker({ type: "getAnswers" });
+    if (!res || !res.ok || !Array.isArray(res.answers)) return null;
+    answers = res.answers;
+  } catch { return null; }
+
+  // Match on the same canonical target the ask was filed under. `key` is what
+  // this page was redirected with; the URL is the fallback for a non-YouTube
+  // block, which is filed as URL:<the exact string>.
+  const [keyType, keyValue] = key ? [key.split(":")[0], key.slice(key.indexOf(":") + 1)] : [null, null];
+  const mine = answers.filter((a) =>
+    (keyType && a.targetType === keyType && a.targetValue === keyValue) ||
+    (a.targetType === "URL" && blockedUrl && a.targetValue === blockedUrl));
+  if (!mine.length) return null;
+
+  // Newest wins: a child who asked, was refused, and asked again should see the
+  // second answer, not the first.
+  mine.sort((a, b) => Date.parse(b.askedAt || 0) - Date.parse(a.askedAt || 0));
+  return mine[0].answer === "opened" ? "approved" : "declined";
+}
+
+/** Promise wrapper over the callback-style runtime message, with the same 12s
+ *  guard the ask uses — a dead worker must not hang this page. */
+function sendToWorker(msg) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    setTimeout(() => done(null), 12000);
+    try { chrome.runtime.sendMessage(msg, (res) => done(res)); }
+    catch { done(null); }
+  });
+}
+
 /** @returns {"approved"|"declined"|null} */
 function answerIn(snapshot, askedAtMs) {
   if (!snapshot) return null;
@@ -338,9 +384,22 @@ btn.addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 async function refreshFromSnapshot() {
   if (mode === "approved" || mode === "declined") return;
-  const answer = answerIn(await readSnapshot(), askedAtMs || Date.now());
-  if (answer === "approved") showApproved();
-  else if (answer === "declined" && askedAtMs) showDeclined();
+
+  // The snapshot first: it is already cached, so an approval paints without a
+  // round trip. It can only ever say "approved" reliably — a refusal's grant
+  // expires after five minutes and is then dropped, which is the whole reason
+  // the server is asked below.
+  const local = answerIn(await readSnapshot(), askedAtMs || Date.now());
+  if (local === "approved") { showApproved(); return; }
+
+  // Then the decision itself, which does not expire.
+  const remote = await serverAnswer();
+  if (remote === "approved") { showApproved(); return; }
+  if (remote === "declined") { showDeclined(); return; }
+
+  // Neither knows. Fall back to the local inference for the window where it is
+  // still valid, so an offline device is not worse off than before.
+  if (local === "declined" && askedAtMs) showDeclined();
 }
 
 (async function boot() {
