@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create your Ajar account</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="../parent/tokens.css">
+<style>
+  body { background: var(--bg); color: var(--ink); font: 16px/1.6 var(--font, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif); margin: 0; }
+  .wrap { max-width: 34rem; margin: 0 auto; padding: 1.25rem 1.25rem 4rem; }
+  a { color: var(--accent-ink); }
+  .mark { display: flex; align-items: center; gap: .55rem; font-weight: 650; padding: 1rem 0 2rem; }
+
+  /* Four dots, not "Step 2 of 4" — the count is visible without being read. */
+  .dots { display: flex; gap: .4rem; margin-bottom: 2rem; }
+  .dots i { height: 4px; flex: 1; border-radius: 999px; background: var(--surface-2); }
+  .dots i[data-on] { background: var(--accent-strong); }
+
+  h1 { font-size: clamp(1.6rem, 5vw, 2.1rem); letter-spacing: -.02em; margin: 0 0 .5rem; }
+  .sub { color: var(--ink-2); margin: 0 0 1.75rem; }
+
+  label { display: block; font-weight: 600; margin: 0 0 .35rem; font-size: .95rem; }
+  .hint { font-weight: 400; color: var(--muted); font-size: .875rem; }
+  input, select { width: 100%; box-sizing: border-box; min-height: 48px; padding: 0 .85rem; font: inherit;
+    color: var(--ink); background: var(--surface); border: 1px solid var(--field-line); border-radius: 10px; }
+  .field { margin-bottom: 1.15rem; }
+  input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
+    outline: 3px solid var(--focus); outline-offset: 2px; box-shadow: 0 0 0 2px var(--focus-halo); }
+
+  button.primary { width: 100%; min-height: 52px; border: 0; border-radius: 12px; font: inherit; font-weight: 650;
+    background: var(--yes); color: var(--yes-ink); cursor: pointer; }
+  button.primary:hover:not(:disabled) { background: var(--yes-strong); }
+  button.primary:disabled { opacity: .55; cursor: default; }
+  button.link { background: none; border: 0; color: var(--ink-2); font: inherit; text-decoration: underline;
+    text-underline-offset: 3px; cursor: pointer; padding: .75rem 0; min-height: 44px; }
+
+  .err { background: var(--err-wash); color: var(--err); border-radius: 10px; padding: .8rem 1rem; margin: 0 0 1.25rem; }
+  .note { background: var(--accent-wash); color: var(--accent-ink); border-radius: 10px; padding: .8rem 1rem; margin: 0 0 1.5rem; font-size: .925rem; }
+
+  .code { font: 700 clamp(2rem, 9vw, 2.8rem)/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: .12em; text-align: center; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; padding: 1.5rem 1rem; margin: 0 0 .75rem; }
+  .expires { text-align: center; color: var(--muted); font-size: .9rem; margin: 0 0 1.75rem; }
+  [hidden] { display: none !important; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="mark" href="/">
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="5" y="3" width="14" height="18" rx="2.5" fill="var(--accent-strong)"/>
+      <path d="M7 4.4 L14.5 6 L14.5 18 L7 19.6 Z" fill="var(--bg)"/>
+      <circle cx="13" cy="12" r=".9" fill="var(--accent-strong)"/>
+    </svg>
+    Ajar
+  </a>
+
+  <div class="dots" aria-hidden="true">
+    <i id="d1" data-on></i><i id="d2"></i><i id="d3"></i><i id="d4"></i>
+  </div>
+
+  <p class="sr" id="sr" role="status" aria-live="polite"></p>
+  <p class="err" id="err" hidden></p>
+
+  <!-- 1 · account -->
+  <form id="s1">
+    <h1>Create your account</h1>
+    <p class="sub">This is the account that says yes. Your child never signs in to it.</p>
+    <div class="field">
+      <label for="name">Your name</label>
+      <input id="name" name="name" autocomplete="name" required>
+    </div>
+    <div class="field">
+      <label for="email">Email <span class="hint">— asks arrive here, so check it for typos</span></label>
+      <input id="email" name="email" type="email" autocomplete="email" inputmode="email" required>
+    </div>
+    <div class="field">
+      <label for="password">Password <span class="hint">— at least 8 characters</span></label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+    </div>
+    <p class="note">We don't verify email addresses yet, so a typo means you'd never hear about an ask and couldn't reset your password.</p>
+    <button class="primary" type="submit">Create account</button>
+    <button class="link" type="button" onclick="location.href='/parent/'">I already have an account</button>
+  </form>
+
+  <!-- 2 · family -->
+  <form id="s2" hidden>
+    <h1>Name your family</h1>
+    <p class="sub">Only you and any other grown-ups you add will see this.</p>
+    <div class="field">
+      <label for="family">Family name</label>
+      <input id="family" name="family" autocomplete="off" required>
+    </div>
+    <button class="primary" type="submit">Continue</button>
+  </form>
+
+  <!-- 3 · first child -->
+  <form id="s3" hidden>
+    <h1>Who is this for?</h1>
+    <p class="sub">Add one child now — you can add more later.</p>
+    <div class="field">
+      <label for="child">Their first name</label>
+      <input id="child" name="child" autocomplete="off" required>
+    </div>
+    <div class="field">
+      <label for="tz">Time zone <span class="hint">— so "until bedtime" means their bedtime</span></label>
+      <input id="tz" name="tz" autocomplete="off" required>
+    </div>
+    <button class="primary" type="submit">Continue</button>
+  </form>
+
+  <!-- 4 · device + code -->
+  <form id="s4" hidden>
+    <h1>Set up their device</h1>
+    <p class="sub">Pick the device Ajar will run on. You'll get a code to type into it.</p>
+    <div class="field">
+      <label for="platform">Device</label>
+      <select id="platform" name="platform">
+        <option value="IOS">iPhone</option>
+        <option value="IPADOS">iPad</option>
+        <option value="MACOS">Mac</option>
+        <option value="WINDOWS">Windows PC</option>
+      </select>
+    </div>
+    <button class="primary" type="submit">Get the setup code</button>
+    <button class="link" type="button" id="skipCode">I'll do this later</button>
+  </form>
+
+  <!-- 5 · done -->
+  <div id="s5" hidden>
+    <h1 id="doneHead">Type this on their device</h1>
+    <p class="sub" id="doneSub">Open Ajar there and enter the code. It works once.</p>
+    <p class="code" id="code"></p>
+    <p class="expires" id="expires"></p>
+    <button class="primary" type="button" onclick="location.href='/parent/'">Go to your console</button>
+  </div>
+</div>
+<script src="signup.js"></script>
+</body>
+</html>
