@@ -2,6 +2,18 @@
 #
 #   brew install xcodegen && xcodegen generate
 #
+# RE-RUN IT AFTER EVERY PULL THAT TOUCHES THIS FOLDER. The .xcodeproj is
+# generated and gitignored, so it does NOT update when you pull — it keeps
+# whatever file list it had when you last generated it. A source file added
+# upstream is simply absent from the target, and Swift reports that as
+# "cannot find <symbol> in scope" at every USE site rather than as a missing
+# file. A new Theme.swift, for instance, produces dozens of "cannot find
+# 'Ajar' in scope" and nothing pointing at the actual cause.
+#
+# CI cannot catch this for you: it runs `xcodegen generate` on a clean
+# checkout every time, so it is never building a stale project.
+# Close the project in Xcode before regenerating, or it will not be reloaded.
+#
 # One product across iOS, iPadOS and macOS, one bundle id, one App Store Connect
 # record — the same universal shape as AjarFilter (../AjarFilter).
 #

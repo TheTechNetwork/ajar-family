@@ -305,6 +305,58 @@ Button radius follows the same pattern: 10px, 999px, 12px, and `Capsule()`.
 
 ---
 
+## Enforcement: "once a URL is allowed the whole site works"
+
+Reported from a real device, 2026-09-01, on iOS, reproduced BOTH by clicking
+through from the approved page and by typing a fresh URL on the same site.
+
+**Ruled out by reading the code.** Nothing widens a URL rule:
+
+| Layer | Checked | Result |
+|---|---|---|
+| Rule minted by an approval | `services.ts` `mapScope` | `THIS_URL` → `URL` rule with the exact URL. Correct. |
+| Reference evaluator | `policy-model.ts` `matchTarget` | `URL` matches only on exact normalised equality. Correct. |
+| On-device matcher | `PolicyStore.swift` `matches` | Identical to the TS. Correct. |
+| URL normalisation | `URLNormalize.normalizeExact` | Careful mirror; preserves the path. Correct. |
+
+**What is actually wrong, and it is enforcement, not policy.**
+
+1. **`handleNewFlow` fails open, silently.** Its terminal `return .allow()`
+   catches a browser flow whose `url` is nil *and* a socket flow whose
+   `remoteHostname` is nil or empty — the latter being routine for a connection
+   to an already-resolved address. Those flows reach the network having never
+   been compared to a rule. Fail-open is defensible (with no host there is no
+   way to apply the safety floor either, so dropping would deny a child a crisis
+   line to enforce a policy we cannot read) — but it was invisible, omitted from
+   the very flow log someone would use to debug this. Now recorded as
+   `unpoliced:unidentifiable`, an action no rule can produce.
+
+2. **Socket flows bypass the YouTube default by design.**
+   `applyYouTubeDefaultToSocketFlows = false` returns `.allow()` for any socket
+   flow blocked by `default:youtube`, and `webDefault` is `ALLOW`, so every
+   socket connection to a YouTube host is allowed before and after any approval.
+   The file states the cost plainly: the YouTube native app is socket-only and
+   therefore unfiltered by this provider.
+
+3. **Per-URL control exists only for flows iOS reports as WebKit browser
+   flows.** An SPA route change produces none — which is exactly why the Windows
+   and macOS extensions ship a `content.js` that catches `pushState` and
+   re-asks the worker. `NEFilterDataProvider` has no equivalent hook.
+
+**Unexplained and still open: the typed-URL case.** A fresh navigation to a
+different URL on the same host should produce a browser flow carrying that URL
+and be blocked. That it was not is not explained by any of the above, and is
+the thing to chase next — with the flow log, which will now show the unpoliced
+flows it was hiding.
+
+**This contradicts a shipped claim.** `web/site/index.html`'s comparison table
+answers "Keep the rest of YouTube closed" with **yes**. On iOS today that holds
+only for Safari navigations that surface as browser flows. Until the typed-URL
+case is understood, that row overstates what the product does — the same defect
+class as the two platform claims corrected in `711cb54`.
+
+---
+
 ## Still open, and not caused by any of the above
 
 Carried forward so they are not lost between tranches:

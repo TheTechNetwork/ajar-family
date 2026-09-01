@@ -113,6 +113,32 @@ final class FilterDataProvider: NEFilterDataProvider {
         if let socket = flow as? NEFilterSocketFlow, let host = socket.remoteHostname, !host.isEmpty {
             return verdict(forURL: "https://\(host)/", host: host, remediable: false)
         }
+
+        // NOTHING TO EVALUATE — and this branch is not rare.
+        //
+        // It catches a browser flow whose `url` is nil AND a socket flow whose
+        // `remoteHostname` is nil or empty, which happens routinely: a connection
+        // opened to an address the system already resolved carries no hostname
+        // for the extension to read. With `filterSockets = true` that can be a
+        // lot of traffic, and every byte of it reaches the network having never
+        // been compared against a single rule.
+        //
+        // It still returns .allow(), because the alternative is worse: with no
+        // host there is no way to apply the SAFETY FLOOR either (Tier 0 matches
+        // by hostname), so dropping here would deny a child a crisis line to
+        // enforce a policy we could not even read. Fail-open is the deliberate
+        // choice; the defect was that it was SILENT.
+        //
+        // So it is recorded now. Anyone debugging "the site works even though it
+        // is blocked" was reading a flow log that omitted the one category of
+        // flow most likely to explain it, which turns a visible gap into a
+        // ghost hunt. `unpoliced` is deliberately not an action any rule can
+        // produce, so it cannot be confused with a real ALLOW.
+        let kind = flow is NEFilterBrowserFlow ? "browser-no-url" : "socket-no-host"
+        log.info("flow UNPOLICED kind=\(kind, privacy: .public) — no URL and no hostname; allowed without evaluation")
+        #if DEBUG
+        FlowLog.record(kind: kind, url: "(no url or hostname)", action: "allow", reason: "unpoliced:unidentifiable")
+        #endif
         return .allow()
     }
 
