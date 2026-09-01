@@ -24,6 +24,17 @@ name: iOS — TestFlight, Ajar Parent (internal)
 #    only discovered after a full archive and export have succeeded.
 
 on:
+  # Ships on every commit to main that touches the app. PATHS FILTER: a docs or
+  # backend commit would otherwise burn a macOS runner (billed 10x) and consume
+  # a TestFlight build number for a binary identical to the last one, which is
+  # noise in a tester's build list. Delete the `paths:` block to build on EVERY
+  # commit to main instead.
+  push:
+    branches: ["main"]
+    paths:
+      - 'apple/AjarParent/**'
+      - '.github/workflows/testflight-parent.yml'
+      - '.github/scripts/**'
   workflow_dispatch:
     inputs:
       confirm:
@@ -40,7 +51,13 @@ permissions:
 
 jobs:
   build:
-    if: inputs.confirm == 'testflight'
+    # `inputs` is null on a push, so the bare `inputs.confirm == 'testflight'`
+    # this replaced evaluated false and SKIPPED the job — which GitHub reports as
+    # a grey check, not a failure. The typed confirmation still gates a manual
+    # dispatch; a push to main is its own confirmation.
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      inputs.confirm == 'testflight'
     runs-on: macos-26
     timeout-minutes: 60
     env:

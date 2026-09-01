@@ -470,11 +470,31 @@ and does not expire like per-app certificates.
 
 ## 8. App Store Connect & TestFlight (LATER)
 
-- [ ] Create the App Store Connect app record for the **child app**
-      (`family.ajar.filter`) at <https://appstoreconnect.apple.com/>. There is no
-      parent app record — the parent console is the web app (§4).
+- [ ] Create an App Store Connect app record for **each** app at
+      <https://appstoreconnect.apple.com/> — `family.ajar.filter` and
+      `family.ajar.parent`. Two records, two apps. (This used to say there was no
+      parent record because the parent console was only `web/parent/`; there is
+      an `apple/AjarParent` app now, and it has its own TestFlight workflow.)
 - [ ] Use **TestFlight** for internal/external beta once distribution signing +
       the Family Controls distribution entitlement (§6) are in place.
+
+**Both TestFlight workflows now build on every commit to `main`** that touches
+their app, as well as on manual dispatch:
+
+| Workflow | Builds when `main` changes | Manual |
+|---|---|---|
+| `testflight.yml` | `apple/AjarFilter/**`, its own file, `.github/scripts/**` | dispatch, type `testflight` |
+| `testflight-parent.yml` | `apple/AjarParent/**`, its own file, `.github/scripts/**` | dispatch, type `testflight` |
+
+The paths filter exists so a docs or backend commit does not burn a macOS runner
+(billed at 10x) and consume a build number for a binary identical to the last
+one. Delete the `paths:` block in a workflow to build on every commit to `main`.
+
+The typed confirmation still gates a **manual** dispatch, but it cannot gate a
+push: `inputs` is null there, so a bare `inputs.confirm == '...'` job condition
+evaluates false and SKIPS the job — which GitHub reports as a grey check, not a
+failure. Both workflows guard with
+`github.event_name != 'workflow_dispatch' || inputs.confirm == 'testflight'`.
 - [ ] **Category: do NOT use the Kids Category.** Per ARCHITECTURE §12 the
       **parent is the buyer and account holder**, and the Kids Category's
       no-third-party-PII rules conflict with the server-side family model. Pick a
