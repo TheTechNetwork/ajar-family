@@ -190,6 +190,53 @@ export interface NotificationEndpoint {
  * in the email we send. 30-minute TTL, consumed on first use, and redeeming it
  * bumps the user's tokenVersion so every outstanding session dies.
  */
+/**
+ * A registered passkey. The public key is public by definition, so nothing here
+ * is a secret — which is the point of the whole mechanism: a database dump is
+ * not a set of account takeovers, the way a password hash dump partially is.
+ */
+export interface WebAuthnCredential {
+  /** base64url of the raw credential id the authenticator generated. */
+  id: string;
+  userId: string;
+  /** COSE public key, base64url. Parsed back to a CryptoKey to verify. */
+  publicKeyCose: string;
+  /** COSE algorithm identifier (-7 ES256, -257 RS256). */
+  alg: number;
+  /**
+   * The authenticator's own counter, last seen. A counter that goes BACKWARDS
+   * means the same credential is being used from two places, which is how a
+   * cloned authenticator shows itself. Many real authenticators — including
+   * every synced passkey — always report 0, so a zero counter is normal and
+   * only a decrease is evidence.
+   */
+  signCount: number;
+  /** What the parent will recognise in a list: "iPhone", "1Password". */
+  label: string;
+  /** Synced to a cloud keychain (backup-eligible), per the BE flag. */
+  backedUp: boolean;
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
+/**
+ * A one-shot challenge for a ceremony in flight.
+ *
+ * Stored server-side rather than handed to the client signed, because it has to
+ * be single-use and the simplest way to guarantee that is to delete it on
+ * redemption. Short TTL: this is a live conversation with a browser, not
+ * something that should still work tomorrow.
+ */
+export interface WebAuthnChallenge {
+  /** base64url of 32 random bytes — the value the authenticator signs over. */
+  challenge: string;
+  /** Registration binds to a user; sign-in does not know who yet. */
+  userId?: string;
+  kind: "REGISTER" | "AUTHENTICATE";
+  expiresAt: string;
+  createdAt: string;
+}
+
 export interface PasswordResetToken {
   id: string;
   userId: string;

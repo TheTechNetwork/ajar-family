@@ -13,6 +13,7 @@ import type {
   PolicyRule, TemporaryRule, DefaultPolicy, RuleScope, Role, Platform,
   RuleAction, PolicyTargetType, ApprovalScope, ApprovalDuration,
   CategoryDomain, PasswordResetToken, EmailVerificationToken, PendingRegistration, TemporaryGrant,
+  WebAuthnCredential, WebAuthnChallenge,
 } from "../../domain/model.js";
 
 const s = (v: unknown) => (v == null ? null : String(v));
@@ -86,6 +87,57 @@ export class SqlStore implements Repository {
   }
 
   // password reset tokens
+  // --- passkeys -----------------------------------------------------------
+  async createWebAuthnCredential(c: WebAuthnCredential) {
+    await this.db.run(
+      "INSERT INTO webauthn_credentials(id,user_id,public_key_cose,alg,sign_count,label,backed_up,created_at,last_used_at)"
+      + " VALUES(?,?,?,?,?,?,?,?,?)",
+      [c.id, c.userId, c.publicKeyCose, c.alg, c.signCount, c.label, c.backedUp ? 1 : 0, c.createdAt, s(c.lastUsedAt)]);
+    return c;
+  }
+  async getWebAuthnCredential(id: string) {
+    return this.mapCredential(await this.db.get("SELECT * FROM webauthn_credentials WHERE id=?", [id]));
+  }
+  async listWebAuthnCredentials(userId: string) {
+    const rows = await this.db.all("SELECT * FROM webauthn_credentials WHERE user_id=? ORDER BY created_at", [userId]);
+    return rows.map((r) => this.mapCredential(r)!).filter(Boolean);
+  }
+  async updateWebAuthnCredential(c: WebAuthnCredential) {
+    await this.db.run("UPDATE webauthn_credentials SET sign_count=?, last_used_at=?, label=?, backed_up=? WHERE id=?",
+      [c.signCount, s(c.lastUsedAt), c.label, c.backedUp ? 1 : 0, c.id]);
+    return c;
+  }
+  async deleteWebAuthnCredential(id: string) {
+    await this.db.run("DELETE FROM webauthn_credentials WHERE id=?", [id]);
+  }
+  private mapCredential(r: SqlRow | null): WebAuthnCredential | null {
+    return r ? {
+      id: r.id as string, userId: r.user_id as string, publicKeyCose: r.public_key_cose as string,
+      alg: Number(r.alg), signCount: Number(r.sign_count), label: r.label as string,
+      backedUp: Number(r.backed_up) === 1, createdAt: r.created_at as string,
+      lastUsedAt: (r.last_used_at as string | null) ?? undefined,
+    } : null;
+  }
+  async createWebAuthnChallenge(c: WebAuthnChallenge) {
+    await this.db.run(
+      "INSERT INTO webauthn_challenges(challenge,user_id,kind,expires_at,created_at) VALUES(?,?,?,?,?)",
+      [c.challenge, s(c.userId), c.kind, c.expiresAt, c.createdAt]);
+    return c;
+  }
+  async takeWebAuthnChallenge(challenge: string) {
+    const r = await this.db.get("SELECT * FROM webauthn_challenges WHERE challenge=?", [challenge]);
+    // Delete unconditionally — spent whether it was valid, expired or absent.
+    // Leaving expired rows is how this table grows forever; leaving USED ones is
+    // how an assertion gets replayed.
+    await this.db.run("DELETE FROM webauthn_challenges WHERE challenge=?", [challenge]);
+    return r ? {
+      challenge: r.challenge as string,
+      userId: (r.user_id as string | null) ?? undefined,
+      kind: r.kind as WebAuthnChallenge["kind"],
+      expiresAt: r.expires_at as string, createdAt: r.created_at as string,
+    } : null;
+  }
+
   async createPasswordResetToken(t: PasswordResetToken) {
     await this.db.run(
       "INSERT INTO password_reset_tokens(id,user_id,token_hash,expires_at,created_at,used_at) VALUES(?,?,?,?,?,?)",

@@ -6,6 +6,8 @@
 import type { Repository } from "./repository.js";
 import { hostCandidates, normalizeHost } from "@ajar/shared/categories";
 import type {
+  WebAuthnCredential,
+  WebAuthnChallenge,
   Session,
   User,
   Family,
@@ -65,6 +67,26 @@ export class MemoryStore implements Repository {
   async updateSession(s: Session) { this.sessions.set(s.id, clone(s)); return clone(s); }
   async listSessionsForUser(userId: string) {
     return [...this.sessions.values()].filter((s) => s.userId === userId).map(clone);
+  }
+
+  // --- passkeys -----------------------------------------------------------
+  private credentials = new Map<string, WebAuthnCredential>();
+  private challenges = new Map<string, WebAuthnChallenge>();
+
+  async createWebAuthnCredential(c: WebAuthnCredential) { this.credentials.set(c.id, clone(c)); return clone(c); }
+  async getWebAuthnCredential(id: string) { const c = this.credentials.get(id); return c ? clone(c) : null; }
+  async listWebAuthnCredentials(userId: string) {
+    return [...this.credentials.values()].filter((c) => c.userId === userId).map(clone);
+  }
+  async updateWebAuthnCredential(c: WebAuthnCredential) { this.credentials.set(c.id, clone(c)); return clone(c); }
+  async deleteWebAuthnCredential(id: string) { this.credentials.delete(id); }
+  async createWebAuthnChallenge(c: WebAuthnChallenge) { this.challenges.set(c.challenge, clone(c)); return clone(c); }
+  async takeWebAuthnChallenge(challenge: string) {
+    const c = this.challenges.get(challenge);
+    // Deleted whether or not it had expired: a used challenge is spent either
+    // way, and leaving expired rows behind is how this map grows without bound.
+    this.challenges.delete(challenge);
+    return c ? clone(c) : null;
   }
 
   async createPasswordResetToken(t: PasswordResetToken) { this.resetTokens.set(t.id, clone(t)); return clone(t); }
