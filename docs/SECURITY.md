@@ -196,6 +196,27 @@ living document for an alpha, not a completed audit.
 
 ## Deferred / known limitations
 
+- **THERE IS NO SECOND FACTOR. No MFA, no passkeys, no TOTP — a password is the
+  whole of parent authentication.** `docs/ARCHITECTURE.md` §7 lists "Sign in with
+  Apple / passkeys / email; parent MFA" as part of the design, and this list did
+  not mention their absence at all until someone signed up and asked where they
+  were. An architecture that names a control, a limitations list that stays
+  silent about it, and no implementation is the same failure this document has
+  already had three times over ("just once", device-token renewal, best-effort
+  mail delivery).
+
+  It matters more here than the usual "you should have MFA". The adversary this
+  product is built around **lives in the house**: they can watch the password
+  being typed, try the ones a parent reuses, and reach a shared computer where a
+  session may still be open. A parent account is not a mailbox — it approves what
+  a child may reach, and it can approve silently. A child who gets that password
+  unlocks everything and can grant their own requests, and the audit log records
+  a parent doing it.
+
+  Nothing about the current design blocks fixing this: sessions, `tokenVersion`
+  revocation and per-request enforcement are already in place, and a second
+  factor slots in at sign-in. It has simply not been built.
+
 - **Enumeration resistance is about STATUS and shape, not wall-clock time.**
   Register's two branches were made to do the same work — one PBKDF2 hash, one
   `users` lookup, one message with one subject — which removes the obvious tell.

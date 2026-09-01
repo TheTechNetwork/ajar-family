@@ -531,11 +531,19 @@ network) and redirect to a block page. All call the same `normalizeYouTube()`.
   pushes the change. Approval scope choices default to the **narrowest useful**
   permission (this request / this exact URL / this video / this channel / this
   domain / this device / this child / whole family) and never auto-broaden.
-- **Security**: Sign in with Apple / passkeys / email; parent MFA; per-device
+- **Security** *(intent; see the status note below)*: Sign in with Apple /
+  passkeys / email; parent MFA; per-device
   keypair generated at enrollment; short-lived access tokens + refresh rotation;
   signed device commands with replay protection; rate limiting; full audit log.
   **Approvals are server-authoritative and cryptographically signed** so a child
   device cannot fabricate one.
+
+  > **Status, 2026-09-01: the authentication half of that line is NOT built.**
+  > Parent auth is email + password only — no passkeys, no MFA, no Sign in with
+  > Apple (the last by decision: no external IdP). Everything after "per-device
+  > keypair" in that list IS implemented. This paragraph described the design and
+  > read as a description of the system; `docs/SECURITY.md` now carries it as a
+  > named limitation rather than leaving the gap to be discovered at signup.
 
 ## 8. Policy synchronization
 
