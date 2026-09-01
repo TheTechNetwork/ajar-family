@@ -251,7 +251,12 @@ struct RequestStatusView: View {
             // end of the road: the page is in Safari, the child is here, and
             // nothing on this screen could take them there. Only offered once
             // something has changed — before that there is nothing to try.
-            if controller.requestState == .answered, let url = controller.requestURL {
+            // Offered once there is anything to try: an answer arrived, or the
+            // wait ran out and this device has simply stopped learning. Opening
+            // the page puts the question to the filter, which is the only thing
+            // whose answer is authoritative.
+            if let url = controller.requestURL,
+               controller.requestState == .answered || controller.waitedWithoutAnswer {
                 Link("Open the page", destination: url)
                     .buttonStyle(PrimaryButton()).frame(maxWidth: 360).padding(.bottom, 12)
             }
@@ -311,7 +316,13 @@ struct RequestStatusView: View {
     private var title: String {
         switch controller.requestState {
         case .sending:  return "Sending…"
-        case .waiting:  return "Sent. Waiting on a parent."
+        // Two sentences, because only one of them is true at a time. The first
+        // was shown for as long as the sheet stayed open — originally forever,
+        // since the long poll was asked exactly once — so a child whose parent
+        // had already answered went on being told nobody had looked.
+        case .waiting:  return controller.waitedWithoutAnswer
+            ? "Sent. No answer here yet."
+            : "Sent. Waiting on a parent."
         // NOT "You're in": the long poll returns on any policy change, and the
         // backend does not report the decision to the device yet. Claiming a yes
         // the parent may not have given is worse than saying what is known.
@@ -324,7 +335,9 @@ struct RequestStatusView: View {
     private var message: String {
         switch controller.requestState {
         case .sending:  return "Asking about \(controller.requestTarget)."
-        case .waiting:  return "Nothing else to do — it is with a parent now."
+        case .waiting:  return controller.waitedWithoutAnswer
+            ? "If a parent has answered, opening \(controller.requestTarget) will show it."
+            : "Nothing else to do — it is with a parent now."
         case .answered: return "Open \(controller.requestTarget) to see what it is."
         case .failed(let why): return why
         case .idle:     return ""

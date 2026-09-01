@@ -198,6 +198,29 @@ function showAsking() {
   setStatus("Sending…", "info");
 }
 
+/**
+ * How long this page may keep claiming a parent has not answered.
+ *
+ * A "Not now" writes a temporary BLOCK grant that expires after
+ * ONCE_GRANT_TTL_MS — five minutes (backend/src/domain/services.ts) — and
+ * `answerIn` below can only see a rule while it is LIVE, because the backend
+ * drops expired temporary rules from the snapshot before it signs one. So a
+ * child who was told no saw "declined" for five minutes at most and then this
+ * page silently went back to "Waiting on a parent" — for up to the seven days
+ * the ask is remembered.
+ *
+ * That is the worst thing this screen can do. A child who was refused is left
+ * believing nobody has looked at all, which is precisely the state the whole
+ * design is built to avoid.
+ *
+ * The real fix is for the device to be told the DECISION rather than infer it
+ * from a rule that happens to still exist — see docs/UX_PLAN.md, "the device is
+ * never told the decision". Until then this page stops asserting what it cannot
+ * know. Ten minutes: comfortably past the five-minute grant, short enough that
+ * a child is not lied to for an afternoon.
+ */
+const WAITING_CLAIM_MS = 10 * 60 * 1000;
+
 function showAsked(atIso) {
   mode = "asked";
   askedAtIso = atIso;
@@ -208,8 +231,29 @@ function showAsked(atIso) {
   openBtn.classList.add("hide");
   $("askBox").classList.add("hide");
   $("askedNote").classList.remove("hide");
-  $("askedNote").textContent = `You asked ${ago(atIso)}. Nothing else to do — you can leave this page open or come back to it.`;
-  setStatus("✓ Sent. Waiting on a parent.", "wait");
+  renderAskedNote();
+}
+
+/** The asked state's two sentences, which change once we stop being able to
+ *  claim a parent has not answered. Called on a timer as well as on entry. */
+function renderAskedNote() {
+  if (mode !== "asked" || !askedAtIso) return;
+  const stale = Date.now() - askedAtMs > WAITING_CLAIM_MS;
+  if (stale) {
+    // True on every branch: approved (the rule is there and reloading proves
+    // it), refused (the grant has expired and left no trace here), or genuinely
+    // not looked at yet. Trying the page again puts the question to the filter,
+    // which is the only thing whose answer is authoritative.
+    $("askedNote").textContent =
+      `You asked ${ago(askedAtIso)}. If a parent has answered, opening the page again will show it.`;
+    setStatus("Sent. No answer here yet.", "wait");
+    btn.removeAttribute("aria-disabled");
+    btn.textContent = "Ask again";
+  } else {
+    $("askedNote").textContent =
+      `You asked ${ago(askedAtIso)}. Nothing else to do — you can leave this page open or come back to it.`;
+    setStatus("✓ Sent. Waiting on a parent.", "wait");
+  }
 }
 
 function showApproved() {
@@ -313,10 +357,7 @@ async function refreshFromSnapshot() {
 
   // Belt and braces, and it keeps the "asked N min ago" line honest.
   setInterval(() => {
-    if (mode === "asked" && askedAtIso) {
-      $("askedNote").textContent =
-        `You asked ${ago(askedAtIso)}. Nothing else to do — you can leave this page open or come back to it.`;
-    }
+    renderAskedNote();
     refreshFromSnapshot();
   }, 20000);
 })();

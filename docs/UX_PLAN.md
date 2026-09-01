@@ -293,11 +293,30 @@ Button radius follows the same pattern: 10px, 999px, 12px, and `Capsule()`.
 
 Carried forward so they are not lost between tranches:
 
-- **The device is never told the decision.** iOS structurally cannot show a
-  "no" today. Everything in A8 and the neutral `.answered` styling is
-  compensation for this, not a fix.
-- **Ask TTL vs grant TTL disagree** — a 7-day ask against a 5-minute BLOCK
-  grant, so a declined child is told "waiting" for a week.
+- **The device is never told the decision.** The block pages infer an answer
+  from whether a rule happens to exist right now, rather than being told what
+  the parent chose. Everything in A8, the neutral `.answered` styling, and the
+  "no answer here yet" copy above is compensation for this, not a fix.
+
+  The shape of the real fix: the device already holds an authenticated channel
+  (the device token) and already long-polls. The decision is recorded server-side
+  (`ApprovalDecision`) and is simply never delivered. Sending it — as part of the
+  sync response, keyed by request id — collapses every piece of compensation
+  above into one honest sentence, and is the single highest-value thing left in
+  this document.
+- **Ask TTL vs grant TTL disagree.** *Mitigated, not fixed.* A "Not now" writes
+  a temporary BLOCK grant that expires after `ONCE_GRANT_TTL_MS` (five minutes),
+  and the block pages can only infer "declined" while that rule is LIVE —
+  the backend drops expired temporary rules before it signs a snapshot. So a
+  refused child saw the answer for five minutes at most and then the page went
+  back to "Waiting on a parent" for up to the seven days the ask is remembered.
+  On iOS it was worse: the long poll was asked exactly once, so a timeout left
+  the child on "waiting" with nothing polling ever again.
+
+  All three surfaces now stop asserting what they cannot know, and offer the one
+  check that is authoritative — open the page and let the filter answer. iOS
+  also keeps polling instead of asking once. The underlying gap is the next
+  item, and it is what a real fix depends on.
 - **Overclaims in copy**: *"the child cannot stop"* and *"Keep the rest of
   YouTube closed"*.
 - **No LICENSE, privacy policy, or terms** on a product that handles children's

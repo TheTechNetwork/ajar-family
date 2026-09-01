@@ -571,6 +571,26 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
       requestBtn.dataset.busy = "1";
       setStatus("Sending…", "info");
     }
+    /**
+     * How long this page may keep claiming a parent has not answered.
+     *
+     * A "Not now" writes a temporary BLOCK grant that expires after
+     * ONCE_GRANT_TTL_MS — five minutes (backend/src/domain/services.ts) — and
+     * `answerIn` can only see a rule while it is LIVE, because the backend
+     * drops expired temporary rules from the snapshot before signing one. So a
+     * refused child saw "declined" for five minutes at most and then this page
+     * silently went back to "Waiting on a parent", for up to the seven days the
+     * ask is remembered.
+     *
+     * That is the worst thing this screen can do: a child who was told no is
+     * left believing nobody looked, which is the exact state the design exists
+     * to prevent. The real fix is for the device to be told the DECISION rather
+     * than infer it from a rule that happens to still exist (docs/UX_PLAN.md,
+     * "the device is never told the decision"). Until then the page stops
+     * asserting what it cannot know.
+     */
+    const WAITING_CLAIM_MS = 10 * 60 * 1000;
+
     function showAsked(atIso) {
       mode = "asked";
       askedAtIso = atIso;
@@ -581,9 +601,27 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
       openBtn.classList.add("hide");
       $("askBox").classList.add("hide");
       $("askedNote").classList.remove("hide");
-      $("askedNote").textContent =
-        `You asked ${ago(atIso)}. Nothing else to do — you can leave this page open or come back to it.`;
-      setStatus("✓ Sent. Waiting on a parent.", "wait");
+      renderAskedNote();
+    }
+
+    /** The asked state's two sentences, which change once we can no longer
+     *  claim a parent has not answered. On a timer as well as on entry. */
+    function renderAskedNote() {
+      if (mode !== "asked" || !askedAtIso) return;
+      if (Date.now() - askedAtMs > WAITING_CLAIM_MS) {
+        // True whichever actually happened — approved, refused, or not yet
+        // looked at. Opening the page again puts the question to the filter,
+        // which is the only thing whose answer is authoritative.
+        $("askedNote").textContent =
+          `You asked ${ago(askedAtIso)}. If a parent has answered, opening the page again will show it.`;
+        setStatus("Sent. No answer here yet.", "wait");
+        requestBtn.removeAttribute("aria-disabled");
+        requestBtn.textContent = "Ask again";
+      } else {
+        $("askedNote").textContent =
+          `You asked ${ago(askedAtIso)}. Nothing else to do — you can leave this page open or come back to it.`;
+        setStatus("✓ Sent. Waiting on a parent.", "wait");
+      }
     }
     function showApproved() {
       if (mode === "approved") return;
@@ -696,10 +734,7 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
       } catch { /* no storage events here; the poll below still runs */ }
 
       setInterval(() => {
-        if (mode === "asked" && askedAtIso) {
-          $("askedNote").textContent =
-            `You asked ${ago(askedAtIso)}. Nothing else to do — you can leave this page open or come back to it.`;
-        }
+        renderAskedNote();
         refreshFromSnapshot();
       }, 20000);
     })();

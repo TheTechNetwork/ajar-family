@@ -237,6 +237,19 @@ final class FilterController: ObservableObject {
     /// ends by name.
     @Published private(set) var lastIncoming: URL?
 
+    /// The long poll ran out of rounds without seeing a policy change.
+    ///
+    /// Not the same as "refused", and the screen must not say it is. It means
+    /// only that this device has learned nothing — so the copy stops claiming a
+    /// parent has not answered, and offers the one check that IS authoritative:
+    /// open the page and let the filter decide.
+    @Published private(set) var waitedWithoutAnswer = false
+
+    /// Roughly ten minutes at the backend's 25s long-poll timeout. Long enough
+    /// to cover an attentive parent, short enough that a child is not told a
+    /// story for an afternoon.
+    static let waitRounds = 24
+
     /// Send the same ask again. No-op when there is nothing to resend, so the
     /// button can be bound without a second nil check at the call site.
     func retryLastRequest() async {
@@ -350,6 +363,7 @@ final class FilterController: ObservableObject {
         // Remembered so `.failed` can offer a retry that does not send the child
         // back to Safari to start the whole ask over.
         lastIncoming = url
+        waitedWithoutAnswer = false
 
         let yt = YouTube.normalize(blocked)
         let targetType: String, targetValue: String
@@ -389,9 +403,28 @@ final class FilterController: ObservableObject {
             // unconditionally, so a request no parent ever saw showed the child a
             // green tick and "try it again" after 25 seconds — the one lie this
             // screen must not tell. Nothing happened, so stay waiting.
-            if await waitForPolicyChange() {
-                requestState = .answered
+            // Keep parking, rather than asking ONCE. A single call meant that a
+            // timeout — which is the normal ending, not a failure — left the
+            // child on "Waiting on a parent" with nothing polling ever again:
+            // an answer given five minutes later was never noticed at all, and
+            // the screen went on claiming a parent had not looked.
+            //
+            // Bounded rather than endless: a filter app holding a long poll open
+            // forever costs battery for a screen nobody is watching. When the
+            // rounds run out the copy stops asserting what it cannot know.
+            var rounds = 0
+            while rounds < Self.waitRounds {
+                if await waitForPolicyChange() {
+                    requestState = .answered
+                    return
+                }
+                rounds += 1
+                // A wait that FAILED (rather than timed out cleanly) would spin
+                // this loop at network speed. `lastError` is only set on the
+                // throwing path, so it is the signal to stop.
+                if lastError != nil { break }
             }
+            waitedWithoutAnswer = true
         } catch {
             fail("That request did not send. Try again in a moment.", error)
             requestState = .failed("That request did not send. Try again in a moment.")
