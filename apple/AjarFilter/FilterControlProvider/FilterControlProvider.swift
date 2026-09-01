@@ -63,6 +63,26 @@ final class FilterControlProvider: NEFilterControlProvider {
                 // that does not resolve — so the page rendered, the button
                 // appeared, and tapping it went nowhere. That is why A3 was only
                 // ever recorded as a partial pass.
+                //
+                // WHAT THE SYSTEM ACTUALLY SUBSTITUTES, and why the page has to
+                // be forgiving about it. NE_FLOW_URL is replaced with the flow's
+                // URL when there IS one — a WebKit browser flow — and with the
+                // HOST when there is not, which is every socket flow. A real
+                // block therefore produced `?u=www.youtube.com/`, with no
+                // scheme, and the page's `^https?://` guard rejected it: the
+                // child got "No address came through" and no button. The server
+                // now adds the scheme rather than dropping the target
+                // (`normalizeBlockedTarget` in backend/src/http/api.ts) — it
+                // cannot be fixed here, because the substitution is the
+                // system's, not ours.
+                //
+                // The substitution is also NOT percent-encoded, so a flow URL
+                // carrying its own query arrives with live `&`s: `?u=…/watch?v=X
+                // &t=30` parses as `u=…/watch?v=X` plus a stray `t=30`. The `v`
+                // survives — it is before the first `&` — so the canonical video
+                // id, which is the only part an approval is keyed on, is intact.
+                // Extra params are lost. Left as-is deliberately: recovering
+                // them would mean guessing which stray params belonged to `u`.
                 "requestAccess": "\(Self.blockPageBase)?u=\(NEFilterProviderRemediationURLFlowURL)" as NSString
             ],
             NEFilterProviderRemediationMapRemediationButtonTexts: [
