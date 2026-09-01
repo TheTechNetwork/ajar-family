@@ -5,11 +5,13 @@ import SwiftUI
 /// DUPLICATED from apple/AjarParent/App/Theme.swift. AjarFilter and AjarParent
 /// are separate Xcode projects with no shared framework between them, so this is
 /// a real copy, like the four inline CSS copies the extensions carry. If a token
-/// changes in tokens.css it must change in three places; check-contrast.mjs
-/// guards the CSS, and nothing yet guards these two.
+/// changes in tokens.css it must change in three places, which is what
+/// `apple/check-theme-tokens.mjs` is for.
 ///
 /// Those values are contrast-checked in CI (`web/parent/check-contrast.mjs`), so
 /// they are copied EXACTLY rather than eyeballed to something that looks close.
+/// `apple/check-theme-tokens.mjs` enforces the copy on every push: change a hex
+/// here and CI fails; change one in tokens.css and CI fails until this follows.
 /// Two rules from that file carry over and are easy to get wrong here:
 ///
 ///   - `accent` (#18A08C) is DECORATIVE only. White on it measures 3.26:1. Text
