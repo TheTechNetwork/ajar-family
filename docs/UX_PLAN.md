@@ -305,55 +305,62 @@ Button radius follows the same pattern: 10px, 999px, 12px, and `Capsule()`.
 
 ---
 
-## Enforcement: "once a URL is allowed the whole site works"
+## Enforcement: an approved YouTube video opens every video from that page
 
-Reported from a real device, 2026-09-01, on iOS, reproduced BOTH by clicking
-through from the approved page and by typing a fresh URL on the same site.
+Reported from a real device, iOS, 2026-09-01, and then narrowed by the reporter
+to the behaviour that matters: **from an approved video's page, clicking any
+other video plays it — but opening a different video in a NEW TAB is correctly
+blocked.**
+
+That second half is the important half. A fresh navigation IS caught and
+remediated, so the filter, the rules and the matching all work. Only in-page
+navigation leaks.
 
 **Ruled out by reading the code.** Nothing widens a URL rule:
 
-| Layer | Checked | Result |
+| Layer | Where | Result |
 |---|---|---|
 | Rule minted by an approval | `services.ts` `mapScope` | `THIS_URL` → `URL` rule with the exact URL. Correct. |
-| Reference evaluator | `policy-model.ts` `matchTarget` | `URL` matches only on exact normalised equality. Correct. |
-| On-device matcher | `PolicyStore.swift` `matches` | Identical to the TS. Correct. |
+| Reference evaluator | `policy-model.ts` `matchTarget` | Matches only on exact normalised equality. Correct. |
+| On-device matcher | `PolicyStore.swift` `matches` | Behaviourally identical to the TS. Correct. |
 | URL normalisation | `URLNormalize.normalizeExact` | Careful mirror; preserves the path. Correct. |
+| YouTube default | `policy-model.ts` tier 9 | Any unmatched youtube.com URL → `default:youtube` BLOCK. Correct. |
 
-**What is actually wrong, and it is enforcement, not policy.**
+**The actual chain, and every link is in the code.**
 
-1. **`handleNewFlow` fails open, silently.** Its terminal `return .allow()`
-   catches a browser flow whose `url` is nil *and* a socket flow whose
-   `remoteHostname` is nil or empty — the latter being routine for a connection
-   to an already-resolved address. Those flows reach the network having never
-   been compared to a rule. Fail-open is defensible (with no host there is no
-   way to apply the safety floor either, so dropping would deny a child a crisis
-   line to enforce a policy we cannot read) — but it was invisible, omitted from
-   the very flow log someone would use to debug this. Now recorded as
-   `unpoliced:unidentifiable`, an action no rule can produce.
+1. The approved video's page loads as a WebKit browser flow and is allowed by
+   its rule. A connection to `www.youtube.com` is now open and allowed.
+2. Clicking another video is a `pushState` route change plus XHR to
+   `/youtubei/v1/player` — carried over **that already-open connection**.
+   `handleNewFlow` fires per flow, so no new flow is created and **nothing is
+   evaluated at all**. The video id for the second video never reaches the
+   provider: it is in the POST body of a request on a connection that was
+   approved for something else.
+3. Were a new connection opened, it would arrive as a socket flow, and
+   `FilterDataProvider.swift:168-172` returns `.allow()` for **any** socket flow
+   blocked by `default:youtube` — `applyYouTubeDefaultToSocketFlows` is `false`.
+4. The video bytes come from `*.googlevideo.com`, which is not a YouTube host,
+   so `webDefault: ALLOW` allows it. The hostname carries no video id, so there
+   is nothing to match on even in principle.
 
-2. **Socket flows bypass the YouTube default by design.**
-   `applyYouTubeDefaultToSocketFlows = false` returns `.allow()` for any socket
-   flow blocked by `default:youtube`, and `webDefault` is `ALLOW`, so every
-   socket connection to a YouTube host is allowed before and after any approval.
-   The file states the cost plainly: the YouTube native app is socket-only and
-   therefore unfiltered by this provider.
+**Why the browser extensions do not have this bug.** They see a `requestType`,
+so `isPlaybackSupportUrl` can allow the player plumbing while a main-frame load
+"NEVER qualifies, or one approved video opens all of YouTube"
+(`windows/extension/background.js`) — and a `content.js` catches `pushState` and
+re-asks the worker. `NEFilterDataProvider` has neither: no request type, and no
+way to run script in the page.
 
-3. **Per-URL control exists only for flows iOS reports as WebKit browser
-   flows.** An SPA route change produces none — which is exactly why the Windows
-   and macOS extensions ship a `content.js` that catches `pushState` and
-   re-asks the worker. `NEFilterDataProvider` has no equivalent hook.
+**The fix is architecturally significant and is not yet made.** Enforcing
+per-request on a reused connection means returning `.filterDataVerdict(...)`
+from `handleNewFlow` and implementing `handleOutboundData` to inspect each
+request — turning a connection-level filter into a data-inspecting one, with
+real performance and correctness cost, and a dependency on YouTube's private
+InnerTube shape. That is a decision for the product owner, not a patch.
 
-**Unexplained and still open: the typed-URL case.** A fresh navigation to a
-different URL on the same host should produce a browser flow carrying that URL
-and be blocked. That it was not is not explained by any of the above, and is
-the thing to chase next — with the flow log, which will now show the unpoliced
-flows it was hiding.
-
-**This contradicts a shipped claim.** `web/site/index.html`'s comparison table
-answers "Keep the rest of YouTube closed" with **yes**. On iOS today that holds
-only for Safari navigations that surface as browser flows. Until the typed-URL
-case is understood, that row overstates what the product does — the same defect
-class as the two platform claims corrected in `711cb54`.
+**This contradicts a shipped claim, and the claim has been corrected.**
+`web/site/index.html`'s comparison table answered "Keep the rest of YouTube
+closed" with an unqualified **yes**. On iOS that holds for a fresh navigation
+and does not hold inside the YouTube app's own page.
 
 ---
 

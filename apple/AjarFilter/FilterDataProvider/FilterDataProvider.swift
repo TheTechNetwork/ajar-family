@@ -104,6 +104,26 @@ final class FilterDataProvider: NEFilterDataProvider {
         completionHandler()
     }
 
+    /// PER FLOW, NOT PER REQUEST — and that is the product's largest enforcement
+    /// gap, measured on device 2026-09-01.
+    ///
+    /// An approved video's page opens a connection to www.youtube.com and this
+    /// method allows it. Clicking another video from that page is a pushState
+    /// route change plus an XHR to /youtubei/v1/player carried over THAT SAME
+    /// connection — so no new flow is created, this method is never called
+    /// again, and the second video's id (which lives in the request body) never
+    /// reaches the filter at all. A fresh navigation in a new tab is still
+    /// caught, because that is a main-frame load and does produce a browser
+    /// flow.
+    ///
+    /// The browser extensions do not have this gap: they see a `requestType`,
+    /// so a main-frame load can never be mistaken for player plumbing, and a
+    /// content script catches the route change. Neither is available here.
+    ///
+    /// Closing it means returning `.filterDataVerdict(...)` and implementing
+    /// `handleOutboundData` to inspect each request on a connection — a
+    /// different class of filter, with real performance cost and a dependency on
+    /// YouTube's private InnerTube shape. Not a patch; see docs/UX_PLAN.md.
     override func handleNewFlow(_ flow: NEFilterFlow) -> NEFilterNewFlowVerdict {
         // WebKit browser flow → full URL available.
         if let browser = flow as? NEFilterBrowserFlow, let url = browser.url {

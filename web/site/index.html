@@ -54,6 +54,8 @@
      visitor that coral means "a tick" before they ever meet the button. Teal
      wash reads as affirmative here without borrowing the action colour. */
   .no { background: var(--surface-2); color: var(--muted); }
+  /* A third verdict, because two forced a measured "mostly" to round to yes. */
+  .part { background: var(--warn-wash); color: var(--warn); }
   .yes { background: var(--accent-wash); color: var(--accent-ink); }
 
   ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 0; display: grid; gap: 1.25rem; }
@@ -130,11 +132,25 @@
       <div class="card">
         <h3>Ajar</h3>
         <div class="row"><span class="verdict yes">yes</span><span class="k">Open just that video</span></div>
-        <div class="row"><span class="verdict yes">yes</span><span class="k">Keep the rest of YouTube closed</span></div>
+        <!-- "yes" here was measured false on iOS on 2026-09-01: from an approved
+             video's page, clicking another video plays it, because YouTube
+             navigates in-page over a connection that was already approved and
+             the content filter is only asked once per connection. A fresh
+             navigation IS blocked, and the browser extensions on Windows and Mac
+             do not have the gap — they see the request type and run a content
+             script. Reduced to "mostly" with the caveat named rather than left
+             as an unqualified yes; docs/UX_PLAN.md carries the full chain. -->
+        <div class="row"><span class="verdict part">mostly</span><span class="k">Keep the rest of YouTube closed</span></div>
         <div class="row"><span class="verdict yes">yes</span><span class="k">Have it close again on its own</span></div>
         <p class="sub" style="margin:1rem 0 0">
           Ajar reads the whole address, so a yes can be as small as one video,
           for thirty minutes, and nothing else moves.
+        </p>
+        <p class="sub" style="margin:.75rem 0 0">
+          One gap we will not paper over: on an iPhone or iPad, once a video is
+          open, YouTube's own page can reach other videos without asking us
+          again. Typing or opening a new address is still checked. On Windows and
+          Mac there is no gap.
         </p>
       </div>
     </div>
