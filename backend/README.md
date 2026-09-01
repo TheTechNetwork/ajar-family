@@ -75,7 +75,11 @@ Signing and tokens use **WebCrypto**, which both runtimes support. Deploy: see
 
 ## API (v1, bearer auth)
 
-- `POST /v1/auth/register` · `POST /v1/auth/login` → `{ userId, token }`
+- `POST /v1/auth/register` → **202 always** (an identical body whether or not the address is taken — otherwise this is an account-enumeration oracle). No account is created here; it is created when the emailed code is redeemed.
+- `POST /v1/auth/verify` → confirms an address: **201 + token pair** when it completes a sign-up (the parent is signed straight in), **200** when an existing account confirms itself. Single use, 60-minute TTL, stored only as a SHA-256 hash.
+- `POST /v1/auth/verify/request` → re-send a confirmation for an account that already exists; 202 whether or not the address is known.
+- `POST /v1/auth/login` → `{ accessToken, refreshToken, ... }`
+- **Sign-up needs working email.** With `MAIL_ENDPOINT`/`MAIL_TOKEN` unset, the confirmation code goes nowhere and no account can be created. `GET /v1/me` reports `emailVerified`; nothing is gated on it (see `docs/SECURITY.md`).
 - `POST /v1/families` · `GET /v1/families/:id` · `POST /v1/families/:id/parents` · `POST|GET /v1/families/:id/children`
 - `PUT /v1/families/:id/children/:childId/defaults` · `POST|GET|DELETE /v1/families/:id/rules[/:ruleId]`
 - `POST /v1/families/:id/enroll` → `{ code }`; `POST /v1/enroll/redeem` (device) → `{ device, deviceToken, signingPublicKeyB64 }`

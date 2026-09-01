@@ -158,6 +158,23 @@ function setRegisterMode(on, quiet) {
   if (!quiet) announce(on ? "Creating a new account." : "Logging in.");
 }
 
+/**
+ * Creating an account no longer signs you in on the spot. The backend answers
+ * the same 202 whether or not the address already has an account — a different
+ * answer for a taken address is a working "who has an account here?" test — so
+ * the truth arrives in the inbox, and nothing here can (or should) say more than
+ * "there is a message on its way".
+ */
+function awaitConfirmation(email) {
+  $("authH").textContent = "Check your email";
+  $("authForm").classList.add("hide");
+  const msg = `If we can set up an account for ${email}, there is a link on its way. `
+    + "Open it to finish — it works for the next hour.";
+  $("authErr").classList.add("note");
+  $("authErr").textContent = msg;
+  announce(msg);
+}
+
 async function auth(register) {
   const email = $("email").value.trim();
   const password = $("password").value;
@@ -171,12 +188,14 @@ async function auth(register) {
   const btn = $("btnLogin");
   btn.dataset.busy = "1";                 // blocks a double-tap on a slow phone
   btn.setAttribute("aria-disabled", "true");
-  announce(register ? "Creating your account…" : "Logging in…");
+  announce(register ? "Setting up your account…" : "Logging in…");
   try {
-    const out = register
-      ? await api("/v1/auth/register", { method: "POST", auth: false, body: { email, password, displayName: $("name").value.trim() || email } })
-      : await api("/v1/auth/login", { method: "POST", auth: false, body: { email, password } });
-    setTokens(out);
+    if (register) {
+      await api("/v1/auth/register", { method: "POST", auth: false, body: { email, password, displayName: $("name").value.trim() || email } });
+      awaitConfirmation(email);
+      return;
+    }
+    setTokens(await api("/v1/auth/login", { method: "POST", auth: false, body: { email, password } }));
     await afterLogin();
   } catch (e) {
     failAuth(friendly(e), "password");
@@ -186,6 +205,7 @@ async function auth(register) {
   }
 }
 function failAuth(msg, focusId) {
+  $("authErr").classList.remove("note");
   $("authErr").textContent = msg;
   announceAlert(msg);
   $(focusId).setAttribute("aria-invalid", "true");
@@ -695,11 +715,36 @@ function cssEscape(s) {
   return (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/["\\]/g, "\\$&");
 }
 
+/**
+ * The confirmation link the backend emails is `<console>?verify=<code>`. Opening
+ * it finishes the sign-up and signs the parent in — they proved the address
+ * seconds ago, so asking them to retype the password they just chose buys
+ * nothing. The code is stripped from the URL immediately: it is single-use, but
+ * it has no business sitting in the address bar, the history, or a screenshot.
+ */
+async function completeConfirmation(code) {
+  history.replaceState(null, "", location.pathname);
+  $("authCard").classList.add("hide");
+  try {
+    const out = await api("/v1/auth/verify", { method: "POST", auth: false, body: { token: code } });
+    if (out.accessToken) setTokens(out);
+    await afterLogin();
+  } catch (e) {
+    $("authCard").classList.remove("hide");
+    const m = friendly(e);
+    $("authErr").textContent = m;
+    announceAlert(m);
+  }
+}
+
 // Auto-resume a session (api() refreshes a stale access token automatically).
 // Only an actual auth rejection clears the refresh token — a single offline
 // fetch used to sign the parent out permanently.
 setRegisterMode(false, true);
-if (state.token || state.refresh) {
+const verifyCode = new URLSearchParams(location.search).get("verify");
+if (verifyCode) {
+  completeConfirmation(verifyCode);
+} else if (state.token || state.refresh) {
   $("authCard").classList.add("hide");           // don't show a form about to vanish
   afterLogin().catch((e) => {
     if (isAuthError(e)) { clearTokens(); $("authCard").classList.remove("hide"); }

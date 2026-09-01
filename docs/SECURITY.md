@@ -53,9 +53,15 @@ living document for an alpha, not a completed audit.
 - **Host normalization.** A trailing root dot (`reddit.com.`) is stripped before
   matching. Without this, one character defeated every DOMAIN and CATEGORY rule.
 - **Category dataset import** (`PUT /v1/categories/dataset`) is GLOBAL data and
-  is now **disabled unless `CATEGORY_ADMIN_TOKEN` is set**, then requires that
-  token in `x-admin-token`. Previously any registered user could wipe or poison
-  category enforcement for every family on the instance.
+  is **disabled unless `CATEGORY_ADMIN_TOKEN` is set**, then requires that token
+  in `x-admin-token` (compared in constant time, on SHA-256 digests, so neither
+  the secret's length nor a matching prefix is published through response time)
+  **on top of** a valid session. Previously any registered user could wipe or
+  poison category enforcement for every family on the instance. A deployment
+  secret rather than a per-user admin flag on purpose: an admin flag puts a
+  switch over global reference data behind one parent's password and inbox, so a
+  single account takeover would reach every family. Covered by
+  `backend/src/http/categories-admin.test.ts`.
 - **Password reset (self-service, no enumeration).** `POST /v1/auth/forgot`
   always answers **202** with an identical body whether or not the address is
   known, so it cannot be used to test which emails have accounts.
@@ -68,6 +74,39 @@ living document for an alpha, not a completed audit.
   client), so the flow cannot be used to flood an inbox. The new password is
   validated *before* the token is burned, so a rejected password does not cost
   the parent their reset link.
+- **Email verification, and a sign-up that answers the same either way.**
+  `POST /v1/auth/register` now **always** answers **202** with an identical body,
+  and **creates nothing**: a free address gets a `pending_registrations` row
+  (password already PBKDF2-hashed, token stored only as `base64url(SHA-256)`) and
+  a link; an address that already has an account gets an email to its owner
+  saying someone tried, with the **same subject** and no code. The account comes
+  into being when the link is opened (`POST /v1/auth/verify` → 201 + token pair);
+  `POST /v1/auth/verify/request` re-sends for an account that already exists.
+  Codes are **single-use**, **60-minute TTL**, and superseded by any newer one.
+  Both register branches hash the password, read `users` once and send one
+  message, so the coarse timing tell is gone — see the limitation below for what
+  that does *not* claim. Consequences: a squatter cannot park on an address they
+  do not control (the pending row expires and never blocks the real owner), and a
+  typo'd address now fails visibly instead of silently.
+- **What an unverified account may do: everything.** `GET /v1/me` reports
+  `emailVerified`, and **nothing is gated on it**. Every account that existed
+  before this flow is unverified by definition, and gating a parental control on
+  a mail round-trip would stop enforcement for families who are already running.
+  The flag is there for the console to prompt with, and any parent can confirm at
+  any time via `/v1/auth/verify/request`. Re-visit once the alpha's accounts have
+  been given the chance to confirm.
+- **Request bodies are schema-validated.** Every route that reads a body reads it
+  through `backend/src/http/validate.ts` — a ~150-line internal validator, no
+  dependency added (the repo has zero runtime dependencies). Malformed JSON is a
+  **400 with a message written for a parent**, where it used to throw out of
+  `req.json()` and be reported as **500 internal error**; wrong types are refused
+  at the edge instead of reaching the domain, where only *some* fields were
+  checked. Concretely, before this: `{"decision": 123}` on an approval returned
+  200 and wrote a grant that silently became a BLOCK, a rule with
+  `target: "NOT_A_TARGET"` was stored and could never match, a notification
+  endpoint of kind `CARRIER_PIGEON` was accepted, and a malformed dataset import
+  crashed with a 500. Unknown fields are ignored, so a newer client is never
+  refused over a field this build does not read.
 - **Notifications actually reach a person.** The alpha's only wired Notifier
   wrote to the server's stdout. `EmailNotifier` + a `MailSender` now deliver
   parent notifications and reset codes by POSTing a small JSON envelope to a
@@ -120,23 +159,30 @@ living document for an alpha, not a completed audit.
 
 ## Deferred / known limitations
 
-- **Account-enumeration on register.** Registering an existing email returns a
-  generic 409, but the status still differs from success. `/v1/auth/forgot` is
-  now fully non-enumerating; **register is not**, and closing it needs the
-  email-verification flow below.
-- **No email verification.** An address is never proved to belong to the person
-  who typed it. Consequences: a typo'd address silently receives nothing (the
-  parent is notified of nothing and cannot reset); someone can register with an
-  address they do not control; and registration remains an enumeration oracle.
-  The delivery mechanism this needs now exists — a verify-token flow on top of
-  `MailSender` is the remaining work, and it should land before public launch.
-- **Input validation.** Request bodies are typed but not schema-validated
-  (no Zod-style guards yet); malformed input is not uniformly rejected.
-- **Category dataset import is not yet role-restricted.** `PUT /v1/categories/dataset`
-  (replace the whole categorization dataset from a feed) requires an authenticated
-  user but there is no admin role yet, so any signed-in parent can call it. It is
-  global reference data — gate it behind an admin/ops role (or move it out of the
-  parent API to an ops tool) before production.
+- **Enumeration resistance is about STATUS and shape, not wall-clock time.**
+  Register's two branches were made to do the same work — one PBKDF2 hash, one
+  `users` lookup, one message with one subject — which removes the obvious tell.
+  That is as far as the claim goes: **the residual timing difference has not been
+  measured**, and a taken address does one string comparison and one mail send
+  along a slightly different code path. Treat this as "the coarse oracle is
+  closed", not as constant-time. A statistical timing study belongs with the
+  pen test.
+- **Sign-up now depends on working email.** With `MAIL_ENDPOINT`/`MAIL_TOKEN`
+  unset the confirmation code goes nowhere and **no account can be created** —
+  the Node server says so on boot. That is the price of not having register
+  answer differently for a taken address; a self-host without a mail provider
+  needs one before its first parent can sign up.
+- **Confirming an address reveals whether the code was valid** (401 vs 200/201),
+  exactly as the reset endpoint does. Inherent to a code-in-email flow at this
+  token strength (256 bits, 60 minutes, single use).
+- **Verification is not enforced anywhere**, by choice (see above). Until it is,
+  an address that has never been confirmed can still hold approval rights over a
+  child; what verification buys today is that the sign-up path is no longer an
+  enumeration oracle and that a typo'd address fails visibly.
+- **The validator is structural, not semantic.** It checks types, enums, lengths
+  and shapes at the edge. Meaning still belongs to the domain — an IANA time
+  zone, a real child id, a password's minimum length — and those checks stay
+  where they were.
 - **Rate limiter is per-instance.** Fine for a single node/isolate; needs a
   shared store to be effective across a fleet.
 - **The child controls the client's trust anchor.** The extension's Options page
@@ -181,8 +227,8 @@ living document for an alpha, not a completed audit.
 - **Password-reset tokens are not bound to a device or IP**, and the reset
   endpoint reveals validity by status code (401 vs 200). That is inherent to a
   code-in-email flow at this token strength (256 bits, 30 minutes, single use).
-- **Before public launch:** a formal third-party penetration test, secret
-  rotation policy, and the input-validation layer.
+- **Before public launch:** a formal third-party penetration test and a secret
+  rotation policy.
 
 ## Reporting
 

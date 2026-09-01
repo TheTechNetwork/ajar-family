@@ -37,10 +37,13 @@ async function fixture(ip = "1.1.1.1") {
   const mail = new InMemoryMailSender();
   const app = await App.create({ mail, config: { authSecret: "test" } });
   const r = buildRouter(app);
-  const reg = await call(r, "POST", "/v1/auth/register",
-    { email: "p@e.com", password: "first-password", displayName: "P" }, undefined, ip);
-  assert.equal(reg.status, 201);
-  return { app, r, mail, tokens: reg.body as { accessToken: string; refreshToken: string }, ip };
+  // The account is created directly (the HTTP sign-up path is covered in
+  // auth-verify.test.ts) so `mail.sent` holds only reset mail from here on.
+  await app.auth.register("p@e.com", "first-password", "P");
+  const login = await call(r, "POST", "/v1/auth/login",
+    { email: "p@e.com", password: "first-password" }, undefined, ip);
+  assert.equal(login.status, 200);
+  return { app, r, mail, tokens: login.body as { accessToken: string; refreshToken: string }, ip };
 }
 
 test("forgot: 202 for a known AND an unknown address (no enumeration)", async () => {
@@ -59,7 +62,7 @@ test("forgot: 202 for a known AND an unknown address (no enumeration)", async ()
 
 test("reset: the emailed token sets a new password and kills every session", async () => {
   const { app, r, mail, tokens } = await fixture("2.2.2.2");
-  // The registration session is live to begin with.
+  // The sign-in session is live to begin with.
   assert.equal((await call(r, "GET", "/v1/me", undefined, tokens.accessToken, "2.2.2.2")).status, 200);
 
   await call(r, "POST", "/v1/auth/forgot", { email: "p@e.com" }, undefined, "2.2.2.2");

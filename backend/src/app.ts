@@ -34,6 +34,9 @@ export interface AppConfig {
   /** Base URL of the parent console page that completes a password reset;
    *  the emailed link is `<base>?token=<raw>`. Omitted = code-only email. */
   resetUrlBase?: string;
+  /** Base URL of the parent console page that completes email confirmation;
+   *  the emailed link is `<base>?verify=<raw>`. Omitted = code-only email. */
+  verifyUrlBase?: string;
 }
 
 export class App {
@@ -42,6 +45,8 @@ export class App {
   readonly mail: MailSender;
   /** Where a password-reset email should point (parent console). */
   readonly resetUrlBase?: string;
+  /** Where a confirm-your-email link should point (parent console). */
+  readonly verifyUrlBase?: string;
   readonly hub: EventHub;
   readonly authSecret: string;
   readonly signingPublicKeyB64: string;
@@ -61,13 +66,14 @@ export class App {
     this.notifier = notifier;
     this.mail = mail;
     this.resetUrlBase = cfg.resetUrlBase;
+    this.verifyUrlBase = cfg.verifyUrlBase;
     this.hub = hub;
     this.authSecret = cfg.authSecret;
     this.signingPublicKeyB64 = signingPublicKeyB64;
     this.categoryAdminToken = cfg.categoryAdminToken;
     this.categories = new RepositoryCategoryProvider(repo);
     this.cnameResolver = resolver;
-    this.auth = new AuthService(repo, notifier);
+    this.auth = new AuthService(repo, notifier, mail);
     this.family = new FamilyService(repo);
     this.enrollment = new EnrollmentService(repo);
     this.devices = new DeviceService(repo);

@@ -5,7 +5,8 @@
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, display_name TEXT NOT NULL,
-  password_hash TEXT, token_version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+  password_hash TEXT, token_version INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+  email_verified_at TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL, label TEXT NOT NULL,
@@ -18,6 +19,22 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_reset_user ON password_reset_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_reset_hash ON password_reset_tokens(token_hash);
+CREATE TABLE IF NOT EXISTS email_verification_tokens (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL, created_at TEXT NOT NULL, used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_verify_user ON email_verification_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_verify_hash ON email_verification_tokens(token_hash);
+-- A sign-up nobody has proved yet. Deliberately NOT a users row: register must
+-- answer the same whether or not the address is taken, so the account cannot
+-- exist until someone opens the link in that inbox.
+CREATE TABLE IF NOT EXISTS pending_registrations (
+  id TEXT PRIMARY KEY, email TEXT NOT NULL, display_name TEXT NOT NULL,
+  password_hash TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL, created_at TEXT NOT NULL, used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pending_email ON pending_registrations(email);
+CREATE INDEX IF NOT EXISTS idx_pending_hash ON pending_registrations(token_hash);
 CREATE TABLE IF NOT EXISTS families (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL
 );
@@ -117,4 +134,8 @@ export const MIGRATIONS_SQL: string[] = [
   "ALTER TABLE children ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'",
   "ALTER TABLE devices ADD COLUMN last_seen_at TEXT",
   "ALTER TABLE temp_rules ADD COLUMN consumed_at TEXT",
+  // Nullable, no backfill: an account that existed before verification existed
+  // has genuinely never proved its address, and saying otherwise in the column
+  // that means "proved" would be a lie the rest of the system then trusts.
+  "ALTER TABLE users ADD COLUMN email_verified_at TEXT",
 ];

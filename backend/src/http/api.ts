@@ -8,7 +8,87 @@ import { Router, ok, err, html, type HttpRequest, type HttpResponse } from "./ro
 import { issueToken, verifyToken, type Principal } from "../auth/tokens.js";
 import { openapiDocument } from "./openapi.js";
 import { RateLimiter, clientKey } from "./rate-limit.js";
-import type { ApprovalDuration, ApprovalScope, Platform, RuleAction, PolicyTargetType, Role } from "../domain/model.js";
+import * as v from "./validate.js";
+import type { ApprovalDuration } from "../domain/model.js";
+
+/**
+ * Every route that reads a body reads it through one of these. Before this, a
+ * body was type-ASSERTED and never checked, so malformed JSON came back as a 500
+ * and a wrong-shaped body failed somewhere further in — see http/validate.ts.
+ *
+ * The enums are repeated here rather than derived from the domain types on
+ * purpose: TypeScript's unions are erased at run time, and this is the run-time
+ * boundary. The OpenAPI contract test keeps the documented set honest.
+ */
+const ROLE_VALUES = ["OWNER", "PARENT", "LIMITED_GUARDIAN"] as const;
+const PLATFORM_VALUES = ["IOS", "IPADOS", "MACOS", "WINDOWS"] as const;
+const ACTION_VALUES = ["ALLOW", "BLOCK"] as const;
+const TARGET_VALUES = ["DOMAIN", "URL", "URL_PATTERN", "YOUTUBE_VIDEO", "YOUTUBE_CHANNEL",
+  "YOUTUBE_PLAYLIST", "CATEGORY", "APPLICATION"] as const;
+const APPROVAL_SCOPE_VALUES = ["THIS_REQUEST", "THIS_URL", "THIS_VIDEO", "THIS_CHANNEL",
+  "THIS_DOMAIN", "THIS_DEVICE", "THIS_CHILD", "WHOLE_FAMILY"] as const;
+const RULE_SCOPE_VALUES = ["FAMILY", "CHILD", "DEVICE"] as const;
+const DURATION_VALUES = ["MINUTES", "UNTIL_END_OF_DAY", "ONCE", "ALWAYS"] as const;
+const PUSH_KIND_VALUES = ["APNS", "WEBSOCKET", "CONSOLE", "EMAIL", "WEBPUSH"] as const;
+
+// A password is never trimmed — a leading or trailing space a parent typed is
+// part of their password, and quietly removing it locks them out later. Its
+// LENGTH rule lives in auth/password.ts and stays there: one source of truth.
+const password = () => v.str({ max: 512, trim: false });
+const id = () => v.str({ max: 128 });
+
+const bodies = {
+  register: v.object(
+    { email: v.email(), password: password(), displayName: v.str({ max: 120 }) },
+    { email: "email address", password: "password", displayName: "name" }),
+  login: v.object({ email: v.email(), password: password() },
+    { email: "email address", password: "password" }),
+  refresh: v.object({ refreshToken: v.str({ max: 4096 }) }, { refreshToken: "sign-in token" }),
+  // Deliberately NOT `v.email()`. These two answer 202 whatever they are given,
+  // and a 400 for a malformed address would be a second answer where there is
+  // meant to be exactly one. The domain does the structural check and stays
+  // silent — see AuthService.requestPasswordReset.
+  emailOnly: v.object({ email: v.str({ max: 254 }) }, { email: "email address" }),
+  reset: v.object({ token: v.str({ max: 512 }), newPassword: password() },
+    { token: "reset code", newPassword: "new password" }),
+  verify: v.object({ token: v.str({ max: 512 }) }, { token: "confirmation code" }),
+  changePassword: v.object({ currentPassword: password(), newPassword: password() },
+    { currentPassword: "current password", newPassword: "new password" }),
+  dataset: v.object({ categories: v.dict(v.arrayOf(v.str({ max: 253 }))) }),
+  family: v.object({ name: v.str({ max: 120 }) }, { name: "family name" }),
+  addParent: v.object({
+    email: v.optional(v.email()), userId: v.optional(id()),
+    role: v.oneOf(ROLE_VALUES), assignedChildIds: v.withDefault(v.arrayOf(id(), { max: 64 }), []),
+  }, { email: "email address", role: "role", assignedChildIds: "list of children" }),
+  addChild: v.object({ displayName: v.str({ max: 120 }), timezone: v.withDefault(v.str({ max: 64 }), "UTC") },
+    { displayName: "name", timezone: "time zone" }),
+  setTimezone: v.object({ timezone: v.str({ max: 64 }) }, { timezone: "time zone" }),
+  defaults: v.object({ webDefault: v.oneOf(ACTION_VALUES), youTubeDefault: v.oneOf(ACTION_VALUES) },
+    { webDefault: "what to do with websites by default", youTubeDefault: "what to do with YouTube by default" }),
+  addRule: v.object({
+    target: v.oneOf(TARGET_VALUES), value: v.str({ max: 2048 }), action: v.oneOf(ACTION_VALUES),
+    priority: v.optional(v.int({ min: 0, max: 1_000_000 })),
+    scope: v.object({
+      type: v.oneOf(RULE_SCOPE_VALUES), childId: v.optional(id()), deviceId: v.optional(id()),
+    }, { type: "who this rule is for" }),
+  }, { target: "what the rule matches", value: "the address or category", action: "allow or block" }),
+  enroll: v.object({ childId: id(), platform: v.oneOf(PLATFORM_VALUES) }, { childId: "child", platform: "device type" }),
+  redeem: v.object({
+    code: v.str({ max: 64 }), devicePublicKey: v.str({ max: 4096 }), displayName: v.str({ max: 120 }),
+  }, { code: "setup code", displayName: "device name" }),
+  createRequest: v.object({
+    targetType: v.oneOf(TARGET_VALUES), targetValue: v.str({ max: 2048 }),
+    title: v.optional(v.str({ max: 512 })), url: v.optional(v.str({ max: 2048 })),
+    reason: v.optional(v.str({ max: 1024 })),
+  }),
+  decide: v.object({
+    decision: v.oneOf(ACTION_VALUES), scope: v.oneOf(APPROVAL_SCOPE_VALUES),
+    duration: v.object({ kind: v.oneOf(DURATION_VALUES), minutes: v.optional(v.int({ min: 1, max: 100_000 })) },
+      { kind: "how long for", minutes: "number of minutes" }),
+  }, { decision: "allow or block", scope: "how widely this applies", duration: "how long for" }),
+  endpoint: v.object({ kind: v.oneOf(PUSH_KIND_VALUES), token: v.str({ max: 4096 }) },
+    { kind: "kind of notification", token: "where to send it" }),
+};
 
 async function principal(app: App, req: HttpRequest): Promise<Principal | null> {
   const auth = req.headers["authorization"] ?? req.headers["Authorization"];
@@ -65,6 +145,22 @@ const DEVICE_TOKEN_TTL = 60 * 60 * 24 * 30;
 const issueDeviceToken = (app: App, d: { id: string; familyId: string; childId: string }) =>
   issueToken(app.authSecret, { kind: "device", deviceId: d.id, familyId: d.familyId, childId: d.childId }, DEVICE_TOKEN_TTL);
 
+
+/**
+ * Compare two secrets without leaking their contents through how long the
+ * comparison ran. `a !== b` on strings stops at the first differing byte, and
+ * the length check that preceded it published the secret's length as well.
+ * Hashing first makes both operands the same fixed size, so the loop below
+ * always runs the same number of steps whatever was offered.
+ */
+async function secretEquals(offered: string, expected: string): Promise<boolean> {
+  const digest = async (x: string) =>
+    new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(x)));
+  const [a, b] = await Promise.all([digest(offered), digest(expected)]);
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
+  return diff === 0;
+}
 
 /** Minimal HTML escaping for the one page this API serves. */
 function escapeHtml(v: string): string {
@@ -231,13 +327,9 @@ export function buildRouter(app: App): Router {
     // ops action gated by a deployment secret, and OFF unless configured.
     const admin = app.categoryAdminToken;
     if (!admin) return err(503, "category dataset import is not enabled on this deployment", "DISABLED");
-    const offered = req.headers["x-admin-token"] ?? "";
-    if (offered.length !== admin.length || offered !== admin)
+    if (!(await secretEquals(req.headers["x-admin-token"] ?? "", admin)))
       return err(403, "admin token required", "FORBIDDEN");
-    const b = await req.json<{ categories?: Record<string, string[]> }>();
-    if (!b?.categories || typeof b.categories !== "object" || Array.isArray(b.categories)) {
-      return err(400, "body must be { categories: { <slug>: string[] } }", "BAD_REQUEST");
-    }
+    const b = await v.readBody(req, bodies.dataset);
     const version = await app.categories.replace(b.categories);
     return ok({ version, categories: await app.categories.listCategories() });
   });
@@ -254,16 +346,40 @@ export function buildRouter(app: App): Router {
   });
 
   // --- auth (self-contained passwords, no external IdP) ---
+  // Ask to create an account. ALWAYS 202 with an identical body, whether or not
+  // the address already has an account — a 201-vs-409 split is a working test for
+  // "does this person have an Ajar account?", and the whole point of the
+  // verification flow is that the answer goes to the inbox instead. No account
+  // exists until the link in that email is opened (see AuthService).
   r.post("/v1/auth/register", async (req) => {
     const capped = limited(authLimiter, req); if (capped) return capped;
-    const b = await req.json<{ email: string; password: string; displayName: string }>();
-    const user = await app.auth.register(b.email, b.password, b.displayName);
+    const b = await v.readBody(req, bodies.register);
+    await app.auth.requestRegistration(b.email, b.password, b.displayName, { verifyUrlBase: app.verifyUrlBase });
+    return ok({ status: "accepted" }, 202);
+  });
+  // Send (or re-send) a confirmation email for an account that already exists.
+  // 202 either way, same as /v1/auth/forgot and for the same reason.
+  r.post("/v1/auth/verify/request", async (req) => {
+    const capped = limited(authLimiter, req); if (capped) return capped;
+    const b = await v.readBody(req, bodies.emailOnly);
+    await app.auth.requestEmailVerification(b.email, { verifyUrlBase: app.verifyUrlBase });
+    return ok({ status: "accepted" }, 202);
+  });
+  // Confirm an address with the emailed code. For a sign-up this is where the
+  // account actually comes into being, and the parent is signed straight in —
+  // they proved the address seconds ago. For an existing account it just records
+  // the proof. Single use, one-hour TTL, stored only as a SHA-256 hash.
+  r.post("/v1/auth/verify", async (req) => {
+    const capped = limited(authLimiter, req); if (capped) return capped;
+    const b = await v.readBody(req, bodies.verify);
+    const { user, created } = await app.auth.completeVerification(b.token);
+    if (!created) return ok({ verified: true, userId: user.id });
     const s = await app.auth.startSession(user.id, deviceLabel(req), REFRESH_TTL);
-    return ok(await tokenPair(app, user, s.id), 201);
+    return ok({ verified: true, ...(await tokenPair(app, user, s.id)) }, 201);
   });
   r.post("/v1/auth/login", async (req) => {
     const capped = limited(authLimiter, req); if (capped) return capped;
-    const b = await req.json<{ email: string; password: string }>();
+    const b = await v.readBody(req, bodies.login);
     const user = await app.auth.authenticate(b.email, b.password);
     const s = await app.auth.startSession(user.id, deviceLabel(req), REFRESH_TTL);
     return ok(await tokenPair(app, user, s.id));
@@ -272,8 +388,8 @@ export function buildRouter(app: App): Router {
   // session was revoked (this device) or the user's tokenVersion changed (all).
   r.post("/v1/auth/refresh", async (req) => {
     const capped = limited(authLimiter, req); if (capped) return capped;
-    const { refreshToken } = await req.json<{ refreshToken: string }>();
-    const p = refreshToken ? await verifyToken(app.authSecret, refreshToken) : null;
+    const { refreshToken } = await v.readBody(req, bodies.refresh);
+    const p = await verifyToken(app.authSecret, refreshToken);
     if (!p || p.kind !== "refresh") return err(401, "invalid refresh token", "UNAUTHORIZED");
     const { user, sid } = await app.auth.refreshSession(p.userId, p.tv, p.sid);
     return ok(await tokenPair(app, user, sid));
@@ -283,8 +399,8 @@ export function buildRouter(app: App): Router {
   // enumeration oracle. The email (if any) is sent out of band.
   r.post("/v1/auth/forgot", async (req) => {
     const capped = limited(authLimiter, req); if (capped) return capped;
-    const b = await req.json<{ email?: string }>();
-    await app.auth.requestPasswordReset(b?.email ?? "", { resetUrlBase: app.resetUrlBase });
+    const b = await v.readBody(req, bodies.emailOnly);
+    await app.auth.requestPasswordReset(b.email, { resetUrlBase: app.resetUrlBase });
     return ok({ status: "accepted" }, 202);
   });
   // Complete a password reset with the emailed token. Single-use, 30-minute TTL,
@@ -292,8 +408,8 @@ export function buildRouter(app: App): Router {
   // so a reset genuinely locks out whoever prompted it.
   r.post("/v1/auth/reset", async (req) => {
     const capped = limited(authLimiter, req); if (capped) return capped;
-    const b = await req.json<{ token: string; newPassword: string }>();
-    const user = await app.auth.resetPassword(b?.token ?? "", b?.newPassword ?? "");
+    const b = await v.readBody(req, bodies.reset);
+    const user = await app.auth.resetPassword(b.token, b.newPassword);
     const s = await app.auth.startSession(user.id, deviceLabel(req), REFRESH_TTL);
     return ok(await tokenPair(app, user, s.id));
   });
@@ -313,7 +429,7 @@ export function buildRouter(app: App): Router {
   // returns a fresh token pair on a new session so the caller stays signed in.
   r.post("/v1/auth/password", async (req) => {
     const { userId } = await userPrincipal(app, req);
-    const b = await req.json<{ currentPassword: string; newPassword: string }>();
+    const b = await v.readBody(req, bodies.changePassword);
     const user = await app.auth.changePassword(userId, b.currentPassword, b.newPassword);
     const s = await app.auth.startSession(user.id, deviceLabel(req), REFRESH_TTL);
     return ok(await tokenPair(app, user, s.id));
@@ -340,13 +456,19 @@ export function buildRouter(app: App): Router {
     const families = await Promise.all(memberships.map(async (m) => ({
       familyId: m.familyId, role: m.role, family: await app.repo.getFamily(m.familyId),
     })));
-    return ok({ userId, email: user?.email, displayName: user?.displayName, families });
+    // `emailVerified` is reported, never enforced: every account created before
+    // this flow existed is unverified and must keep working (docs/SECURITY.md).
+    // It is here so the console can ask, not so the API can refuse.
+    return ok({
+      userId, email: user?.email, displayName: user?.displayName,
+      emailVerified: !!user?.emailVerifiedAt, emailVerifiedAt: user?.emailVerifiedAt, families,
+    });
   });
 
   // --- families ---
   r.post("/v1/families", async (req) => {
     const userId = await requireUser(app, req);
-    const { name } = await req.json<{ name: string }>();
+    const { name } = await v.readBody(req, bodies.family);
     return ok(await app.family.createFamily(name, userId), 201);
   });
   r.get("/v1/families/:familyId", async (req) => {
@@ -362,22 +484,22 @@ export function buildRouter(app: App): Router {
   // approver but could never sign in.
   r.post("/v1/families/:familyId/parents", async (req) => {
     const userId = await requireUser(app, req);
-    const b = await req.json<{ email?: string; userId?: string; role: Role; assignedChildIds?: string[] }>();
-    const assigned = b.assignedChildIds ?? [];
+    const b = await v.readBody(req, bodies.addParent);
+    if (!b.email && !b.userId) return err(400, "we need the co-parent's email address", "BAD_REQUEST");
     const membership = b.email
-      ? await app.family.inviteParentByEmail(req.params.familyId!, userId, b.email, b.role, assigned)
-      : await app.family.addParent(req.params.familyId!, userId, b.userId ?? "", b.role, assigned);
+      ? await app.family.inviteParentByEmail(req.params.familyId!, userId, b.email, b.role, b.assignedChildIds)
+      : await app.family.addParent(req.params.familyId!, userId, b.userId!, b.role, b.assignedChildIds);
     return ok(membership, 201);
   });
   r.post("/v1/families/:familyId/children", async (req) => {
     const userId = await requireUser(app, req);
-    const { displayName, timezone } = await req.json<{ displayName: string; timezone?: string }>();
-    return ok(await app.family.addChild(req.params.familyId!, userId, displayName, timezone ?? "UTC"), 201);
+    const { displayName, timezone } = await v.readBody(req, bodies.addChild);
+    return ok(await app.family.addChild(req.params.familyId!, userId, displayName, timezone), 201);
   });
   // Update a child's IANA time zone — what "until the end of the day" is measured in.
   r.put("/v1/families/:familyId/children/:childId", async (req) => {
     const userId = await requireUser(app, req);
-    const { timezone } = await req.json<{ timezone: string }>();
+    const { timezone } = await v.readBody(req, bodies.setTimezone);
     return ok(await app.family.setChildTimezone(req.params.familyId!, userId, req.params.childId!, timezone));
   });
   // Erase a child and everything attached to them (devices, rules, grants,
@@ -413,14 +535,13 @@ export function buildRouter(app: App): Router {
   // --- policy ---
   r.add("PUT" as string, "/v1/families/:familyId/children/:childId/defaults", async (req) => {
     const userId = await requireUser(app, req);
-    const d = await req.json<{ webDefault: RuleAction; youTubeDefault: RuleAction }>();
+    const d = await v.readBody(req, bodies.defaults);
     await app.policy.setDefaults(req.params.familyId!, userId, req.params.childId!, d);
     return ok({ updated: true });
   });
   r.post("/v1/families/:familyId/rules", async (req) => {
     const userId = await requireUser(app, req);
-    const b = await req.json<{ target: PolicyTargetType; value: string; action: RuleAction;
-      scope: { type: "FAMILY" | "CHILD" | "DEVICE"; childId?: string; deviceId?: string }; priority?: number }>();
+    const b = await v.readBody(req, bodies.addRule);
     const rule = await app.policy.addRule(req.params.familyId!, userId, {
       target: b.target, value: b.value, action: b.action, priority: b.priority,
       scope: { type: b.scope.type, familyId: req.params.familyId!, childId: b.scope.childId, deviceId: b.scope.deviceId },
@@ -441,13 +562,13 @@ export function buildRouter(app: App): Router {
   // --- enrollment ---
   r.post("/v1/families/:familyId/enroll", async (req) => {
     const userId = await requireUser(app, req);
-    const { childId, platform } = await req.json<{ childId: string; platform: Platform }>();
+    const { childId, platform } = await v.readBody(req, bodies.enroll);
     const tok = await app.enrollment.createToken(req.params.familyId!, userId, childId, platform);
     return ok({ code: tok.code, expiresAt: tok.expiresAt }, 201);
   });
   r.post("/v1/enroll/redeem", async (req) => {
     const capped = limited(enrollLimiter, req); if (capped) return capped;
-    const b = await req.json<{ code: string; devicePublicKey: string; displayName: string }>();
+    const b = await v.readBody(req, bodies.redeem);
     const device = await app.enrollment.redeem(b.code, b.devicePublicKey, b.displayName);
     const token = await issueDeviceToken(app, device);
     return ok({ device, deviceToken: token, expiresIn: DEVICE_TOKEN_TTL, signingPublicKeyB64: app.signingPublicKeyB64 }, 201);
@@ -456,7 +577,7 @@ export function buildRouter(app: App): Router {
   // --- access requests & approvals ---
   r.post("/v1/requests", async (req) => {
     const dev = await requireDevice(app, req);
-    const b = await req.json<{ targetType: PolicyTargetType; targetValue: string; title?: string; url?: string; reason?: string }>();
+    const b = await v.readBody(req, bodies.createRequest);
     const reqRec = await app.approvals.createRequest({
       familyId: dev.familyId, childId: dev.childId, deviceId: dev.deviceId,
       targetType: b.targetType, targetValue: b.targetValue, title: b.title, url: b.url, reason: b.reason,
@@ -494,10 +615,10 @@ export function buildRouter(app: App): Router {
   });
   r.post("/v1/families/:familyId/requests/:requestId/decide", async (req) => {
     const userId = await requireUser(app, req);
-    const b = await req.json<{ decision: RuleAction; scope: ApprovalScope; duration: ApprovalDuration }>();
+    const b = await v.readBody(req, bodies.decide);
     const out = await app.approvals.decide({
       familyId: req.params.familyId!, requestId: req.params.requestId!, decidedBy: userId,
-      decision: b.decision, scope: b.scope, duration: b.duration, policy: app.policy,
+      decision: b.decision, scope: b.scope, duration: b.duration as ApprovalDuration, policy: app.policy,
     });
     return ok(out);
   });
@@ -578,7 +699,7 @@ export function buildRouter(app: App): Router {
   // --- notification endpoints ---
   r.post("/v1/me/endpoints", async (req) => {
     const userId = await requireUser(app, req);
-    const b = await req.json<{ kind: "APNS" | "WEBSOCKET" | "CONSOLE" | "EMAIL" | "WEBPUSH"; token: string }>();
+    const b = await v.readBody(req, bodies.endpoint);
     const ep = await app.repo.addNotificationEndpoint({
       id: crypto.randomUUID(), userId, kind: b.kind, token: b.token, createdAt: new Date().toISOString(),
     });
