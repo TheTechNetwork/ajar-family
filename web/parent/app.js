@@ -475,6 +475,14 @@ function renderPasskeys(keys) {
 
 async function removePasskey(id, label) {
   $("pkErr").textContent = "";
+  // These two confirm()s stay, deliberately, and the block one above did not.
+  // The difference is whether the product can offer the action back: a standing
+  // block has a rule id and a working Undo, so a modal was asking permission for
+  // something reversible one tap later. Removing a passkey is not reversible —
+  // the credential is gone from the server and has to be enrolled again from the
+  // device that holds it — and neither is losing the standing rule below without
+  // remembering exactly what it said. An unthemeable dialog is a real cost; it
+  // is the smaller one when the alternative is a silent irreversible action.
   if (!confirm(`Remove the passkey "${label}"? You'll need another way to sign in.`)) return;
   try {
     await api(`/v1/me/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -668,7 +676,7 @@ async function refreshChildren() {
         <span class="grow">${escapeHtml(k.displayName)}</span>
         <button type="button" data-cid="${escapeAttr(k.id)}">Set up a device<span class="sr-only"> for ${escapeHtml(k.displayName)}</span></button>
       </li>`).join("")
-    : `<li class="muted">No kids added yet.</li>`;
+    : `<li class="empty">No kids yet. Add a first name below — that is all it takes.</li>`;
   box.querySelectorAll("button").forEach((b) => (b.onclick = () => enrollDevice(b.dataset.cid, b)));
 }
 
@@ -904,8 +912,17 @@ function renderRequests(reqs) {
   box.removeAttribute("aria-busy");
 
   if (!reqs.length) {
-    const kid = Object.values(state.childName)[0];
-    box.innerHTML = `<li class="empty">All clear. When ${escapeHtml(kid || "someone")} asks for something it lands here — usually within a second.</li>`;
+    // Name every kid, or none. This took `Object.values(...)[0]` — an ARBITRARY
+    // child, whichever the map happened to yield first — so a two-kid family
+    // read "When Jane asks…" and Bob did not exist on the screen his parent
+    // looks at most. Past two names it says "the kids", because a list of five
+    // is not reassurance any more.
+    const names = Object.values(state.childName).filter(Boolean);
+    const who = names.length === 0 ? "someone"
+      : names.length === 1 ? names[0]
+      : names.length === 2 ? `${names[0]} or ${names[1]}`
+      : "the kids";
+    box.innerHTML = `<li class="empty">All clear. When ${escapeHtml(who)} asks for something it lands here — usually within a second.</li>`;
     announce("No asks waiting.");
     return;
   }
@@ -1000,12 +1017,16 @@ function wireRequest(r) {
   document.querySelectorAll(`[data-approve="${cssEscape(id)}"]`).forEach((b) =>
     (b.onclick = () => decide(r, "ALLOW", $(`scope-${id}`).value, DURATIONS[+b.dataset.di].d)));
 
+  // No confirm() here any more. The toast this produces already carries Undo —
+  // `producesStandingRule` returns true for BLOCK and the server returns the
+  // rule id — so the modal was asking a parent to confirm something the very
+  // next screen offered to take back. It was also the only place that SAID the
+  // block was reversible, and the only dark-mode-blind element on the page: an
+  // unthemeable browser dialog in a product that has a designed toast + Undo
+  // pattern. The sentence moved into the toast, where it is themed, announced,
+  // and attached to the control that actually reverses it.
   const block = q(`[data-block="${cssEscape(id)}"]`);
-  if (block) block.onclick = () => {
-    const what = hostOf(r) || r.targetValue;
-    if (!confirm(`Keep ${what} closed for good?\n\nYou can take this back any time under "What you've already decided".`)) return;
-    decide(r, "BLOCK", "THIS_DOMAIN", { kind: "ALWAYS" });
-  };
+  if (block) block.onclick = () => decide(r, "BLOCK", "THIS_DOMAIN", { kind: "ALWAYS" });
 }
 
 /** A decision that writes a STANDING rule is the only kind we can take back:
@@ -1024,9 +1045,14 @@ async function decide(r, decision, scope, duration) {
 
     const ruleId = out?.decision?.producedRuleId;
     const undoable = producesStandingRule(decision, duration) && ruleId;
+    // Say what was actually written. "Left closed" undersold a standing BLOCK,
+    // which is a rule that outlives the ask; the confirm() this replaced was the
+    // only thing that had ever said so.
     const msg = decision === "ALLOW"
       ? `Sent to ${who}'s device — ${scopeLabel(scope, r.childId)}`
-      : `Left closed — ${who} sees the answer on their screen`;
+      : producesStandingRule(decision, duration)
+        ? `Kept closed for good. Undo here, or any time under "What you've already decided".`
+        : `Left closed — ${who} sees the answer on their screen`;
 
     toast(msg, undoable ? {
       label: "Undo",
@@ -1065,7 +1091,7 @@ async function refreshRules() {
   }
   box.removeAttribute("aria-busy");
   if (!rules.length) {
-    box.innerHTML = `<li class="muted">Nothing standing yet — everything is on the family defaults.</li>`;
+    box.innerHTML = `<li class="empty">Nothing standing yet — everything is on the family defaults. A "yes" with a time on it runs out by itself and never lands here.</li>`;
     return;
   }
   rules.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));

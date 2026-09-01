@@ -48,8 +48,13 @@
   .row { display: flex; align-items: baseline; gap: .6rem; padding: .45rem 0; }
   .row .k { font-variant-numeric: tabular-nums; }
   .verdict { font-weight: 650; font-size: .85rem; padding: .1rem .5rem; border-radius: 999px; white-space: nowrap; }
+  /* NOT coral. BRAND.md reserves coral for the yes ACTION — the one button a
+     parent presses — and spending it on comparison-table chips put four of them
+     above the fold, outranking the single coral CTA in the hero and teaching a
+     visitor that coral means "a tick" before they ever meet the button. Teal
+     wash reads as affirmative here without borrowing the action colour. */
   .no { background: var(--surface-2); color: var(--muted); }
-  .yes { background: var(--yes); color: var(--yes-ink); }
+  .yes { background: var(--accent-wash); color: var(--accent-ink); }
 
   ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 0; display: grid; gap: 1.25rem; }
   @media (min-width: 46rem) { ol.steps { grid-template-columns: repeat(3, 1fr); gap: 2rem; } }
