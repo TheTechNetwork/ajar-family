@@ -28,7 +28,7 @@ jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -95,7 +95,7 @@ jobs:
       GOOS: windows
       CGO_ENABLED: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v5
         with:
@@ -146,7 +146,7 @@ jobs:
       # At the default depth 1 that commit is not in the local object store, the
       # check falls back to "build to be safe", and the 10x runner is spent on
       # every PR — the exact cost the check exists to avoid.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
