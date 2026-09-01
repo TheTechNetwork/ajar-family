@@ -25,9 +25,14 @@ function call(router: ReturnType<typeof buildRouter>, method: string, path: stri
 async function fixture() {
   const app = await App.create({ config: { authSecret: "test" } });
   const r = buildRouter(app);
-  const register = async (email: string, name: string) =>
-    ((await call(r, "POST", "/v1/auth/register", { email, password: "correct-horse", displayName: name })).body as
-      { accessToken: string; userId: string });
+  // Accounts are made with the account-creation primitive and then signed in:
+  // the HTTP sign-up path deliberately hands back no tokens any more (it answers
+  // 202 and emails a link — see auth-verify.test.ts).
+  const register = async (email: string, name: string) => {
+    await app.auth.register(email, "correct-horse", name);
+    return (await call(r, "POST", "/v1/auth/login", { email, password: "correct-horse" })).body as
+      { accessToken: string; userId: string };
+  };
   const owner = await register("owner@e.com", "Owner");
   const coparent = await register("co@e.com", "Co");
   const fam = (await call(r, "POST", "/v1/families", { name: "F" }, owner.accessToken)).body as { id: string };

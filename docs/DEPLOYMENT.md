@@ -146,7 +146,7 @@ way it can be locally, by requesting those paths under workerd
 
 ## 5. Secrets
 
-The Worker reads three secrets from `env` (`backend/src/worker.ts` → `Env`); CI
+The Worker reads its secrets from `env` (`backend/src/worker.ts` → `Env`); CI
 needs two more to authenticate to Cloudflare.
 
 | Secret | Where it lives | Purpose |
@@ -154,8 +154,13 @@ needs two more to authenticate to Cloudflare.
 | `AUTH_SECRET` | `wrangler secret put` | HMAC secret for bearer tokens (`backend/src/auth/tokens.ts`) |
 | `SIGNING_PUBLIC_KEY_B64` | `wrangler secret put` | Ed25519 **public** key (SPKI DER, base64) — served at `/v1/signing-key`, shipped to devices |
 | `SIGNING_PRIVATE_KEY_B64` | `wrangler secret put` | Ed25519 **private** key (PKCS8 DER, base64) — signs `DevicePolicySnapshot`s (ADR-010) |
+| `MAIL_ENDPOINT` + `MAIL_TOKEN` | `wrangler secret put` | Outbound email. **Required for anyone to sign up** — creating an account means opening a link that only arrives by email (`docs/SECURITY.md`). Without them the Worker runs, and no parent can register. |
 | `CLOUDFLARE_API_TOKEN` | GitHub Actions repo secret | CI deploy auth (Workers Scripts:Edit) |
 | `CLOUDFLARE_ACCOUNT_ID` | GitHub Actions repo secret | CI deploy target account |
+
+Two plain vars (not secrets) point the emailed links back at the parent console:
+`PASSWORD_RESET_URL` (`?token=` is appended) and `VERIFY_EMAIL_URL` (`?verify=`).
+Unset, the emails carry the raw code for the parent to paste.
 
 Set the runtime secrets on the Worker:
 

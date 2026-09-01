@@ -102,6 +102,8 @@
     .hide { display: none !important; }
     .errline { color: var(--err); font-size: var(--t-sm); margin-top: var(--s-2);
                min-height: 1.25rem; }
+    /* Same slot, but "we have emailed you" is not a failure and must not be red. */
+    .errline.note { color: var(--ink-2); }
     .live { font-size: var(--t-sm); font-weight: var(--w-semi); }
     .live-ok  { color: var(--accent-ink); }
     .live-off { color: var(--warn); }

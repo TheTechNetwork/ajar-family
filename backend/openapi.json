@@ -1312,8 +1312,9 @@
         "tags": [
           "auth"
         ],
-        "summary": "Register a parent with a password",
+        "summary": "Ask to create an account (always 202)",
         "security": [],
+        "description": "Emails a single-use confirmation code, valid for 60 minutes. Responds 202 with an identical body whether or not the address already has an account — a different status would make this an account-enumeration oracle — and NO account is created here: the account comes into being when the code is redeemed at POST /v1/auth/verify, which returns the token pair. An address that already has an account is emailed a notice instead, with the same subject and no code. A 400 means the request itself was unusable (malformed body, bad address, password below the minimum) and says nothing about the address. Rate-limited.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1343,12 +1344,17 @@
           }
         },
         "responses": {
-          "201": {
-            "description": "Token pair",
+          "202": {
+            "description": "Accepted (whether or not the address is known)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "accepted"
+                    }
+                  }
                 }
               }
             }
@@ -1363,8 +1369,177 @@
               }
             }
           },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/verify/request": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Re-send a confirmation email (always 202)",
+        "security": [],
+        "description": "For an account that already exists and has not confirmed its address — including every account created before this flow existed. Responds 202 whether or not the address is known, and sends nothing when there is nothing to confirm. Rate-limited.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted (whether or not the address is known)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "accepted"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/verify": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Confirm an email address with the emailed code",
+        "security": [],
+        "description": "Single use, 60-minute TTL, stored only as a SHA-256 hash, and superseded by any newer code. For a sign-up this CREATES the account and returns 201 with a token pair, so the parent is signed straight in. For an account that already exists it records the confirmation and returns 200 with no session.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "An existing account confirmed its address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "verified": {
+                      "const": true
+                    },
+                    "userId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "verified"
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The account was created; token pair returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/TokenResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "verified": {
+                          "const": true
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or expired confirmation code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "Email already registered",
+            "description": "That address already has an account",
             "content": {
               "application/json": {
                 "schema": {
@@ -1857,6 +2032,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "`emailVerified` is reported, never enforced: an unconfirmed account keeps every capability, because every account created before this flow existed is unconfirmed. Use it to prompt, not to gate.",
         "responses": {
           "200": {
             "description": "Profile",
@@ -1873,6 +2049,15 @@
                     },
                     "displayName": {
                       "type": "string"
+                    },
+                    "emailVerified": {
+                      "type": "boolean",
+                      "description": "Whether the address has been proved to belong to this person."
+                    },
+                    "emailVerifiedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "When it was proved. Absent = never."
                     },
                     "families": {
                       "type": "array",

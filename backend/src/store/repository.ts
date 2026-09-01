@@ -19,6 +19,8 @@ import type {
   Session,
   CategoryDomain,
   PasswordResetToken,
+  EmailVerificationToken,
+  PendingRegistration,
   TemporaryGrant,
 } from "../domain/model.js";
 
@@ -41,6 +43,20 @@ export interface Repository {
   updatePasswordResetToken(t: PasswordResetToken): Promise<PasswordResetToken>;
   /** Burn every outstanding token for a user (new request supersedes; reset used). */
   invalidatePasswordResetTokensForUser(userId: string, at: string): Promise<void>;
+
+  // email verification (single-use, short-lived, hashed at rest — see AuthService)
+  createEmailVerificationToken(t: EmailVerificationToken): Promise<EmailVerificationToken>;
+  getEmailVerificationTokenByHash(tokenHash: string): Promise<EmailVerificationToken | null>;
+  updateEmailVerificationToken(t: EmailVerificationToken): Promise<EmailVerificationToken>;
+  invalidateEmailVerificationTokensForUser(userId: string, at: string): Promise<void>;
+
+  // pending registrations (a sign-up that has not yet proved its address; no
+  // `users` row exists until the link in that inbox is opened)
+  createPendingRegistration(p: PendingRegistration): Promise<PendingRegistration>;
+  getPendingRegistrationByHash(tokenHash: string): Promise<PendingRegistration | null>;
+  updatePendingRegistration(p: PendingRegistration): Promise<PendingRegistration>;
+  /** Burn every outstanding sign-up for an address (a newer attempt supersedes). */
+  invalidatePendingRegistrationsForEmail(email: string, at: string): Promise<void>;
 
   // families & membership
   createFamily(f: Family): Promise<Family>;

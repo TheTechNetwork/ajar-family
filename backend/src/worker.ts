@@ -42,6 +42,8 @@ export interface Env {
   MAIL_FROM?: string;
   /** Parent-console URL that completes a password reset (`?token=` appended). */
   PASSWORD_RESET_URL?: string;
+  /** Parent-console URL that confirms an email address (`?verify=` appended). */
+  VERIFY_EMAIL_URL?: string;
   /** Ops secret gating the global category-dataset import. */
   CATEGORY_ADMIN_TOKEN?: string;
   /**
@@ -99,6 +101,7 @@ async function getRouter(env: Env): Promise<Router> {
           mailToken: env.MAIL_TOKEN,
           mailFrom: env.MAIL_FROM,
           resetUrlBase: env.PASSWORD_RESET_URL,
+          verifyUrlBase: env.VERIFY_EMAIL_URL,
         },
         // Workers has no raw DNS — follow CNAME chains over DNS-over-HTTPS.
         cnameResolver: new DohCnameResolver(),

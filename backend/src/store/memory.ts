@@ -21,6 +21,8 @@ import type {
   DefaultPolicy,
   CategoryDomain,
   PasswordResetToken,
+  EmailVerificationToken,
+  PendingRegistration,
   TemporaryGrant,
 } from "../domain/model.js";
 
@@ -39,6 +41,8 @@ export class MemoryStore implements Repository {
   private rules = new Map<string, PolicyRule>();
   private tempRules = new Map<string, TemporaryGrant>();
   private resetTokens = new Map<string, PasswordResetToken>();
+  private verifyTokens = new Map<string, EmailVerificationToken>();
+  private pendingRegistrations = new Map<string, PendingRegistration>();
   private versions = new Map<string, number>();
   private requests = new Map<string, AccessRequest>();
   private decisions = new Map<string, ApprovalDecision>();
@@ -72,6 +76,28 @@ export class MemoryStore implements Repository {
   async invalidatePasswordResetTokensForUser(userId: string, at: string) {
     for (const t of this.resetTokens.values())
       if (t.userId === userId && !t.usedAt) this.resetTokens.set(t.id, { ...clone(t), usedAt: at });
+  }
+
+  async createEmailVerificationToken(t: EmailVerificationToken) { this.verifyTokens.set(t.id, clone(t)); return clone(t); }
+  async getEmailVerificationTokenByHash(tokenHash: string) {
+    for (const t of this.verifyTokens.values()) if (t.tokenHash === tokenHash) return clone(t);
+    return null;
+  }
+  async updateEmailVerificationToken(t: EmailVerificationToken) { this.verifyTokens.set(t.id, clone(t)); return clone(t); }
+  async invalidateEmailVerificationTokensForUser(userId: string, at: string) {
+    for (const t of this.verifyTokens.values())
+      if (t.userId === userId && !t.usedAt) this.verifyTokens.set(t.id, { ...clone(t), usedAt: at });
+  }
+
+  async createPendingRegistration(p: PendingRegistration) { this.pendingRegistrations.set(p.id, clone(p)); return clone(p); }
+  async getPendingRegistrationByHash(tokenHash: string) {
+    for (const p of this.pendingRegistrations.values()) if (p.tokenHash === tokenHash) return clone(p);
+    return null;
+  }
+  async updatePendingRegistration(p: PendingRegistration) { this.pendingRegistrations.set(p.id, clone(p)); return clone(p); }
+  async invalidatePendingRegistrationsForEmail(email: string, at: string) {
+    for (const p of this.pendingRegistrations.values())
+      if (p.email === email && !p.usedAt) this.pendingRegistrations.set(p.id, { ...clone(p), usedAt: at });
   }
 
   async createFamily(f: Family) { this.families.set(f.id, clone(f)); return clone(f); }

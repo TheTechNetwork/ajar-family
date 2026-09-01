@@ -17,9 +17,16 @@
  *      implementation from Node's.
  *
  * So this boots the real dist/worker.js under workerd with a real local D1 and
- * drives the actual product flow over HTTP: register a parent, create a family
- * and a child, enrol a device, pull a signed policy, have the child ask, have the
- * parent approve, and confirm the device's next snapshot actually unblocks it.
+ * drives the actual product flow over HTTP: sign up a parent, confirm the address
+ * from the email that actually arrives, create a family and a child, enrol a
+ * device, pull a signed policy, have the child ask, have the parent approve, and
+ * confirm the device's next snapshot actually unblocks it.
+ *
+ * The mail provider is a real HTTP endpoint here — a socket this file listens on
+ * — because signing up now goes through a confirmation link, and because that
+ * makes workerd exercise FetchMailSender too. A deployment with no MAIL_ENDPOINT
+ * cannot create accounts at all; that is a deliberate consequence of the sign-up
+ * flow, and it is documented in backend/README.md rather than worked around.
  *
  * HONEST LIMITS. Local D1 is SQLite, not the production service: it will not
  * reproduce D1's row/size limits, its eventual consistency, or its rate limits.
@@ -30,30 +37,69 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { createRequire } from "node:module";
 
 const requireWrangler = createRequire(new URL("../package.json", import.meta.url));
 
 const AUTH_SECRET = "workerd-live-test-secret-0123456789";
-let worker, origin;
+const MAIL_TOKEN = "workerd-live-mail-token";
+let worker, origin, mailServer;
+/** Everything the worker asked the "provider" to send, newest last. */
+const inbox = [];
+
+/** A stand-in transactional-email provider: accepts the JSON envelope
+ *  FetchMailSender posts and records it. */
+async function startMailSink() {
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      if (req.headers.authorization !== `Bearer ${MAIL_TOKEN}`) { res.writeHead(401).end(); return; }
+      try { inbox.push(JSON.parse(body)); } catch { /* record only what parses */ }
+      res.writeHead(200, { "content-type": "application/json" }).end("{}");
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return server;
+}
+
+/** The confirmation code as it appears in the message we actually sent. */
+function codeFromInbox(to) {
+  const msg = [...inbox].reverse().find((m) => m.to === to);
+  assert.ok(msg, `no message was sent to ${to}`);
+  const found = /[A-Za-z0-9_-]{40,}/.exec(msg.text);
+  assert.ok(found, "the email carries a high-entropy confirmation code");
+  return found[0];
+}
 
 before(async () => {
   // workerd persists local D1 under .wrangler/state, so a previous run's parent
   // would still exist and the "email already registered" path would fire.
   await rm(new URL("../.wrangler/state", import.meta.url), { recursive: true, force: true });
 
+  mailServer = await startMailSink();
+  const mailPort = mailServer.address().port;
+
   const { unstable_dev } = await import(requireWrangler.resolve("wrangler"));
   worker = await unstable_dev("dist/worker.js", {
     config: new URL("../wrangler.toml", import.meta.url).pathname,
     local: true,
     logLevel: "error",
-    vars: { AUTH_SECRET },
+    vars: {
+      AUTH_SECRET,
+      MAIL_ENDPOINT: `http://127.0.0.1:${mailPort}/send`,
+      MAIL_TOKEN,
+    },
     experimental: { disableExperimentalWarning: true },
   });
   origin = `http://${worker.address}:${worker.port}`;
 });
 
-after(async () => { await worker?.stop(); });
+after(async () => {
+  await worker?.stop();
+  await new Promise((resolve) => mailServer?.close(resolve));
+});
 
 const api = async (path, init = {}) => {
   const res = await fetch(`${origin}${path}`, {
@@ -129,15 +175,25 @@ test("static serving did not swallow the API's 404, and adds no second URL", asy
   }
 });
 
-test("D1 works: the schema replays and a parent can actually register", async () => {
+test("D1 works: the schema replays and a parent can actually sign up", async () => {
   // This is the assertion that exercises createD1().exec()'s statement split. If
-  // the schema does not replay, this is where it fails — on the first write.
+  // the schema does not replay, this is where it fails — on the first write
+  // (the pending sign-up row), which also proves PBKDF2 finished inside the CPU
+  // budget, since the password is hashed before anything is stored.
   const reg = await api("/v1/auth/register", {
     method: "POST",
     body: JSON.stringify({ email: "parent@example.com", password: "correct horse battery", displayName: "Parent" }),
   });
-  assert.equal(reg.status, 201, `register said ${reg.status}: ${JSON.stringify(reg.body)}`);
-  assert.ok(reg.body.accessToken, "PBKDF2 at 210k iterations completed inside the CPU budget");
+  assert.equal(reg.status, 202, `register said ${reg.status}: ${JSON.stringify(reg.body)}`);
+
+  // The confirmation email really left the worker, through FetchMailSender, and
+  // redeeming it is what creates the account.
+  const confirmed = await api("/v1/auth/verify", {
+    method: "POST",
+    body: JSON.stringify({ token: codeFromInbox("parent@example.com") }),
+  });
+  assert.equal(confirmed.status, 201, `verify said ${confirmed.status}: ${JSON.stringify(confirmed.body)}`);
+  assert.ok(confirmed.body.accessToken, "PBKDF2 at 210k iterations completed inside the CPU budget");
 
   // Durability across requests is the whole point of binding D1: log in again.
   const login = await api("/v1/auth/login", {
