@@ -3,15 +3,16 @@ import FamilyControls
 import NetworkExtension
 import ManagedSettings
 
-/// App-side controller for PoC A: request `.child` authorization, install/enable
-/// the content filter, and drive the local test policy, including a short
-/// temporary approval (test A5) and a CATEGORY rule (the general-filtering path).
+/// App-side controller for Ajar Filter: request `.child` authorization,
+/// install/enable the content filter, enrol against the backend, and track the
+/// state of an access request. It backs both the product screens
+/// (`ContentView`) and the PoC levers (`DebugHarnessView`).
 ///
-/// This is a PoC harness, not production. In the real product the snapshot is
-/// fetched SIGNED from the backend and installed with
+/// The seeding helpers below are still a PoC harness. On the real path the
+/// snapshot is fetched SIGNED from the backend and installed with
 /// `PolicyStore.install(rawSnapshot:)`, which verifies the Ed25519 signature and
-/// refuses anything that does not check out. The local seeding helpers below go
-/// through the DEBUG-only unsigned path and do not exist in a release build.
+/// refuses anything that does not check out. The seeding helpers go through the
+/// DEBUG-only unsigned path and do not exist in a release build.
 @MainActor
 final class FilterController: ObservableObject {
 
@@ -178,6 +179,20 @@ final class FilterController: ObservableObject {
     /// asked for rather than silently posting.
     @Published var lastRequest: String?
 
+    /// What the child is shown after tapping "Ask to unlock" on the block page.
+    /// A string status could not drive a screen; this can.
+    enum RequestState: Equatable {
+        case idle
+        case sending
+        case waiting(since: Date)
+        case answered
+        case failed(String)
+    }
+    @Published var requestState: RequestState = .idle
+    /// A human label for the thing being asked about — never the raw URL, which
+    /// reads as a system fault rather than a request (UX_PRINCIPLES §4).
+    @Published var requestTarget: String = ""
+
     var baseURLString: String { BackendClient.baseURL?.absoluteString ?? "" }
     var policyVersion: Int? { store.current()?.version }
 
@@ -261,14 +276,31 @@ final class FilterController: ObservableObject {
         }
 
         lastRequest = "\(targetType) \(targetValue)"
+        // The best human label available WITHOUT fetching metadata, which a
+        // content filter has no business doing: the host, or "a video on
+        // YouTube" when the id is all we have. The designs mocked a real title
+        // ("How Volcanoes Erupt"); nothing on the device knows it, and inventing
+        // one would be worse than naming the site honestly.
+        let host = URL(string: blocked)?.host?.replacingOccurrences(of: "www.", with: "")
+        requestTarget = yt.videoId != nil ? "a video on YouTube" : (host ?? "this page")
+        requestState = .sending
         do {
             try await backend.createRequest(targetType: targetType, targetValue: targetValue, url: blocked)
             backendStatus = "Request sent — waiting for a parent."
+            requestState = .waiting(since: Date())
             // Park on the long poll so an approval applies without the child
             // having to reopen the app.
             await waitForPolicyChange()
+            // The long poll returns on ANY policy change, which is not the same
+            // as "this request was approved" — a rule for a different child, or
+            // a category update, wakes it too. The backend does not yet report
+            // the decision back to the device, so claiming "You're in" here would
+            // be a yes the parent may never have given. Until it does, say only
+            // what is known: something changed, try the page again.
+            requestState = .answered
         } catch {
             lastError = "Request failed: \(error.localizedDescription)"
+            requestState = .failed(error.localizedDescription)
         }
     }
 
