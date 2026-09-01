@@ -139,6 +139,19 @@ PASSKEY_ORIGIN = "https://ajar.family"
 # Shown inside the platform's own "Save a passkey for …" prompt.
 PASSKEY_RP_NAME = "Ajar"
 
+# Which native apps may use the passkeys enrolled against PASSKEY_RP_ID, as
+# `<TeamID>.<bundle id>`, comma separated. This is what the router serves at
+# /.well-known/apple-app-site-association, and without it the parent iOS/macOS
+# app cannot complete a passkey sign-in — which, because sign-in is
+# password-then-passkey, means it cannot sign in at all.
+#
+# Commented out rather than set to a placeholder: a WRONG team id is worse than
+# a missing one. The route 404s while this is unset, and Apple retries a 404;
+# it does not retry a file that positively lists the wrong app.
+#
+# Fill in the real Team ID (docs/APPLE_ACCOUNT_SETUP.md §1) and redeploy:
+# APPLE_APP_IDS = "ABCDE12345.family.ajar.parent"
+
 # ---------------------------------------------------------------------------
 # EMAIL. Cloudflare Email Sending, called as env.EMAIL.send() from worker.ts.
 #

@@ -367,6 +367,40 @@ export function buildRouter(app: App): Router {
   r.get("/v1/signing-key", async () => ok({ publicKeyB64: app.signingPublicKeyB64, alg: "Ed25519" }));
 
   /**
+   * Apple App Site Association — what lets the parent APP use the passkeys a
+   * parent enrolled in the BROWSER.
+   *
+   * A passkey is bound to its rpId (`ajar.family`). A native app may only claim
+   * that rpId if Apple can fetch this file from `https://<rpId>/.well-known/
+   * apple-app-site-association` and find the app's id under `webcredentials`.
+   * Without it `ASAuthorizationPlatformPublicKeyCredentialProvider` fails with
+   * a domain-association error, and since sign-in is password-then-passkey, the
+   * parent cannot get into the app at all.
+   *
+   * Served from the router rather than as a static asset so it exists on every
+   * deploy target, and because it must be JSON with no redirect — Apple follows
+   * neither a 30x nor an HTML error page.
+   *
+   * `appleAppIds` is empty until a real Team ID is known (APPLE_APP_IDS, e.g.
+   * `ABCDE12345.family.ajar.parent`). Serving an EMPTY apps list would tell
+   * Apple, authoritatively and with caching, that no app may claim this domain;
+   * a 404 is the honest answer for "not configured yet" and is retried.
+   */
+  r.get("/.well-known/apple-app-site-association", async () => {
+    const apps = app.appleAppIds;
+    if (apps.length === 0) return err(404, "no associated apps are configured", "NOT_FOUND");
+    // Universal Links are deliberately NOT claimed alongside webcredentials. The
+    // block page hands back via the `ajar://` scheme (AjarFilter/project.yml),
+    // and claiming paths we do not handle would swallow ordinary web links to
+    // ajar.family into an app that has no screen for them.
+    //
+    // `ok` serves this as application/json, which is what Apple requires; it
+    // does not accept text/html, and the wrong type here is indistinguishable
+    // from a missing file.
+    return ok({ webcredentials: { apps } });
+  });
+
+  /**
    * The Request-Access block page (iOS content-filter remediation target).
    *
    * When the data provider returns `.remediateVerdict`, iOS renders THIS page

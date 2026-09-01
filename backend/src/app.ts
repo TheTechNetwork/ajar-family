@@ -59,6 +59,17 @@ export interface AppConfig {
   passkeyRpId?: string;
   passkeyOrigin?: string;
   passkeyRpName?: string;
+  /**
+   * Apple application identifiers allowed to use this rpId's passkeys, as
+   * `<TeamID>.<bundle id>` — e.g. `ABCDE12345.family.ajar.parent`. Comma
+   * separated in the environment (APPLE_APP_IDS).
+   *
+   * Empty means the apple-app-site-association route 404s. That is deliberate:
+   * an EMPTY apps list is a positive statement to Apple that no app may claim
+   * this domain, and it is cached. "Not configured" and "configured to refuse"
+   * must not look the same.
+   */
+  appleAppIds?: string;
 }
 
 export class App {
@@ -82,6 +93,8 @@ export class App {
   readonly categories: CategoryProvider;
   readonly cnameResolver: CnameResolver;
   readonly passkeys: PasskeyService;
+  /** Parsed `appleAppIds`; empty when unset. */
+  readonly appleAppIds: string[];
 
   private constructor(repo: Repository, notifier: Notifier, mail: MailSender, hub: EventHub, cfg: AppConfig,
                       signingPublicKeyB64: string, signingPrivateKeyB64: string, resolver: CnameResolver) {
@@ -102,6 +115,8 @@ export class App {
     this.devices = new DeviceService(repo);
     this.policy = new PolicyService(repo, signingPrivateKeyB64, this.categories);
     this.approvals = new ApprovalService(repo, notifier, hub);
+    this.appleAppIds = (cfg.appleAppIds ?? "")
+      .split(",").map((s) => s.trim()).filter((s) => s.length > 0);
     this.passkeys = new PasskeyService(repo, {
       rpId: cfg.passkeyRpId ?? "localhost",
       origin: cfg.passkeyOrigin ?? "http://localhost:8787",

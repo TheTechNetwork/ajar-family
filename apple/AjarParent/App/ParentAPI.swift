@@ -30,6 +30,33 @@ struct TokenResponse: Codable {
     let refreshToken: String
 }
 
+/// `/v1/auth/login` when the account has a passkey enrolled: a short-lived
+/// token of a different KIND, good only for finishing at
+/// `/v1/auth/passkeys/login`. No access token, no session yet.
+///
+/// This type exists because its absence was a lockout. The password response
+/// was decoded straight into `TokenResponse`, whose fields are all
+/// non-optional, so an account with a passkey — the state signup steers every
+/// new parent into — got a `DecodingError` rendered as Foundation's *"The data
+/// couldn't be read because it is missing."* The one surface where "approve in
+/// seconds from your phone" happens was the one the security step disabled.
+struct MFAChallenge: Codable {
+    let mfaToken: String
+    let expiresIn: Int
+    let methods: [String]?
+
+    /// Whether this build can actually finish the challenge. A method we do not
+    /// implement must produce a sentence a parent can act on, not a spinner.
+    var canFinishHere: Bool { (methods ?? ["passkey"]).contains("passkey") }
+}
+
+/// What a password bought. Either a session, or permission to try the second
+/// step — never a thrown decoding error, which is what this replaced.
+enum SignInOutcome {
+    case session(userId: String)
+    case passkeyNeeded(MFAChallenge)
+}
+
 enum PolicyTargetType: String, Codable {
     case url = "URL", urlPattern = "URL_PATTERN", domain = "DOMAIN"
     case youtubeVideo = "YOUTUBE_VIDEO", youtubeChannel = "YOUTUBE_CHANNEL"
@@ -192,11 +219,57 @@ actor ParentAPI {
 
     // MARK: Auth
 
-    func signIn(email: String, password: String) async throws -> String {
-        let t: TokenResponse = try await send("/v1/auth/login", method: "POST",
-                                              body: ["email": email, "password": password], authed: false)
+    /// Step one. The password alone does not always produce a session, so the
+    /// response is decoded by SHAPE rather than assumed: an account with a
+    /// passkey gets an `mfaToken` and no `accessToken`.
+    ///
+    /// Order matters. `TokenResponse` is tried first and `MFAChallenge` second,
+    /// because the challenge's only required field is `mfaToken` — a lenient
+    /// decoder asked the other way round would still be wrong the day the
+    /// server adds a field. Neither shape decoding is the real error to report.
+    func signIn(email: String, password: String) async throws -> SignInOutcome {
+        let data = try await perform(try request("/v1/auth/login", method: "POST",
+                                                 body: ["email": email, "password": password],
+                                                 authed: false, timeout: 30))
+        if let t = try? JSONDecoder().decode(TokenResponse.self, from: data) {
+            adopt(t)
+            return .session(userId: t.userId)
+        }
+        if let c = try? JSONDecoder().decode(MFAChallenge.self, from: data) {
+            return .passkeyNeeded(c)
+        }
+        throw ParentAPIError.http(200, "The sign-in server sent something this app could not read. Update Ajar and try again.")
+    }
+
+    // MARK: Passkeys
+
+    /// Step two, part one: what the platform should sign.
+    ///
+    /// The options blob is passed through to `ASAuthorization…` verbatim, so it
+    /// is `Data` rather than a modelled type — every field the server sends has
+    /// to survive, and a struct here would silently drop the ones this version
+    /// does not know about.
+    func passkeyLoginOptions(mfaToken: String) async throws -> Data {
+        try await perform(try mfaRequest("/v1/auth/passkeys/login/options", mfaToken: mfaToken, body: nil))
+    }
+
+    /// Step two, part two. On success this is a real session, exactly as if the
+    /// password had been enough.
+    func finishPasskeyLogin(mfaToken: String, credential: [String: Any]) async throws -> String {
+        let data = try await perform(try mfaRequest("/v1/auth/passkeys/login", mfaToken: mfaToken,
+                                                    body: ["credential": credential]))
+        let t = try JSONDecoder().decode(TokenResponse.self, from: data)
         adopt(t)
         return t.userId
+    }
+
+    /// The `mfa` token is a bearer token of a different kind, not our session —
+    /// so it is set by hand here rather than through `authed: true`, which would
+    /// have sent whatever stale session happened to be in `tokens`.
+    private func mfaRequest(_ path: String, mfaToken: String, body: [String: Any]?) throws -> URLRequest {
+        var r = try request(path, method: "POST", body: body, authed: false, timeout: 30)
+        r.setValue("Bearer \(mfaToken)", forHTTPHeaderField: "authorization")
+        return r
     }
 
     /// One place that owns "these are our tokens now" — sign-in and refresh must

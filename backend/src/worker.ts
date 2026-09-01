@@ -57,6 +57,7 @@ export interface Env {
   PASSKEY_RP_ID?: string;
   PASSKEY_ORIGIN?: string;
   PASSKEY_RP_NAME?: string;
+  APPLE_APP_IDS?: string;
   /**
    * Static site + parent console, uploaded by `[assets]` in wrangler.toml.
    * Typed structurally rather than as workers-types' `Fetcher` so the backend
@@ -158,6 +159,7 @@ async function getRouter(env: Env): Promise<Router> {
           passkeyRpId: env.PASSKEY_RP_ID,
           passkeyOrigin: env.PASSKEY_ORIGIN,
           passkeyRpName: env.PASSKEY_RP_NAME,
+          appleAppIds: env.APPLE_APP_IDS,
         },
         // Workers has no raw DNS — follow CNAME chains over DNS-over-HTTPS.
         cnameResolver: new DohCnameResolver(),

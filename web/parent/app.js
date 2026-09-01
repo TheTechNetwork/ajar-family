@@ -719,6 +719,14 @@ async function startLiveRequests() {
       const out = await api(`/v1/families/${state.familyId}/requests/wait?count=${lastCount}&timeout=25000`);
       backoffMs = 0;
       setLive(true);
+      // The server distinguishes "nothing changed in 25 seconds" from "here is
+      // the new list", and this loop used to throw that away and re-render
+      // regardless. Every 25 seconds, forever: a screen reader re-announced the
+      // same count, any <details> a parent had opened snapped shut, and the
+      // scope <select> reset to its preselect MID-DECISION. The focus-restore
+      // code in renderRequests() is good work that only existed to survive a
+      // re-render that should never have happened.
+      if (out.upToDate) continue;
       renderRequests(out.requests || []);
     } catch (e) {
       if (isAuthError(e)) {

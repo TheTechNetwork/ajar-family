@@ -47,6 +47,12 @@ enum Ajar {
     static let warnWash    = dyn(0xFBF1DE, 0x2E2716)
     static let ok          = dyn(0x14602F, 0x7BD69B)
     static let okWash      = dyn(0xEAF3EC, 0x16301F)
+    // Present in tokens.css from the start and missing here, which is why both
+    // apps rendered every error in `muted` — quieter than body copy, on the one
+    // string that matters when it appears. Not alarm-red (BRAND §7): a child
+    // seeing a red screen reads punishment before words.
+    static let err         = dyn(0x8C4636, 0xF0A08C)
+    static let errWash     = dyn(0xFAEDE9, 0x2E1E19)
 
     // 44px is the floor we hold ourselves to; WCAG 2.5.8 only asks 24.
     static let tap: CGFloat = 44

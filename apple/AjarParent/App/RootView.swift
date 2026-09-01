@@ -26,6 +26,44 @@ struct SignInView: View {
                 Text("Approve one thing at a time.")
                     .font(.system(size: 16)).foregroundStyle(Ajar.muted)
             }
+            if model.pendingPasskey != nil { passkeyStep } else { passwordStep }
+            Spacer()
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Ajar.bg)
+    }
+
+    /// The second step, shown only when the password bought a challenge rather
+    /// than a session. It is a screen and not a silent retry because the
+    /// platform sheet can be dismissed, and a parent who dismisses it needs
+    /// somewhere to land that is not the password form they already filled in.
+    private var passkeyStep: some View {
+        VStack(spacing: 16) {
+            Text("One more step")
+                .font(.system(size: 20, weight: .semibold)).foregroundStyle(Ajar.ink)
+            Text("Use the passkey you saved for Ajar.")
+                .font(.system(size: 16)).foregroundStyle(Ajar.ink2)
+                .multilineTextAlignment(.center)
+
+            Button {
+                Task { await model.finishPasskeySignIn() }
+            } label: {
+                if model.busy { ProgressView() } else { Text("Use passkey") }
+            }
+            .buttonStyle(PrimaryButton())
+            .frame(maxWidth: 360)
+            .disabled(model.busy)
+
+            errorText
+
+            Button("Start again") { model.cancelPasskeySignIn() }
+                .buttonStyle(SecondaryButton()).frame(maxWidth: 360)
+        }
+    }
+
+    private var passwordStep: some View {
+        VStack(spacing: 20) {
             VStack(spacing: 12) {
                 TextField("Email", text: $email)
                     .textContentType(.emailAddress)
@@ -53,15 +91,27 @@ struct SignInView: View {
             .frame(maxWidth: 360)
             .disabled(model.busy || email.isEmpty || password.isEmpty)
 
-            if let error = model.error {
-                Text(error).font(.system(size: 14)).foregroundStyle(Ajar.muted)
-                    .multilineTextAlignment(.center).frame(maxWidth: 360)
-            }
-            Spacer()
+            errorText
+
+            // Password recovery is a link out rather than a screen: the reset
+            // lands on the console (PASSWORD_RESET_URL), and duplicating that
+            // flow here would mean a second place for it to rot. What must not
+            // happen is what happened before — no route at all, on the one
+            // credential every account has.
+            Link("Forgot your password?", destination: URL(string: "https://ajar.family/parent/#forgot")!)
+                .font(.system(size: 15)).foregroundStyle(Ajar.accentInk)
+                .frame(minHeight: Ajar.tap)
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Ajar.bg)
+    }
+
+    /// Errors used to be `Ajar.muted` — quieter than body copy, on the text
+    /// that matters most when it appears.
+    @ViewBuilder private var errorText: some View {
+        if let error = model.error {
+            Text(error).font(.system(size: 15)).foregroundStyle(Ajar.err)
+                .multilineTextAlignment(.center).frame(maxWidth: 360)
+                .accessibilityAddTraits(.isStaticText)
+        }
     }
 }
 
@@ -86,6 +136,13 @@ struct RequestsView: View {
                     noFamily
                 } else if model.families.count > 1 {
                     familyPicker
+                } else if let error = model.error {
+                    // The branch that was missing. `hasNoFamily` needs
+                    // `loadedFamilies`, which is set only on SUCCESS — so a
+                    // failed /v1/me fell through to the spinner below and stayed
+                    // there. Launch the app on a train and the screen was grey,
+                    // forever, with no message and no way to retry.
+                    couldNotLoad(error)
                 } else {
                     ProgressView().tint(Ajar.muted)
                 }
@@ -108,17 +165,63 @@ struct RequestsView: View {
         }
     }
 
+    /// Nothing loaded, and we know why. A retry rather than a sign-out: the
+    /// session is almost certainly fine and the network is not.
+    private func couldNotLoad(_ error: String) -> some View {
+        VStack(spacing: 14) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 34)).foregroundStyle(Ajar.muted)
+                .accessibilityHidden(true)
+            Text("Can't reach Ajar")
+                .font(.system(size: 20, weight: .semibold)).foregroundStyle(Ajar.ink)
+            Text(error).font(.system(size: 15)).foregroundStyle(Ajar.ink2)
+                .multilineTextAlignment(.center)
+            Button("Try again") { Task { await model.loadFamilies() } }
+                .buttonStyle(PrimaryButton()).frame(maxWidth: 360)
+        }
+        .padding(24)
+    }
+
     @ViewBuilder private var requestList: some View {
-        if model.pending.isEmpty {
-            quiet
-        } else {
-            ScrollView {
+        ScrollView {
+            // A failure AFTER the list has loaded is different from the branch
+            // above: there is real content to keep on screen. It sits over the
+            // list rather than replacing it, because `decide()` rolls a failed
+            // approval back onto the list — silently, before this — while the
+            // parent believed they had said yes.
+            if let error = model.error {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.circle")
+                        .foregroundStyle(Ajar.err).accessibilityHidden(true)
+                    Text(error).font(.system(size: 15)).foregroundStyle(Ajar.err)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Ajar.errWash))
+                .padding(.horizontal, 16).padding(.top, 12)
+            }
+
+            if !model.live {
+                // Word AND colour, never colour alone (UX_PRINCIPLES §8).
+                Text("Reconnecting…")
+                    .font(.system(size: 14)).foregroundStyle(Ajar.warn)
+                    .padding(.horizontal, 16).padding(.top, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if model.pending.isEmpty {
+                quiet
+            } else {
                 LazyVStack(spacing: 12) {
                     ForEach(model.pending) { RequestCard(request: $0) }
                 }
                 .padding(16)
             }
         }
+        // The gesture every iOS user tries first, where Refresh was buried in
+        // an ellipsis menu.
+        .refreshable { await model.refresh() }
     }
 
     /// Shown ONLY when this parent belongs to more than one family.
@@ -173,8 +276,13 @@ struct RequestsView: View {
             }
             .padding(.bottom, 8)
             Text("Nothing waiting").font(.system(size: 18, weight: .semibold)).foregroundStyle(Ajar.ink)
-            Text("A request lands here the moment one is made.")
-                .font(.system(size: 16)).foregroundStyle(Ajar.muted)
+            // Two sentences, because only one of them is true at a time. The
+            // first was shown unconditionally, including while the long poll
+            // was down — promising immediacy the app could not deliver.
+            Text(model.live
+                 ? "A request lands here the moment one is made."
+                 : "Reconnecting. A request may take a moment to show up.")
+                .font(.system(size: 16)).foregroundStyle(model.live ? Ajar.muted : Ajar.warn)
                 .multilineTextAlignment(.center)
         }
         .padding(40)
@@ -195,8 +303,72 @@ struct RequestCard: View {
     private var defaultScope: ApprovalScope { scopes.first ?? .thisRequest }
 
     /// The narrowest useful default, stated in full so nobody decodes a chip.
-    private var defaultDuration: ApprovalDuration {
-        request.targetType == .domain ? .always : .minutes(30)
+    ///
+    /// Thirty minutes for EVERY target type, including a whole domain. A domain
+    /// ask used to default to `.always`, so the one-tap button read "… ·
+    /// Always" and a tired thumb wrote a permanent, site-wide standing rule —
+    /// on the surface with no Undo and no rules list, findable only in a
+    /// browser. UX_PRINCIPLES §3: whatever we preselect IS the policy most of
+    /// the time, so it has to be the narrowest useful option, never the
+    /// broadest. A longer grant is one tap away in `ChangeSheet`; undoing a
+    /// permanent one is not.
+    private var defaultDuration: ApprovalDuration { .minutes(30) }
+
+    /// Who asked. The avatar used to be `request.childId.prefix(1)` — the first
+    /// character of a UUID — so the card showed a hex digit in a circle and the
+    /// child's name appeared nowhere, though `model.children` is loaded on every
+    /// refresh. UX_PRINCIPLES §8 names this exact failure: a one-tap decision on
+    /// an opaque id is not a decision.
+    private var childName: String? {
+        model.children.first { $0.id == request.childId }?.displayName
+    }
+
+    private var initial: String {
+        String((childName ?? "?").prefix(1)).uppercased()
+    }
+
+    /// `Jane · 4 min ago`, matching the console. The raw ISO-8601 timestamp was
+    /// here before; the name half is dropped rather than faked when the child
+    /// is not in the roster yet.
+    private var byline: String {
+        let when = Self.ago(request.createdAt)
+        guard let name = childName else { return when }
+        return "\(name) · \(when)"
+    }
+
+    /// Two formatters, tried in order.
+    ///
+    /// `ISO8601DateFormatter` is all-or-nothing about fractional seconds: the
+    /// one that parses `…:10.812Z` refuses `…:10Z` and vice versa. The backend
+    /// writes `toISOString()` (fractional) today, but the audit log and the
+    /// stores are not one code path, and a formatter that silently returns nil
+    /// here shows the raw timestamp again — the bug this is fixing.
+    private static let withFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let plain = ISO8601DateFormatter()
+
+    private static func parse(_ iso: String) -> Date? {
+        withFraction.date(from: iso) ?? plain.date(from: iso)
+    }
+
+    /// Elapsed time in the words the console uses (`app.js` `ago()`), ported so
+    /// the two surfaces do not describe the same instant differently.
+    ///
+    /// Falls back to the raw string rather than to "now": an unparseable
+    /// timestamp displayed as "just now" would misdate every ask on the screen.
+    /// Word for word and rounding for rounding the same as `app.js:688-695`,
+    /// including treating a negative interval as "just now" — a device clock a
+    /// few seconds ahead of the server must not print "in 3 minutes".
+    static func ago(_ iso: String) -> String {
+        guard let then = Self.parse(iso) else { return iso }
+        let s = Date().timeIntervalSince(then)
+        if s < 60 { return "just now" }
+        if s < 3600 { return "\(Int((s / 60).rounded())) min ago" }
+        if s < 86400 { return "\(Int((s / 3600).rounded())) h ago" }
+        return "\(Int((s / 86400).rounded())) d ago"
     }
 
     var body: some View {
@@ -204,14 +376,15 @@ struct RequestCard: View {
             HStack(alignment: .top, spacing: 12) {
                 ZStack {
                     Circle().fill(Ajar.accentWash).frame(width: 40, height: 40)
-                    Text(String(request.childId.prefix(1)).uppercased())
+                    Text(initial)
                         .font(.system(size: 16, weight: .semibold)).foregroundStyle(Ajar.accentInk)
                 }
+                .accessibilityHidden(true)   // the name is read out below
                 VStack(alignment: .leading, spacing: 2) {
                     Text(request.title ?? request.targetValue)
                         .font(.system(size: 18, weight: .semibold)).foregroundStyle(Ajar.ink)
                         .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                    Text(request.createdAt).font(.system(size: 14)).foregroundStyle(Ajar.muted)
+                    Text(byline).font(.system(size: 14)).foregroundStyle(Ajar.muted)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)

@@ -342,6 +342,23 @@ export const openapiDocument = {
       get: { tags: ["system"], summary: "Liveness probe", security: [],
         responses: { "200": { description: "OK", content: json({ type: "object", properties: { status: { const: "ok" }, version: { type: "string" } } }) } } },
     },
+    "/.well-known/apple-app-site-association": {
+      get: { tags: ["system"], summary: "Apple App Site Association", security: [],
+        description: "Lets the parent iOS/macOS app use the passkeys enrolled against PASSKEY_RP_ID. " +
+          "Apple fetches this from https://<rpId>/.well-known/apple-app-site-association and will only " +
+          "let a native app claim that relying party if it is listed here. Returns 404 while APPLE_APP_IDS " +
+          "is unset: an EMPTY apps list is a positive, cached statement that no app may claim the domain, " +
+          "which is not the same as \"not configured yet\".",
+        responses: {
+          "200": { description: "Associated application identifiers", content: json({
+            type: "object",
+            properties: { webcredentials: { type: "object", properties: {
+              apps: { type: "array", items: { type: "string" },
+                      description: "`<TeamID>.<bundle id>`, e.g. ABCDE12345.family.ajar.parent" } } } },
+          }) },
+          "404": { description: "No associated apps are configured on this deployment" },
+        } },
+    },
     "/v1/signing-key": {
       get: { tags: ["system"], summary: "Policy-signing public key", security: [],
         responses: { "200": { description: "Public key", content: json({ type: "object", properties: { publicKeyB64: { type: "string" }, alg: { const: "Ed25519" } } }) } } },
