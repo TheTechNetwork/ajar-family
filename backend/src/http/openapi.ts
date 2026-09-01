@@ -359,6 +359,31 @@ export const openapiDocument = {
           "404": { description: "No associated apps are configured on this deployment" },
         } },
     },
+    "/v1/devices/{deviceId}/answers": {
+      get: { tags: ["devices"], summary: "What the parent decided, for this device's child",
+        description: "Lets a block page say what actually happened instead of inferring it from " +
+          "whether a temporary rule still exists. A refusal writes a grant that expires after five " +
+          "minutes and is then dropped from the snapshot, so a refused child was shown \"waiting on " +
+          "a parent\" for up to seven days. Scoped to the device's own child; grants nothing and is " +
+          "consulted by no filter — enforcement is the signed snapshot.",
+        parameters: [{ name: "deviceId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "Decided requests from the last seven days", content: json({
+            type: "object",
+            properties: { answers: { type: "array", items: {
+              type: "object",
+              properties: {
+                requestId: { type: "string" },
+                targetType: { $ref: "#/components/schemas/PolicyTargetType" },
+                targetValue: { type: "string" },
+                answer: { type: "string", enum: ["opened", "closed"] },
+                askedAt: { type: "string", format: "date-time" },
+              },
+            } } },
+          }) },
+          "403": { description: "Device mismatch" },
+        } },
+    },
     "/v1/signing-key": {
       get: { tags: ["system"], summary: "Policy-signing public key", security: [],
         responses: { "200": { description: "Public key", content: json({ type: "object", properties: { publicKeyB64: { type: "string" }, alg: { const: "Ed25519" } } }) } } },

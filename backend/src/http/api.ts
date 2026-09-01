@@ -1074,6 +1074,51 @@ ${safe ? `<script>
   });
 
   /**
+   * WHAT THE PARENT ACTUALLY DECIDED, told to the device rather than inferred.
+   *
+   * THE BUG THIS CLOSES. A refusal writes a temporary BLOCK grant that expires
+   * after ONCE_GRANT_TTL_MS (five minutes), and the block pages could only work
+   * out "declined" by noticing such a rule in the snapshot — which the policy
+   * builder drops as soon as it expires. So a child who was told no saw the
+   * answer for five minutes at most and then the page went back to "waiting on
+   * a parent", for up to the seven days the ask is remembered. Every honesty
+   * fix on those screens has been compensation for this endpoint's absence.
+   *
+   * Scoped to the DEVICE'S OWN CHILD, never the family: a sibling's refusals are
+   * not this device's business, and a device token is not a parent session.
+   *
+   * `status` is the whole payload beyond identity. Deliberately NOT the scope,
+   * the duration, or who decided: the child needs to know they were answered and
+   * which way, and the rest is the parent's business. Enforcement still comes
+   * from the signed snapshot — this endpoint grants nothing and is not consulted
+   * by any filter.
+   */
+  r.get("/v1/devices/:deviceId/answers", async (req) => {
+    const dev = await requireDevice(app, req);
+    if (dev.deviceId !== req.params.deviceId) return err(403, "device mismatch", "FORBIDDEN");
+    // A window, not the whole history. A block page is asking about something a
+    // child asked for minutes or hours ago; a month of decisions is a profile of
+    // the child sitting on an endpoint reachable from the device they use.
+    const windowMs = 7 * 24 * 3600 * 1000;
+    const cutoff = Date.now() - windowMs;
+    const all = await app.repo.listAccessRequests(dev.familyId);
+    const answers = all
+      .filter((r) => r.childId === dev.childId)
+      .filter((r) => r.status === "APPROVED" || r.status === "DENIED")
+      .filter((r) => Date.parse(r.createdAt) >= cutoff)
+      .map((r) => ({
+        requestId: r.id,
+        targetType: r.targetType,
+        targetValue: r.targetValue,
+        // "opened" / "closed", not APPROVED/DENIED: this is read by a screen a
+        // child looks at, and the product settled on open/closed (BRAND.md §6.1).
+        answer: r.status === "APPROVED" ? "opened" : "closed",
+        askedAt: r.createdAt,
+      }));
+    return ok({ answers });
+  });
+
+  /**
    * Refresh a device token before it expires. Device tokens last 30 days and had
    * no renewal path at all: on day 31 a child's device stopped syncing policy,
    * silently, and the only recovery was a full re-enrollment by a parent. A
