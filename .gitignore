@@ -49,3 +49,9 @@ windows/agent/ajar-agent.exe
 *.mobileprovision
 *.certSigningRequest
 *.cer
+
+# Transient git worktrees the agent harness creates for parallel work. Each is a
+# FULL checkout of this repo; committing them would nest the repo inside itself.
+# They are removed when the agent finishes. Only this path is ignored — a real
+# .claude/settings.json or skill belongs in version control.
+.claude/worktrees/
