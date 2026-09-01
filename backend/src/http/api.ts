@@ -116,30 +116,85 @@ export function buildRouter(app: App): Router {
     const shown = escapeHtml(safe);
     const deepLink = safe ? `ajar://request?u=${encodeURIComponent(safe)}` : "";
 
+    // Who the child is asking. The page is deliberately UNAUTHENTICATED and
+    // stateless, so it cannot look a child up — the device passes the label it
+    // already holds in its signed snapshot. A child can edit the parameter, and
+    // that is fine: it only renames a button on their own screen, grants nothing
+    // and reaches no one else.
+    //
+    // It is still reflected input, so it is constrained to something that can
+    // only be a NAME: 24 characters of letters, marks, spaces, apostrophes and
+    // hyphens. escapeHtml alone would be enough against markup (verified), but a
+    // label is not free-form text and there is no reason to accept 2 KB of it.
+    const rawAlly = (req.query.get("ally") ?? "").slice(0, 24).trim();
+    const ally = /^[\p{L}\p{M} '’-]{1,24}$/u.test(rawAlly) ? rawAlly : "";
+    const named = ally.length > 0;
+    // No pronoun anywhere. "she'll get a message" forces a guess the product has
+    // no business making and breaks the moment a family picks the generic label;
+    // promising the CHILD a fast answer keeps the relatedness and the speed
+    // promise without gendering anyone (docs/UX_PRINCIPLES.md §4, §9).
+    const askLabel = named ? `Ask ${escapeHtml(ally)}` : "Send request";
+    const subhead = named
+      ? `Ask ${escapeHtml(ally)} to unlock it — you’ll hear back right away.`
+      : "Send a request — you’ll hear back right away.";
+
     return html(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Blocked</title>
 <style>
-  :root { color-scheme: light dark; }
+  /* Values lifted from web/parent/tokens.css, which CI contrast-checks. Inlined
+     rather than linked: this page renders inside the content filter's
+     remediation view, which loads nothing cross-origin. */
+  :root { color-scheme: light dark;
+    --bg:#F6F4EE; --surface:#FFFFFF; --surface-2:#EFEDE4; --line:#E3E1D8;
+    --field-line:#767468; --ink:#12241F; --ink-2:#3E4F49; --muted:#5C6B64;
+    --accent-ink:#0b6355; --accent-wash:#E7F4F1; --yes:#FF8A5B; --yes-ink:#12241F;
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --bg:#12211D; --surface:#1A2A26; --surface-2:#223531; --line:#2B3A35;
+    --field-line:#7b8d87; --ink:#EAF1EE; --ink-2:#C3D2CC; --muted:#9FB1AA;
+    --accent-ink:#5FD3BE; --accent-wash:#1F322D; --yes:#FF8A5B; --yes-ink:#2A1208;
+  } }
+  * { box-sizing: border-box; }
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
-         font:-apple-system-body, system-ui, sans-serif; background:#F6F4EE; color:#12241F; padding:24px; }
-  @media (prefers-color-scheme: dark) { body { background:#12241F; color:#F6F4EE; } }
-  .card { max-width:32rem; width:100%; text-align:center; }
-  h1 { font-size:1.4rem; margin:0 0 .5rem; }
-  p { color:#3E4F49; line-height:1.5; margin:0 0 1rem; }
-  @media (prefers-color-scheme: dark) { p { color:#C9D3CF; } }
-  .url { font:0.8rem ui-monospace, monospace; word-break:break-all; background:#EFEDE4;
-         border:1px solid #767468; border-radius:8px; padding:.6rem .75rem; margin-bottom:1.5rem; }
-  @media (prefers-color-scheme: dark) { .url { background:#1B2E28; border-color:#5C6B64; } }
-  a.btn { display:inline-block; background:#0d6d5e; color:#fff; text-decoration:none;
-          padding:.8rem 1.4rem; border-radius:999px; font-weight:600; }
+         background:var(--bg); color:var(--ink); padding:24px;
+         font:16px/1.5 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
+  .card { max-width:32rem; width:100%; }
+  .mark { display:flex; align-items:center; gap:8px; margin-bottom:32px;
+          font-size:14px; font-weight:600; color:var(--ink-2); }
+  h1 { font-size:22px; line-height:1.25; font-weight:600; margin:0 0 12px; }
+  .sub { color:var(--ink-2); margin:0 0 24px; }
+  .target { background:var(--surface); border:1px solid var(--line); border-radius:14px;
+            padding:16px; margin-bottom:24px; }
+  .target .name { font-size:18px; font-weight:600; line-height:1.25; word-break:break-word; }
+  details { margin-top:12px; }
+  summary { font-size:14px; color:var(--muted); cursor:pointer; min-height:24px; }
+  .url { font:12px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+         color:var(--muted); word-break:break-all; margin-top:8px; }
+  /* Coral is FILL ONLY and carries dark ink — white on it measures 2.32:1. */
+  .btn { display:flex; align-items:center; justify-content:center; width:100%;
+         min-height:52px; background:var(--yes); color:var(--yes-ink); text-decoration:none;
+         border-radius:999px; font-size:16px; font-weight:600; }
+  .foot { font-size:14px; color:var(--muted); text-align:center; margin:16px 0 0; }
 </style></head>
 <body><div class="card">
-  <h1>This page is blocked</h1>
-  ${safe ? `<p>You can ask a parent to allow it.</p><div class="url">${shown}</div>
-  <a class="btn" href="${escapeHtml(deepLink)}">Ask a parent</a>`
-         : `<p>No address was supplied, so there is nothing to request.</p>`}
+  <div class="mark">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 21V5a2 2 0 0 1 2-2h7l5 4v14"></path><path d="M13 3v18"></path>
+    </svg>
+    Ajar
+  </div>
+  ${safe ? `<h1>You can ask to unlock this page</h1>
+  <p class="sub">${subhead}</p>
+  <div class="target">
+    <div class="name">${shown.replace(/^https?:\/\/(www\.)?/i, "").split("/")[0] || "This page"}</div>
+    <details><summary>Details</summary><div class="url">${shown}</div></details>
+  </div>
+  <a class="btn" href="${escapeHtml(deepLink)}">${askLabel}</a>
+  <p class="foot">New sites go past a parent first.</p>`
+         : `<h1>This page is closed</h1>
+  <p class="sub">No address came through, so there is nothing to ask about yet.</p>`}
 </div></body></html>`);
   });
   // Machine-readable API contract (the source of truth clients integrate against).
