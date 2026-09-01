@@ -1,7 +1,10 @@
 # web/parent — Parent Console (dev/demo web UI)
 
 A minimal static web UI for the approval workflow, so the whole MVP loop is
-clickable in a browser. **The production parent experience is the iOS app**
+clickable in a browser. **Served at `/parent/`** — `/` is the home page and
+signup flow (`web/site/`), which hands off to this console through localStorage
+keys the two share. It moved off `/` because this page's markup references
+`app.js` and `tokens.css` relatively and therefore survives a prefix. **The production parent experience is the iOS app**
 (`apple/parent-app/`); a web admin was noted as optional in the brief. This exists
 to demo and test the backend without curl.
 
