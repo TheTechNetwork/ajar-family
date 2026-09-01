@@ -604,7 +604,22 @@ a few minutes before the build appears to internal testers.
    `ITSAppUsesNonExemptEncryption: false` is now set in `project.yml` (§8.5), so
    uploads no longer stop. Listed here only so the old symptom is recognisable if
    a third-party crypto library is ever linked and the declaration stops holding.
-5. **The rest of the app record (§8.5).** Age rating, content rights and — for
+5. **A missing app icon (error 90713).** Every app target needs
+   `App/Assets.xcassets/AppIcon.appiconset` holding one **opaque** 1024x1024 PNG,
+   plus `ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon` in `project.yml`. The
+   setting alone does nothing: AjarParent had it, had no catalog, and was
+   rejected at UPLOAD — after a clean archive and export — with
+
+   ```
+   A value for the Info.plist key 'CFBundleIconName' is missing (90713)
+   ```
+
+   `CFBundleIconName` is written by the asset-catalog compiler, not by hand, so
+   an absent catalog produces a bundle that looks fine locally. Generate the icon
+   with `node tools/appicon/make-icon.mjs <filter|parent> <catalog path>`; an
+   icon with an **alpha channel** is rejected too, so the generator writes PNG
+   colour type 2.
+6. **The rest of the app record (§8.5).** Age rating, content rights and — for
    external testing — the privacy label. A build can upload perfectly and still
    reach nobody because a questionnaire is unanswered.
 
