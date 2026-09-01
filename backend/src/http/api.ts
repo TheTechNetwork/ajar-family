@@ -974,6 +974,13 @@ ${safe ? `<script>
   });
 
   // --- policy ---
+  // What a child is on right now. There was a PUT and no GET, so a console had
+  // no way to show the control's current value — one reason nothing ever called
+  // the setter and every child stayed on the hardcoded posture.
+  r.get("/v1/families/:familyId/children/:childId/defaults", async (req) => {
+    const userId = await requireUser(app, req);
+    return ok(await app.policy.getDefaults(req.params.familyId!, userId, req.params.childId!));
+  });
   r.add("PUT" as string, "/v1/families/:familyId/children/:childId/defaults", async (req) => {
     const userId = await requireUser(app, req);
     const d = await v.readBody(req, bodies.defaults);

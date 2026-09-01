@@ -810,6 +810,24 @@ export class PolicyService {
     private categories: CategoryProvider,
   ) {}
 
+  /**
+   * The posture a child is on right now.
+   *
+   * There was a setter and no getter, so the only way to see what a child's
+   * defaults were was to build their device's snapshot. A console cannot offer a
+   * control it can't show the current value of, which is one reason nothing ever
+   * called `setDefaults`.
+   */
+  async getDefaults(familyId: string, actingUserId: string, childId: string): Promise<DefaultPolicy> {
+    const m = await this.repo.getMembership(familyId, actingUserId);
+    if (!m) throw new DomainError("not a member of this family", "FORBIDDEN");
+    if (m.role === "LIMITED_GUARDIAN" && !m.assignedChildIds.includes(childId)) {
+      throw new DomainError("not this guardian's child", "FORBIDDEN");
+    }
+    return (await this.repo.getDefaultPolicy(familyId, childId))
+      ?? { webDefault: "ALLOW", youTubeDefault: "BLOCK" };
+  }
+
   async setDefaults(familyId: string, actingUserId: string, childId: string, d: DefaultPolicy) {
     await this.requireManage(familyId, actingUserId);
     await this.repo.setDefaultPolicy(familyId, childId, d);

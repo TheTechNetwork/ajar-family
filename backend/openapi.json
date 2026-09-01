@@ -3365,6 +3365,67 @@
       }
     },
     "/v1/families/{familyId}/children/{childId}/defaults": {
+      "get": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Read a child's default policy (web + YouTube)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "familyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "childId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Defaults",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefaultPolicy"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
       "put": {
         "tags": [
           "policy"
@@ -3843,7 +3904,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "Requires a **device token**. The child device asks a parent to open one canonical target.",
+        "description": "Requires a **device token**. The child device asks a parent to open ONE canonical target. `targetType` is limited to things a device actually hits — URL, DOMAIN, YOUTUBE_VIDEO, YOUTUBE_CHANNEL, YOUTUBE_PLAYLIST, APPLICATION — and `targetValue` must be the shape that type claims. URL_PATTERN and CATEGORY are parent-authoring constructs and are refused here: the rule a parent's approval mints comes from these two fields, and a device that could name its own target could name a wildcard.",
         "requestBody": {
           "required": true,
           "content": {

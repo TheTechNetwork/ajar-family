@@ -650,8 +650,11 @@ async function selectFamily(fid) {
   $("childrenBox").classList.remove("hide");
   $("requestsCard").classList.remove("hide");
   $("rulesCard").classList.remove("hide");
+  $("defaultsCard").classList.remove("hide");
   await refreshChildren();
   refreshRules();
+  refreshDefaults();
+  fillRuleWho();
   startLiveRequests();
   try { renderFamilyPick((await api("/v1/me")).families); } catch { /* picker is cosmetic */ }
 }
@@ -962,15 +965,16 @@ function renderRequest(r) {
     <h3 class="t" id="reqt-${id}">${ctx}</h3>
     <!-- THE TARGET, ALWAYS VISIBLE, never only inside Details.
 
-         `title` is free text FROM THE CHILD'S DEVICE, and it was the headline
+         The title is free text FROM THE CHILD'S DEVICE, and it was the headline
          while what a tap would actually open sat folded away. That is the wrong
          way round: a parent is deciding about the target, and the title is how
          the ask was described to them. The device can no longer name a wildcard
-         (shared/policy/target-validate.ts), but "Khan Academy — Algebra 1" over
+         (shared/policy/target-validate.ts), but "Khan Academy - Algebra 1" over
          a link to somewhere else needs no wildcard to mislead.
 
          Shown as a second line rather than replacing the title, because the
-         title is genuinely the useful part when it is honest. -->
+         title is genuinely the useful part when it is honest.
+         (No backticks in this comment: it lives inside a template literal.) -->
     <p class="target">${escapeHtml(TYPE_LABEL[r.targetType] ?? r.targetType)} — <span class="target-value">${escapeHtml(r.targetValue)}</span></p>
     ${r.reason ? `<p class="quote">“${escapeHtml(r.reason)}”</p>` : ""}
     ${r.url && r.url !== r.targetValue ? `<details>
@@ -1215,4 +1219,145 @@ if (verifyCode) {
       announceAlert(friendly(e));
     }
   });
+}
+
+
+// ---------------------------------------------------------------------------
+// CLOSING SOMETHING WITHOUT BEING ASKED, and the posture underneath it
+//
+// `POST /v1/families/:id/rules` and `PUT .../defaults` have existed — tested,
+// in the OpenAPI, reachable — since the policy engine landed, and NO CLIENT
+// EVER CALLED EITHER. So every child sat on the hardcoded posture written at
+// `services.ts` addChild (websites open, YouTube closed), the only thing a
+// parent could do was answer asks, and this console could delete rules it had
+// no way to create. "Block all social media" was unreachable from any screen in
+// the product.
+// ---------------------------------------------------------------------------
+
+// `classifyRuleInput` lives in classify.js so it can be exercised by a test
+// without a DOM. index.html loads it before this file.
+
+function fillRuleWho() {
+  const sel = $("ruleWho");
+  if (!sel) return;
+  const kids = Object.entries(state.childName);
+  sel.innerHTML = `<option value="">Everyone</option>`
+    + kids.map(([id, name]) => `<option value="${escapeAttr(id)}">${escapeHtml(name)}</option>`).join("");
+}
+
+function previewRule() {
+  const out = $("rulePreview");
+  if (!out) return null;
+  const hit = classifyRuleInput($("ruleValue").value);
+  const closing = $("ruleAction").value === "BLOCK";
+  if (!hit) { out.textContent = ""; return null; }
+  out.textContent = `${closing ? "Closes" : "Opens"} ${hit.label}: ${hit.value}`;
+  return hit;
+}
+
+if ($("ruleValue")) {
+  $("ruleValue").oninput = previewRule;
+  $("ruleAction").onchange = previewRule;
+}
+
+if ($("addRuleForm")) $("addRuleForm").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const input = $("ruleValue"), errEl = $("ruleErr"), btn = $("btnAddRule");
+  errEl.textContent = "";
+  const hit = classifyRuleInput(input.value);
+  if (!hit) {
+    input.setAttribute("aria-invalid", "true");
+    errEl.textContent = "That doesn't look like a website or a link. Try tiktok.com, or paste the address.";
+    input.focus();
+    return;
+  }
+  input.removeAttribute("aria-invalid");
+  const childId = $("ruleWho").value || undefined;
+  const action = $("ruleAction").value;
+  btn.dataset.busy = "1"; btn.setAttribute("aria-disabled", "true");
+  try {
+    await api(`/v1/families/${state.familyId}/rules`, {
+      method: "POST",
+      body: {
+        target: hit.target, value: hit.value, action,
+        scope: childId ? { type: "CHILD", childId } : { type: "FAMILY" },
+      },
+    });
+    input.value = ""; previewRule();
+    const who = childId ? (state.childName[childId] || "them") : "everyone";
+    toast(`${action === "BLOCK" ? "Closed" : "Opened"} ${hit.value} for ${who}`);
+    announce(`${hit.value} is now ${action === "BLOCK" ? "closed" : "open"} for ${who}`);
+    await refreshRules();
+  } catch (e) {
+    const m = friendly(e); errEl.textContent = m; announceAlert(m);
+  } finally {
+    delete btn.dataset.busy; btn.removeAttribute("aria-disabled");
+  }
+};
+
+/**
+ * The posture each child is on, and a way to change it.
+ *
+ * Two switches per child rather than one family-wide pair, because that is how
+ * the data is stored (per child) and because a nine-year-old and a fifteen-
+ * year-old are not the same question.
+ */
+async function refreshDefaults() {
+  const box = $("defaults");
+  if (!box || !state.familyId) return;
+  box.setAttribute("aria-busy", "true");
+  const kids = Object.entries(state.childName);
+  if (!kids.length) {
+    box.removeAttribute("aria-busy");
+    box.innerHTML = `<li class="empty">Add a kid first — the starting point is set per child.</li>`;
+    return;
+  }
+  let rows = [];
+  try {
+    rows = await Promise.all(kids.map(async ([id, name]) => {
+      const d = await api(`/v1/families/${state.familyId}/children/${id}/defaults`);
+      return { id, name, ...d };
+    }));
+  } catch (e) {
+    box.removeAttribute("aria-busy");
+    box.innerHTML = `<li class="muted">Couldn't load these. ${escapeHtml(friendly(e))}</li>`;
+    return;
+  }
+  box.removeAttribute("aria-busy");
+  box.innerHTML = rows.map((r) => {
+    const id = escapeAttr(r.id);
+    const pick = (field, current, label) => `
+      <label class="sr-only" for="def-${field}-${id}">${escapeHtml(label)} for ${escapeHtml(r.name)}</label>
+      <select id="def-${field}-${id}" data-def="${id}" data-field="${field}">
+        <option value="ALLOW"${current === "ALLOW" ? " selected" : ""}>Open</option>
+        <option value="BLOCK"${current === "BLOCK" ? " selected" : ""}>Closed</option>
+      </select>`;
+    return `<li>
+      <span class="grow"><span class="rt">${escapeHtml(r.name)}</span></span>
+      <span class="muted">Websites</span>${pick("webDefault", r.webDefault, "Websites")}
+      <span class="muted">YouTube</span>${pick("youTubeDefault", r.youTubeDefault, "YouTube")}
+    </li>`;
+  }).join("");
+  box.querySelectorAll("[data-def]").forEach((sel) => (sel.onchange = () => saveDefault(sel, rows)));
+}
+
+async function saveDefault(sel, rows) {
+  const childId = sel.dataset.def;
+  const row = rows.find((r) => r.id === childId);
+  if (!row) return;
+  const next = { webDefault: row.webDefault, youTubeDefault: row.youTubeDefault, [sel.dataset.field]: sel.value };
+  const previous = row[sel.dataset.field];
+  sel.setAttribute("aria-disabled", "true");
+  try {
+    await api(`/v1/families/${state.familyId}/children/${childId}/defaults`, { method: "PUT", body: next });
+    row.webDefault = next.webDefault; row.youTubeDefault = next.youTubeDefault;
+    const what = sel.dataset.field === "webDefault" ? "Websites" : "YouTube";
+    toast(`${what} now start ${sel.value === "BLOCK" ? "closed" : "open"} for ${row.name}`);
+    announce(`${what} start ${sel.value === "BLOCK" ? "closed" : "open"} for ${row.name}`);
+  } catch (e) {
+    sel.value = previous;   // put the control back, rather than lying about state
+    const m = friendly(e); toast(m); announceAlert(m);
+  } finally {
+    sel.removeAttribute("aria-disabled");
+  }
 }

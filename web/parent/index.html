@@ -72,6 +72,15 @@
     .tag-open   { color: var(--accent-ink); }
     .tag-closed { color: var(--err); }
 
+    /* "Close something yourself" — a disclosure inside a card, not a card of
+       its own: it is an exception to the list above it, not a separate idea. */
+    details.sub { margin-top: var(--s-4); border-top: 1px solid var(--line); padding-top: var(--s-3); }
+    details.sub > summary { font-weight: var(--w-semi); color: var(--accent-ink);
+                            cursor: pointer; min-height: var(--tap);
+                            display: flex; align-items: safe center; }
+    details.sub > summary:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+    details.sub > form { margin-top: var(--s-3); }
+
     /* --- children -------------------------------------------------------- */
     .kids { list-style: none; margin: 0 0 var(--s-3); padding: 0; }
     .kids li { display: flex; gap: var(--s-3); align-items: center; flex-wrap: wrap;
@@ -271,6 +280,57 @@
         Only standing decisions show here — a "yes" with a time on it runs out by
         itself and isn't listed.
       </p>
+
+      <!-- CLOSE SOMETHING WITHOUT WAITING TO BE ASKED.
+           POST /v1/families/:id/rules has existed, tested and documented, since
+           the policy engine landed, and no client ever called it. Neither did
+           anything call the defaults setter. So every child sat on the hardcoded
+           posture — websites open, YouTube closed — and the only thing a parent
+           could do was answer asks. This console could delete rules it had no way
+           to create. -->
+      <details class="sub" id="addRuleBox">
+        <summary>Close something yourself</summary>
+        <form id="addRuleForm" novalidate>
+          <div class="row">
+            <div class="field grow">
+              <label for="ruleValue">Website, page, or YouTube link</label>
+              <input id="ruleValue" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="tiktok.com" aria-describedby="ruleValueHelp" />
+              <p class="help" id="ruleValueHelp">
+                Paste a link or type a site name. Ajar works out what it is.
+              </p>
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="ruleWho">Who for</label>
+              <select id="ruleWho"></select>
+            </div>
+            <div class="field">
+              <label for="ruleAction">Open or closed</label>
+              <select id="ruleAction">
+                <option value="BLOCK" selected>Closed</option>
+                <option value="ALLOW">Open</option>
+              </select>
+            </div>
+            <div class="shrink"><button type="submit" class="btn-primary" id="btnAddRule">Save</button></div>
+          </div>
+          <p class="muted" id="rulePreview" aria-live="polite"></p>
+          <p class="errline" id="ruleErr"></p>
+        </form>
+      </details>
+    </section>
+
+    <!-- ================= 2b. The posture, per child ================= -->
+    <section class="card hide" id="defaultsCard" aria-labelledby="defH">
+      <div class="cardhead">
+        <h2 id="defH">What's open to start with</h2>
+      </div>
+      <p class="help">
+        This is the answer for anything you haven't decided about. Everything
+        above is an exception to it.
+      </p>
+      <ul class="rules" id="defaults" aria-busy="true"></ul>
     </section>
 
     <!-- ================= 3. Setup, collapsed ================= -->
@@ -332,6 +392,7 @@
   </div>
 
   <script src="webauthn.js"></script>
+<script src="classify.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

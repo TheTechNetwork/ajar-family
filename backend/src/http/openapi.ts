@@ -580,6 +580,9 @@ export const openapiDocument = {
         responses: { "200": { description: "Audit events", content: json({ type: "array", items: { $ref: "#/components/schemas/AuditEvent" } }) }, "403": errorResponses["403"] } },
     },
     "/v1/families/{familyId}/children/{childId}/defaults": {
+      get: { tags: ["policy"], summary: "Read a child's default policy (web + YouTube)", security: userAuth,
+        parameters: [familyIdParam, { name: "childId", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Defaults", content: json({ $ref: "#/components/schemas/DefaultPolicy" }) }, "401": errorResponses["401"], "403": errorResponses["403"] } },
       put: { tags: ["policy"], summary: "Set a child's default policy (web + YouTube)", security: userAuth,
         parameters: [familyIdParam, { name: "childId", in: "path", required: true, schema: { type: "string" } }],
         requestBody: { required: true, content: json({ $ref: "#/components/schemas/DefaultPolicy" }) },
@@ -609,7 +612,12 @@ export const openapiDocument = {
     },
     "/v1/requests": {
       post: { tags: ["requests"], summary: "File an access request (device token)", security: userAuth,
-        description: "Requires a **device token**. The child device asks a parent to open one canonical target.",
+        description: "Requires a **device token**. The child device asks a parent to open ONE canonical target."
+          + " `targetType` is limited to things a device actually hits — URL, DOMAIN, YOUTUBE_VIDEO,"
+          + " YOUTUBE_CHANNEL, YOUTUBE_PLAYLIST, APPLICATION — and `targetValue` must be the shape that"
+          + " type claims. URL_PATTERN and CATEGORY are parent-authoring constructs and are refused here:"
+          + " the rule a parent's approval mints comes from these two fields, and a device that could name"
+          + " its own target could name a wildcard.",
         requestBody: { required: true, content: json({ type: "object", properties: { targetType: { $ref: "#/components/schemas/PolicyTargetType" }, targetValue: { type: "string" }, title: { type: "string" }, url: { type: "string" }, reason: { type: "string" } }, required: ["targetType", "targetValue"] }) },
         responses: { "201": { description: "Request", content: json({ $ref: "#/components/schemas/AccessRequest" }) }, "401": errorResponses["401"], "403": errorResponses["403"] } },
     },

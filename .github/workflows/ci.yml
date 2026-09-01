@@ -82,6 +82,14 @@ jobs:
       - name: App Group and its keys match across targets
         run: node apple/check-app-group.mjs
 
+      # The parent console's JavaScript is not compiled, not linted, and not run
+      # by any test, so a syntax error in it reaches a parent as a blank page and
+      # a message only devtools shows. That happened — a backtick inside an HTML
+      # comment inside a template literal. Also checks that what a parent TYPES
+      # becomes the right policy target.
+      - name: Browser JavaScript parses, and the rule classifier is right
+        run: node tools/conformance/check-console-js.mjs
+
       # The OpenAPI document is the client contract; fail if the committed file
       # drifts from the one the code generates.
       - name: OpenAPI is in sync
