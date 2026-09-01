@@ -77,6 +77,33 @@ export const YOUTUBE_PLAYBACK_SUPPORT_HOSTS: readonly string[] = [
   "fonts.gstatic.com", // player glyphs
 ];
 
+/**
+ * The subset of the above that serves NOTHING BUT YouTube — and is therefore
+ * safe for an adapter to BLOCK when no video is currently approved.
+ *
+ * WHY THIS EXISTS. The list above is a NEVER-BLOCK list: it says what must stay
+ * reachable while a video is approved. An adapter read it as its own inverse and
+ * blocked every entry when no video was approved, which took `fonts.gstatic.com`
+ * — Google Fonts, on a large fraction of the entire web — offline on every site
+ * a child visited, all day, for a YouTube reason. `jnn-pa.googleapis.com` is
+ * likewise shared Google attestation infrastructure, not YouTube's.
+ *
+ * So the two directions are two lists. Reachability is generous; blocking is
+ * narrow. A host earns a place here only if taking it away can break nothing
+ * except YouTube.
+ *
+ * `www.youtube.com` is deliberately absent: it is a YouTube host, so
+ * `youTubeDefault` already governs it and a second rule would only be a second
+ * place to disagree.
+ */
+export const YOUTUBE_EXCLUSIVE_MEDIA_HOSTS: readonly string[] = [
+  "youtubei.googleapis.com",
+  "i.ytimg.com",
+  "s.ytimg.com",
+  "yt3.ggpht.com",
+  "*.googlevideo.com",
+];
+
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 const CHANNEL_ID_RE = /^UC[A-Za-z0-9_-]{22}$/;
 const PLAYLIST_ID_RE = /^(?:PL|UU|LL|FL|RD|OL|EL)[A-Za-z0-9_-]{10,}$/;

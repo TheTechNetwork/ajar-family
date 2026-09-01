@@ -84,32 +84,66 @@
     }
   }
 
-  // --- Patch history.pushState / replaceState to catch SPA navigations ---
-  const origPush = history.pushState;
-  const origReplace = history.replaceState;
+  // --- Catching in-page (SPA) route changes ---
+  //
+  // THE PATCH THAT USED TO BE HERE DID NOTHING. This file runs in an ISOLATED
+  // world: it shares the DOM with the page but not the JavaScript globals, so
+  // assigning `history.pushState` here replaced the function THIS script would
+  // call and left the one the PAGE calls alone. Every site that routes with
+  // pushState — Reddit, X, Instagram, TikTok, Google Search — was never
+  // re-evaluated after its first load, so one approved page opened the whole
+  // site. It appeared to work only on YouTube, and only because of the
+  // vendor-specific `yt-navigate-finish` event below.
+  //
+  // Two mechanisms now, because neither is sufficient alone and neither is
+  // verified on iOS Safari yet:
+  //   1. `webNavigation.onHistoryStateUpdated` in background.js — privileged,
+  //      needs no cooperation from the page, unstoppable by a page's CSP.
+  //   2. page-hook.js, injected below into the PAGE's world, where the patch
+  //      actually bites. Covers a browser that does not deliver that event.
+  // A page CSP that forbids our script element defeats (2); a browser without
+  // the event defeats (1). Both firing is harmless: the background worker's
+  // decision is idempotent and a spent one-time grant is guarded by id.
 
-  history.pushState = function (...args) {
-    const ret = origPush.apply(this, args);
-    // URL is applied synchronously; read it after the call.
-    queueMicrotask(() => notify(location.href));
-    return ret;
-  };
+  // Inject the page-world hook. `src` rather than inline text, so a page whose
+  // CSP forbids inline script can still load it.
+  try {
+    const hook = document.createElement("script");
+    hook.src = browser.runtime.getURL("page-hook.js");
+    hook.async = false;
+    (document.head || document.documentElement).appendChild(hook);
+  } catch (e) {
+    console.warn("[ajar] could not install the page-world route hook:", e);
+  }
 
-  history.replaceState = function (...args) {
-    const ret = origReplace.apply(this, args);
-    queueMicrotask(() => notify(location.href));
-    return ret;
-  };
+  // What page-hook.js announces, on a DOM event — which crosses the world
+  // boundary that the function patch could not.
+  document.addEventListener("ajar:route", (e) => {
+    const url = typeof e.detail === "string" ? e.detail : location.href;
+    notify(url);
+  });
 
-  // Back/forward and hash changes.
+  // Back/forward and hash changes. These are real window events and DO reach an
+  // isolated world, so they always worked and still do.
   window.addEventListener("popstate", () => notify(location.href));
   window.addEventListener("hashchange", () => notify(location.href));
 
-  // YouTube fires this custom event on internal SPA navigations; use it as an
-  // extra signal in case a future router bypasses history.* directly.
+  // YouTube fires this on internal SPA navigations. Kept as an extra signal for
+  // that one site — but it is no longer the only thing holding this up, which is
+  // what it silently was.
   window.addEventListener("yt-navigate-finish", () => notify(location.href));
 
-  // Evaluate the initial load too (the full-navigation path also covers this,
-  // but this makes content-script-only testing deterministic).
-  notify(location.href);
+  // Evaluate the initial load too, in SUBFRAMES.
+  //
+  // `webNavigation.onBeforeNavigate` returns early for `frameId !== 0`, so a
+  // frame's first load is otherwise checked by nothing. The top frame is
+  // already covered there and does not need a second, slower look.
+  //
+  // `lastUrl` starts at `location.href`, so calling notify() with it was a
+  // guaranteed no-op — the line was dead on every page load, under a comment
+  // saying it made testing deterministic.
+  if (window.top !== window) {
+    lastUrl = "";            // let the current URL through the dedupe once
+    notify(location.href);
+  }
 })();

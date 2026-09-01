@@ -47,6 +47,29 @@ export const YOUTUBE_PLAYBACK_SUPPORT_HOSTS = [
   "fonts.gstatic.com", // player glyphs
 ];
 
+/**
+ * The subset of the above that serves NOTHING BUT YouTube — and is therefore
+ * safe to BLOCK when no video is currently approved.
+ *
+ * The list above is a NEVER-BLOCK list: what must stay reachable while a video
+ * is approved. Read as its own inverse it blocks `fonts.gstatic.com` — Google
+ * Fonts, a large fraction of the whole web — on every site, all day, for a
+ * YouTube reason. `jnn-pa.googleapis.com` is shared Google attestation
+ * infrastructure, not YouTube's. Reachability is generous; blocking is narrow.
+ *
+ * `www.youtube.com` is deliberately absent: it is a YouTube host, so the
+ * YouTube default already governs it.
+ *
+ * Kept identical to YOUTUBE_EXCLUSIVE_MEDIA_HOSTS in the TypeScript.
+ */
+export const YOUTUBE_EXCLUSIVE_MEDIA_HOSTS = [
+  "youtubei.googleapis.com",
+  "i.ytimg.com",
+  "s.ytimg.com",
+  "yt3.ggpht.com",
+  "*.googlevideo.com",
+];
+
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 const CHANNEL_ID_RE = /^UC[A-Za-z0-9_-]{22}$/;
 const PLAYLIST_ID_RE = /^(?:PL|UU|LL|FL|RD|OL|EL)[A-Za-z0-9_-]{10,}$/;
@@ -185,14 +208,25 @@ export function youTubePolicyKey(o) {
  * "*." wildcard, matching the CDN entry `*.googlevideo.com`). Used by
  * background.js to keep an approved video's media/streaming reachable (B7).
  */
-export function isPlaybackSupportHost(host) {
+function matchesHostList(host, list) {
   if (!host) return false;
   const h = host.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
-  return YOUTUBE_PLAYBACK_SUPPORT_HOSTS.some((entry) => {
+  return list.some((entry) => {
     if (entry.startsWith("*.")) {
       const suffix = entry.slice(1); // ".googlevideo.com"
       return h === entry.slice(2) || h.endsWith(suffix);
     }
     return h === entry.replace(/\.$/, "").replace(/^www\./i, "");
   });
+}
+
+export function isPlaybackSupportHost(host) {
+  return matchesHostList(host, YOUTUBE_PLAYBACK_SUPPORT_HOSTS);
+}
+
+/** Does this host serve NOTHING BUT YouTube? The question the no-grant block
+ *  path must ask — never isPlaybackSupportHost, which is the never-block list
+ *  and includes shared Google infrastructure. */
+export function isExclusiveMediaHost(host) {
+  return matchesHostList(host, YOUTUBE_EXCLUSIVE_MEDIA_HOSTS);
 }

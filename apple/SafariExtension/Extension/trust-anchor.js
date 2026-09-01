@@ -26,10 +26,21 @@ const ext = globalThis.browser ?? globalThis.chrome;
  * offers no way to type a different address; a developer opts in explicitly
  * with `browser.storage.local.set({ ajarDevMode: "1" })`.
  *
- * The alpha has no hosted backend, so this is the local dev server. A shipped
- * build replaces it with the real origin.
+ * THE REAL ORIGIN, not a placeholder. This was `http://localhost:8787` — "the
+ * alpha has no hosted backend" — long after `backend/wrangler.toml` bound
+ * `api.ajar.family`. And `isAllowedBackendUrl` returned true for the bundled
+ * address unconditionally, so a shipped build accepted an enrolment against
+ * anything the child ran on port 8787: their own server, their own signing key,
+ * their own policy, reachable from the extension's options page with six digits
+ * they made up. The constant that was supposed to make the address untypeable
+ * was the thing that allowed it.
+ *
+ * Local development points elsewhere the documented way — turn dev mode on
+ * (`browser.storage.local.set({ ajarDevMode: "1" })`) and loopback is allowed
+ * again. That is one deliberate step for a developer and no step at all for a
+ * child, which is the difference that was missing.
  */
-export const BUNDLED_BACKEND_URL = "http://localhost:8787";
+export const BUNDLED_BACKEND_URL = "https://api.ajar.family";
 
 /** Storage keys. The anchor and the setup word both OUTLIVE Disconnect. */
 export const ANCHOR_KEY = "ajarTrustAnchor";
@@ -68,10 +79,27 @@ const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 export function isAllowedBackendUrl(raw, opts) {
   const url = normalizeBackendUrl(raw);
   if (!url) return false;
-  const bundled = normalizeBackendUrl(opts.bundledUrl);
-  if (bundled && url === bundled) return true;
-  if (!opts.devMode) return false;
   const host = new URL(url).hostname.toLowerCase();
+  const bundled = normalizeBackendUrl(opts.bundledUrl);
+
+  // THE BUNDLED ADDRESS IS TRUSTED BECAUSE IT IS HTTPS, NOT BECAUSE IT IS
+  // BUNDLED. This used to `return true` for the bundled URL unconditionally,
+  // and the value shipping in trust-anchor.js is the development placeholder
+  // "http://localhost:8787". So in a shipped build, with dev mode off, a child
+  // who ran any server on port 8787 could enrol the extension against it from
+  // the options page — six digits they made up, their own signing key, and every
+  // "policy" the browser then trusted was theirs. The check that was supposed to
+  // make the address untypeable was the thing that allowed it.
+  //
+  // A loopback bundle is now refused outside dev mode like any other plaintext
+  // origin, so the placeholder cannot become a bypass if a build ships before
+  // the real origin is baked in.
+  if (bundled && url === bundled && url.startsWith("https://")) return true;
+
+  if (!opts.devMode) return false;
+  // Dev builds may point anywhere, but plaintext stays loopback-only: policy is
+  // signed, yet a device bearer token in the clear on a shared network is not
+  // something a dev flag should quietly enable.
   return url.startsWith("https://") || LOOPBACK.has(host);
 }
 

@@ -169,6 +169,31 @@ async function expectOk(label, fn) {
 for (const c of CLIENTS) {
   const client = await import(new URL(c.path, import.meta.url).href);
   const anchor = await import(new URL(c.anchorPath, import.meta.url).href);
+  // THE SHIPPED CONSTANT ITSELF, not a stand-in.
+  //
+  // The vectors below run against VECTOR_BUNDLED_URL ("https://api.ajar.family"),
+  // and one of them asserts "loopback is refused in a shipped build too" — which
+  // passed for years while the value actually compiled into both extensions was
+  // `http://localhost:8787`, and isAllowedBackendUrl returned true for the
+  // bundled address unconditionally. The suite proved a property of a string it
+  // had substituted. A child running any server on port 8787 could enrol the
+  // extension against it.
+  //
+  // So: check the real one, on every implementation, before anything else.
+  const bundled = anchor.BUNDLED_BACKEND_URL;
+  checks++;
+  if (!bundled?.startsWith("https://")) {
+    failures++;
+    console.error(`FAIL [${c.id}] BUNDLED_BACKEND_URL is "${bundled}"\n`
+      + "  a shipped build must not bundle a plaintext address — the bundled one is\n"
+      + "  the address enrollment accepts without a parent word");
+  }
+  checks++;
+  if (anchor.isAllowedBackendUrl("http://localhost:8787", { bundledUrl: bundled, devMode: false })) {
+    failures++;
+    console.error(`FAIL [${c.id}] loopback is accepted with dev mode off`);
+  }
+
   const HOME = anchor.BUNDLED_BACKEND_URL;
   const EVIL = "https://allow-all.example";
 

@@ -56,9 +56,10 @@
   "_host_permissions_note": "<all_urls> is REQUIRED and justified: the shared policy model is not YouTube-only \u2014 it evaluates DOMAIN / URL / URL_PATTERN / CATEGORY rules and supports a default-deny web posture (DefaultPolicy.webDefault). Enforcing those on arbitrary sites means observing navigations to arbitrary sites. ADR-004 still holds: we never disable or blanket-block Safari, we only redirect a specifically-blocked navigation to our own block page. The extension inspects URLs to make allow/block decisions and does NOT exfiltrate browsing history (ARCHITECTURE.md privacy posture); only a URL the child explicitly asks about is ever sent. The media CDN *.googlevideo.com and other playback-support hosts stay reachable while a video is approved (B7).",
   "web_accessible_resources": [
     {
-      "_note": "blocked.html is the Request-Access page a blocked navigation is redirected to. The WAR `matches` list gates which ORIGINS may load it, and it used to name four YouTube hosts \u2014 so a blocked navigation on any other site could not load the block page at all, and the child got a browser error instead of a way to ask. That contradicted this same manifest's host_permissions note, which says <all_urls> is required precisely because the shared policy model evaluates DOMAIN / URL / URL_PATTERN / CATEGORY rules on arbitrary sites. Now every http(s) origin, which is the set of origins the extension can block in the first place.",
+      "_note": "blocked.html is the Request-Access page a blocked navigation is redirected to. The WAR `matches` list gates which ORIGINS may load it, and it used to name four YouTube hosts \u2014 so a blocked navigation on any other site could not load the block page at all, and the child got a browser error instead of a way to ask. That contradicted this same manifest's host_permissions note, which says <all_urls> is required precisely because the shared policy model evaluates DOMAIN / URL / URL_PATTERN / CATEGORY rules on arbitrary sites. Now every http(s) origin, which is the set of origins the extension can block in the first place. page-hook.js is loaded BY THE PAGE (content.js injects a <script src> pointing here), so it must be web-accessible from every origin the extension can gate \u2014 it runs in the page's own JavaScript world, which is the only world where patching history.pushState has any effect.",
       "resources": [
-        "blocked.html"
+        "blocked.html",
+        "page-hook.js"
       ],
       "matches": [
         "http://*/*",

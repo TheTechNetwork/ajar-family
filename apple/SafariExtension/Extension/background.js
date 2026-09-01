@@ -20,7 +20,7 @@
  * and all non-YouTube browsing stay fully functional.
  */
 
-import { normalizeYouTube, youTubePolicyKey } from "./youtube-normalize.js";
+import { isExclusiveMediaHost, isPlaybackSupportHost, normalizeYouTube, youTubePolicyKey } from "./youtube-normalize.js";
 import { adoptSigningKeyIfUnset, getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest, consumeGrant, getAnswers } from "./backend-client.js";
 import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
 import { makeResolver } from "./cname-resolve.js";
@@ -272,6 +272,21 @@ function scopeSpecificity(s = {}) {
   return 1;
 }
 
+/**
+ * Is a YouTube video approved on this device RIGHT NOW?
+ *
+ * The gate for the playback chain above. Standing ALLOW rules count as well as
+ * live grants: a parent who said "for good" to a video has approved it, and the
+ * chain has to serve it. Mirrors PolicyStore.hasActiveVideoGrant.
+ */
+function hasActiveVideoGrant(snap, nowMs) {
+  if (!snap) return false;
+  const live = (snap.temporaryRules ?? []).some(
+    (t) => t.action === "ALLOW" && t.target === "YOUTUBE_VIDEO" && isActiveTemp(t, nowMs));
+  if (live) return true;
+  return (snap.rules ?? []).some((r) => r.action === "ALLOW" && r.target === "YOUTUBE_VIDEO");
+}
+
 function isActiveTemp(t, nowMs) {
   const start = Date.parse(t.startsAt);
   const end = Date.parse(t.expiresAt);
@@ -351,10 +366,24 @@ function categoriesFromFilters(host) {
 
 // --- SAFETY FLOOR: lockstep mirror of shared/safety/safety-floor.ts. Crisis and
 // emergency resources are ALLOWED above every tier and are never reported.
+//
+// It was NOT a lockstep mirror. This list carried four entries the spec does not
+// have — who.int, cdc.gov, samhsa.gov, nhs.uk — under a comment claiming it did.
+// A safety-floor entry outranks a parent's explicit BLOCK and is deliberately
+// never reported, so the divergence meant one iPhone giving two answers for the
+// same host: Safari silently allowed it, the content filter blocked it, and the
+// parent saw a rule the console called active and nothing to explain why it did
+// not hold. *.nhs.uk alone is thousands of sites.
+//
+// Removed rather than promoted. Adding a domain to this list is a decision about
+// whose block a child may override; it belongs in the spec, reviewed once, not
+// in one platform's mirror. shared/safety/safety-floor.ts has an empty "Public
+// health authorities" section where somebody meant to make that decision — that
+// is where it goes.
 const SAFETY_FLOOR_DOMAINS = ["988lifeline.org","suicidepreventionlifeline.org","crisistextline.org",
   "befrienders.org","findahelpline.com","samaritans.org","papyrus-uk.org","thetrevorproject.org",
   "childline.org.uk","kidshelpphone.ca","childhelphotline.org","youthline.co.nz","rainn.org",
-  "thehotline.org","childhelp.org","humantraffickinghotline.org","who.int","cdc.gov","samhsa.gov","nhs.uk"];
+  "thehotline.org","childhelp.org","humantraffickinghotline.org"];
 function isSafetyFloorHost(host) {
   const h = (host || "").replace(/\.$/, "").replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
   if (!h) return false;
@@ -561,7 +590,35 @@ function decide(url) {
   const view = SPENT.size > 0
     ? { ...snapshot, temporaryRules: (snapshot.temporaryRules ?? []).filter((t) => !SPENT.has(t.id)) }
     : snapshot;
-  const res = evaluate(view, ctx);
+  let res = evaluate(view, ctx);
+
+  // ------------------------------------------------------------------
+  // THE PLAYBACK CHAIN. An approved video's bytes come from
+  // *.googlevideo.com and its player from i.ytimg/s.ytimg — hosts that are
+  // not YouTube hosts, so they fell through to webDefault and were reachable
+  // permanently, approved video or not. Their URLs are opaque: nothing in them
+  // names a video, so the chain can only be tied to the GRANT.
+  //
+  // This existed in the iOS filter and NOT here, while
+  // `isPlaybackSupportHost` sat exported and unimported and the manifest
+  // claimed storage held "the 'any video currently approved?' flag used to
+  // keep googlevideo.com reachable". There was no such flag. B7 was recorded
+  // as delivered on this surface and was not written.
+  //
+  // Two lists, two directions. Reachable while approved: the whole support
+  // list. Blocked while not: only hosts that serve NOTHING but YouTube —
+  // never `fonts.gstatic.com`, which is Google Fonts and most of the web.
+  // ------------------------------------------------------------------
+  if (res.reason?.startsWith("default:")) {
+    if (hasActiveVideoGrant(view, ctx.nowMs)) {
+      if (isPlaybackSupportHost(host)) {
+        res = { action: "ALLOW", reason: "playback-support", matchedKey: `PLAYBACK:${host}` };
+      }
+    } else if (res.action === "ALLOW" && res.reason === "default:web" && isExclusiveMediaHost(host)) {
+      res = { action: "BLOCK", reason: "playback-support:no-grant", matchedKey: `PLAYBACK:${host}` };
+    }
+  }
+
   return {
     blocked: res.action === "BLOCK",
     key: res.matchedKey || (yt.isYouTube ? youTubePolicyKey(yt) : `URL:${url}`),
@@ -627,6 +684,34 @@ browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
     }
   }
 });
+
+// IN-PAGE ROUTE CHANGES, the privileged half.
+//
+// `onHistoryStateUpdated` fires when a frame's history is updated by
+// history.pushState/replaceState WITHOUT a network navigation — which is how
+// every single-page app navigates. It needs no cooperation from the page and no
+// script injection, so a page's Content-Security-Policy cannot stop it.
+//
+// This used to be handled ONLY by content.js patching history.pushState, which
+// a content script cannot do: it runs in an isolated JavaScript world and the
+// patch never touched the function the page calls. In-page gating therefore
+// worked on YouTube, through its proprietary yt-navigate-finish event, and on no
+// other site. page-hook.js is the second half; either alone would leave a gap,
+// so both run and the duplicate evaluation is harmless.
+for (const event of ["onHistoryStateUpdated", "onReferenceFragmentUpdated"]) {
+  browser.webNavigation?.[event]?.addListener(async (details) => {
+    if (details.frameId !== 0) return;   // only the top frame owns the tab
+    if (!snapshot) await restoreCachedPolicy();
+    const res = decide(details.url);
+    if (!res.blocked) { spendOnce(res); return; }
+    try {
+      await browser.tabs.update(details.tabId,
+        { url: blockedPageUrl(details.url, res.key, res.reason) });
+    } catch (e) {
+      console.warn("[ajar] in-page redirect failed:", e);
+    }
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Messages from content.js (SPA route changes, B3) and blocked.html (B2)

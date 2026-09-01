@@ -114,13 +114,27 @@ export function isAllowedBackendUrl(
 ): boolean {
   const url = normalizeBackendUrl(raw);
   if (!url) return false;
+  const host = new URL(url).hostname.toLowerCase();
   const bundled = normalizeBackendUrl(opts.bundledUrl);
-  if (bundled && url === bundled) return true;
+
+  // THE BUNDLED ADDRESS IS TRUSTED BECAUSE IT IS HTTPS, NOT BECAUSE IT IS
+  // BUNDLED. This used to `return true` for the bundled URL unconditionally,
+  // and the value shipping in trust-anchor.js is the development placeholder
+  // "http://localhost:8787". So in a shipped build, with dev mode off, a child
+  // who ran any server on port 8787 could enrol the extension against it from
+  // the options page — six digits they made up, their own signing key, and every
+  // "policy" the browser then trusted was theirs. The check that was supposed to
+  // make the address untypeable was the thing that allowed it.
+  //
+  // A loopback bundle is now refused outside dev mode like any other plaintext
+  // origin, so the placeholder cannot become a bypass if a build ships before
+  // the real origin is baked in.
+  if (bundled && url === bundled && url.startsWith("https://")) return true;
+
   if (!opts.devMode) return false;
   // Dev builds may point anywhere, but plaintext stays loopback-only: policy is
   // signed, yet a device bearer token in the clear on a shared network is not
   // something a dev flag should quietly enable.
-  const host = new URL(url).hostname.toLowerCase();
   return url.startsWith("https://") || LOOPBACK.has(host);
 }
 

@@ -86,6 +86,12 @@ jobs:
           [ -n "${{ secrets.APPLE_PROFILE_APP }}" ]       || missing="$missing APPLE_PROFILE_APP(secret)"
           [ -n "${{ secrets.APPLE_PROFILE_DATA }}" ]      || missing="$missing APPLE_PROFILE_DATA(secret)"
           [ -n "${{ secrets.APPLE_PROFILE_CONTROL }}" ]   || missing="$missing APPLE_PROFILE_CONTROL(secret)"
+          # The Safari Web Extension is a FOURTH target of this app (ADR-018).
+          # Adding it to project.yml without adding it here would have failed the
+          # archive at signing time, on the pipeline this app's only shipping
+          # path runs through — and ci.yml cannot catch it, because ci.yml builds
+          # with CODE_SIGNING_ALLOWED=NO.
+          [ -n "${{ secrets.APPLE_PROFILE_SAFARI }}" ]    || missing="$missing APPLE_PROFILE_SAFARI(secret)"
           if [ -n "$missing" ]; then
             echo "::error::Not configured:$missing"
             echo "See docs/APPLE_ACCOUNT_SETUP.md §3.1 and §5. Signing is MANUAL: the"
@@ -181,6 +187,7 @@ jobs:
           PROFILE_APP: ${{ secrets.APPLE_PROFILE_APP }}
           PROFILE_DATA: ${{ secrets.APPLE_PROFILE_DATA }}
           PROFILE_CONTROL: ${{ secrets.APPLE_PROFILE_CONTROL }}
+          PROFILE_SAFARI: ${{ secrets.APPLE_PROFILE_SAFARI }}
         run: |
           set -euo pipefail
           DEST=~/Library/MobileDevice/Provisioning\ Profiles
@@ -190,7 +197,7 @@ jobs:
           # A `case` rather than an associative array: macOS ships bash 3.2, which
           # has no `declare -A`, and this must not depend on which bash the runner
           # happens to resolve first.
-          for var in PROFILE_APP PROFILE_DATA PROFILE_CONTROL; do
+          for var in PROFILE_APP PROFILE_DATA PROFILE_CONTROL PROFILE_SAFARI; do
             eval "b64=\$$var"
             raw="$RUNNER_TEMP/$var.mobileprovision"
             printf '%s' "$b64" | tr -d '\r\n' | base64 --decode > "$raw"   # see note above
@@ -208,9 +215,10 @@ jobs:
               family.ajar.filter)                      target=AJAR_PROFILE_APP ;;
               family.ajar.filter.DataProvider)   target=AJAR_PROFILE_DATA ;;
               family.ajar.filter.ControlProvider) target=AJAR_PROFILE_CONTROL ;;
+              family.ajar.filter.SafariExtension) target=AJAR_PROFILE_SAFARI ;;
               *)
                 echo "::error::$var is a profile for '$bundle', which is not a target of this app."
-                echo "Expected family.ajar.filter, .FilterDataProvider or .FilterControlProvider."
+                echo "Expected family.ajar.filter, .DataProvider, .ControlProvider or .SafariExtension."
                 exit 1 ;;
             esac
 
@@ -228,7 +236,7 @@ jobs:
             rm -f "$plist"
           done
 
-          for want in AJAR_PROFILE_APP AJAR_PROFILE_DATA AJAR_PROFILE_CONTROL; do
+          for want in AJAR_PROFILE_APP AJAR_PROFILE_DATA AJAR_PROFILE_CONTROL AJAR_PROFILE_SAFARI; do
             case "$seen" in
               *"$want"*) ;;
               *) echo "::error::No profile supplied for $want"; exit 1 ;;
@@ -287,6 +295,7 @@ jobs:
               AJAR_PROFILE_APP="$AJAR_PROFILE_APP" \
               AJAR_PROFILE_DATA="$AJAR_PROFILE_DATA" \
               AJAR_PROFILE_CONTROL="$AJAR_PROFILE_CONTROL" \
+              AJAR_PROFILE_SAFARI="$AJAR_PROFILE_SAFARI" \
               CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
           }
           if command -v xcbeautify >/dev/null 2>&1; then
@@ -313,6 +322,7 @@ jobs:
               <key>family.ajar.filter</key><string>${AJAR_PROFILE_APP}</string>
               <key>family.ajar.filter.DataProvider</key><string>${AJAR_PROFILE_DATA}</string>
               <key>family.ajar.filter.ControlProvider</key><string>${AJAR_PROFILE_CONTROL}</string>
+              <key>family.ajar.filter.SafariExtension</key><string>${AJAR_PROFILE_SAFARI}</string>
             </dict>
           </dict></plist>
           PLIST

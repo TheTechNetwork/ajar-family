@@ -367,10 +367,18 @@ function categoriesFromFilters(host) {
 
 // --- SAFETY FLOOR: lockstep mirror of shared/safety/safety-floor.ts. Crisis and
 // emergency resources are ALLOWED above every tier and are never reported.
+//
+// It was not a mirror: this and the Safari copy both carried four entries the
+// spec does not have (who.int, cdc.gov, samhsa.gov, nhs.uk). A floor entry
+// outranks a parent's explicit BLOCK and is never reported, so the divergence
+// made a rule the console calls active silently not hold on the one platform
+// that ships. Removed rather than promoted — whose block a child may override is
+// a decision for the spec, made once. tools/conformance/check-safety-floor.mjs
+// now fails CI if the four copies drift again.
 const SAFETY_FLOOR_DOMAINS = ["988lifeline.org","suicidepreventionlifeline.org","crisistextline.org",
   "befrienders.org","findahelpline.com","samaritans.org","papyrus-uk.org","thetrevorproject.org",
   "childline.org.uk","kidshelpphone.ca","childhelphotline.org","youthline.co.nz","rainn.org",
-  "thehotline.org","childhelp.org","humantraffickinghotline.org","who.int","cdc.gov","samhsa.gov","nhs.uk"];
+  "thehotline.org","childhelp.org","humantraffickinghotline.org"];
 function isSafetyFloorHost(host) {
   const h = (host || "").replace(/\.$/, "").replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
   if (!h) return false;

@@ -41,6 +41,29 @@ public enum YouTube {
         "jnn-pa.googleapis.com", "fonts.gstatic.com",
     ]
 
+    /// The subset of the above that serves NOTHING BUT YouTube — and is
+    /// therefore safe to BLOCK when no video is currently approved.
+    ///
+    /// WHY THIS IS A SECOND LIST. `playbackSupportHosts` is a NEVER-BLOCK list:
+    /// it says what must stay reachable while a video is approved. The data
+    /// provider read it as its own inverse and blocked every entry when no video
+    /// was approved — which took `fonts.gstatic.com`, Google Fonts, on a large
+    /// fraction of the entire web, offline on every site the child visited, all
+    /// day, for a YouTube reason. `jnn-pa.googleapis.com` is shared Google
+    /// attestation infrastructure, not YouTube's.
+    ///
+    /// Reachability is generous; blocking is narrow. A host earns a place here
+    /// only if taking it away can break nothing except YouTube.
+    ///
+    /// `www.youtube.com` is deliberately absent: it is a YouTube host, so
+    /// `youTubeDefault` already governs it and a second rule would only be a
+    /// second place to disagree. Mirrors YOUTUBE_EXCLUSIVE_MEDIA_HOSTS in
+    /// shared/youtube/youtube-normalize.ts.
+    public static let exclusiveMediaHosts: [String] = [
+        "youtubei.googleapis.com", "i.ytimg.com", "s.ytimg.com",
+        "yt3.ggpht.com", "*.googlevideo.com",
+    ]
+
     /// Paths on `www.youtube.com` that are genuinely player plumbing.
     ///
     /// That host serves the InnerTube API *and* every watch page, search page
@@ -56,10 +79,10 @@ public enum YouTube {
         "/generate_204", "/error_204",  // beacons
     ]
 
-    /// Does this host serve playback plumbing? Handles the one wildcard entry.
-    static func isPlaybackSupportHost(_ rawHost: String) -> Bool {
+    /// Does `rawHost` match any entry in `list`? Handles wildcard entries.
+    private static func matchesHostList(_ rawHost: String, _ list: [String]) -> Bool {
         let host = Host.normalize(rawHost)
-        for entry in playbackSupportHosts {
+        for entry in list {
             if entry.hasPrefix("*.") {
                 let suffix = String(entry.dropFirst(2))
                 if host == suffix || host.hasSuffix(".\(suffix)") { return true }
@@ -68,6 +91,18 @@ public enum YouTube {
             }
         }
         return false
+    }
+
+    /// Does this host serve playback plumbing?
+    static func isPlaybackSupportHost(_ rawHost: String) -> Bool {
+        matchesHostList(rawHost, playbackSupportHosts)
+    }
+
+    /// Does this host serve NOTHING BUT YouTube? The question the no-grant
+    /// block path must ask — never `isPlaybackSupportHost`, which is the
+    /// never-block list and includes shared Google infrastructure.
+    public static func isExclusiveMediaHost(_ rawHost: String) -> Bool {
+        matchesHostList(rawHost, exclusiveMediaHosts)
     }
 
     /// Is this request the PLUMBING an already-approved video needs, rather than
