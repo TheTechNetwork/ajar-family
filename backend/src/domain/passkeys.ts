@@ -189,9 +189,17 @@ export class PasskeyService {
     }
     if (!verification.verified) throw new DomainError("that passkey was not recognised", "UNAUTHORIZED");
 
-    // Counter regression is the clone signal. Synced passkeys report 0 forever,
-    // so 0 -> 0 is normal and only a DECREASE from a non-zero counter means the
-    // same credential is in use in two places.
+    // Counter regression is the clone signal: a counter that does not move
+    // forward means the same credential is being used from two places.
+    //
+    // BE HONEST ABOUT WHAT THIS LINE DOES. The library already rejects this, and
+    // more strictly than we do — it throws whenever the reported counter is <=
+    // the stored one and either is non-zero, so the branch below never fires
+    // today and the catch above is what actually turns a clone into a 401. It is
+    // kept as a second line for the version bump that loosens that check, and
+    // for the day this file talks to a different verifier. Synced passkeys report
+    // 0 forever, which is why 0 -> 0 has to stay legal in both checks; treating
+    // it as regression would lock out most parents on their second sign-in.
     const next = verification.authenticationInfo.newCounter;
     if (stored.signCount > 0 && next < stored.signCount) {
       // eslint-disable-next-line no-console
