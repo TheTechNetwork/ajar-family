@@ -255,6 +255,11 @@ export class MemoryStore implements Repository {
   async listTemporaryRules(familyId: string) {
     return [...this.tempRules.values()].filter((t) => t.scope.familyId === familyId).map(clone);
   }
+  async deleteTemporaryRule(familyId: string, id: string) {
+    const t = this.tempRules.get(id);
+    if (t && t.scope.familyId === familyId) this.tempRules.delete(id);
+  }
+
   async markTemporaryRuleConsumed(id: string, at: string) {
     const t = this.tempRules.get(id);
     if (!t || t.consumedAt) return false;

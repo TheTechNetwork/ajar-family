@@ -3656,6 +3656,187 @@
         }
       }
     },
+    "/v1/categories/attribution": {
+      "get": {
+        "tags": [
+          "categories"
+        ],
+        "summary": "Credit required by the category data's licence",
+        "security": [],
+        "description": "Public on purpose: it is a credit, and gating a credit behind a login defeats it. Rendered by /legal.html from this endpoint rather than retyped, so it cannot go stale.",
+        "responses": {
+          "200": {
+            "description": "Attribution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "license": {
+                      "type": "string"
+                    },
+                    "sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "license": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/families/{familyId}/grants": {
+      "get": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "List live temporary grants (not expired, not spent)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "familyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grants",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TemporaryRule"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/families/{familyId}/grants/{grantId}": {
+      "delete": {
+        "tags": [
+          "policy"
+        ],
+        "summary": "Take back a live grant before it runs out",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "A permanent decision could always be deleted; a timed one could not, so a misfired \"30 minutes\" had to be waited out. Deletes rather than marking consumed — \"consumed\" means a ONCE grant was spent, and reusing it here would make the audit log say the child opened something they never did.",
+        "parameters": [
+          {
+            "name": "familyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "grantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revoked": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/families/{familyId}/rules/{ruleId}": {
       "delete": {
         "tags": [

@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ajar — privacy, terms and data</title>
+<meta name="description" content="What Ajar stores about your family, what it does not, and the terms you are agreeing to.">
+<!-- `..` clamps at the server root, so this one href works both when served
+     (/parent/tokens.css) and when opened as a file (web/parent/tokens.css).
+     Linked, not inlined: only the extension pages have to duplicate the palette,
+     and every extra copy is one more place a colour can drift. -->
+<link rel="stylesheet" href="../parent/tokens.css">
+<style>
+  body { background: var(--bg); color: var(--ink); font: 16px/1.6 var(--font, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif); margin: 0; }
+  .wrap { max-width: 62rem; margin: 0 auto; padding: 0 1.25rem; }
+  a { color: var(--accent-ink); }
+
+  nav { display: flex; align-items: center; justify-content: space-between; padding: 1.25rem 0; }
+  .mark { display: flex; align-items: center; gap: .55rem; font-weight: 650; letter-spacing: -.01em; }
+  .mark svg { display: block; }
+
+  header.hero { padding: clamp(2.5rem, 8vw, 5.5rem) 0 clamp(2rem, 5vw, 3.5rem); }
+  h1 { font-size: clamp(2.2rem, 6.5vw, 3.9rem); line-height: 1.08; letter-spacing: -.03em; margin: 0 0 1rem; max-width: 18ch; }
+  .lede { font-size: clamp(1.05rem, 2.4vw, 1.3rem); color: var(--ink-2); max-width: 46ch; margin: 0 0 2rem; }
+
+  .cta { display: inline-flex; align-items: center; justify-content: center; min-height: 52px; padding: 0 1.5rem;
+         border-radius: 12px; border: 1px solid transparent; font: inherit; font-weight: 650;
+         text-decoration: none; cursor: pointer; }
+  /* The border is required, not decorative: coral is 2.32:1 on this ground, so a
+     coral button with no edge has no perceivable boundary (SC 1.4.11).
+     tokens.css states the rule for `.btn-yes`; this page re-implemented the
+     button and dropped it. `border: 0` above became a transparent 1px so the two
+     variants stay the same size. */
+  .cta-primary { background: var(--yes); color: var(--yes-ink); border-color: var(--yes-ink); }
+  .cta-primary:hover { background: var(--yes-strong); }
+  .cta-quiet { background: transparent; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+  .ctas { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+
+  section { padding: clamp(2.5rem, 6vw, 4.5rem) 0; border-top: 1px solid var(--line); }
+  h2 { font-size: clamp(1.5rem, 3.4vw, 2.1rem); letter-spacing: -.02em; margin: 0 0 .75rem; max-width: 22ch; }
+  .sub { color: var(--ink-2); max-width: 52ch; margin: 0 0 2rem; }
+
+  /* The comparison is the whole product in one glance, so it gets to be big. */
+  .compare { display: grid; gap: 1rem; grid-template-columns: 1fr; }
+  @media (min-width: 40rem) { .compare { grid-template-columns: 1fr 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 1.5rem; }
+  .card h3 { margin: 0 0 .75rem; font-size: 1rem; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); }
+  .row { display: flex; align-items: baseline; gap: .6rem; padding: .45rem 0; }
+  .row .k { font-variant-numeric: tabular-nums; }
+  .verdict { font-weight: 650; font-size: .85rem; padding: .1rem .5rem; border-radius: 999px; white-space: nowrap; }
+  /* NOT coral. BRAND.md reserves coral for the yes ACTION — the one button a
+     parent presses — and spending it on comparison-table chips put four of them
+     above the fold, outranking the single coral CTA in the hero and teaching a
+     visitor that coral means "a tick" before they ever meet the button. Teal
+     wash reads as affirmative here without borrowing the action colour. */
+  .no { background: var(--surface-2); color: var(--muted); }
+  /* A third verdict, because two forced a measured "mostly" to round to yes. */
+  .part { background: var(--warn-wash); color: var(--warn); }
+  .yes { background: var(--accent-wash); color: var(--accent-ink); }
+
+  ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 0; display: grid; gap: 1.25rem; }
+  @media (min-width: 46rem) { ol.steps { grid-template-columns: repeat(3, 1fr); gap: 2rem; } }
+  ol.steps li { counter-increment: s; }
+  ol.steps li::before { content: counter(s); display: grid; place-items: center; width: 2rem; height: 2rem;
+    border-radius: 999px; background: var(--accent-wash); color: var(--accent-ink); font-weight: 650; margin-bottom: .75rem; }
+  ol.steps h3 { margin: 0 0 .35rem; font-size: 1.05rem; }
+  ol.steps p { margin: 0; color: var(--ink-2); }
+
+  table.platforms { width: 100%; border-collapse: collapse; }
+  table.platforms th, table.platforms td { text-align: left; padding: .7rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.platforms th { color: var(--muted); font-weight: 600; font-size: .9rem; }
+  .tag { font-size: .8rem; font-weight: 650; padding: .1rem .5rem; border-radius: 999px; white-space: nowrap; }
+  .tag-live { background: var(--ok-wash); color: var(--ok); }
+  .tag-soon { background: var(--warn-wash); color: var(--warn); }
+
+  .plain { background: var(--surface-2); border-radius: 14px; padding: 1.5rem; }
+  .plain ul { margin: 0; padding-left: 1.1rem; color: var(--ink-2); }
+  .plain li + li { margin-top: .5rem; }
+
+  footer { border-top: 1px solid var(--line); padding: 2rem 0 3rem; color: var(--muted); font-size: .9rem;
+           display: flex; gap: 1.25rem; flex-wrap: wrap; justify-content: space-between; }
+  :where(a, button):focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; box-shadow: 0 0 0 2px var(--focus-halo); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<nav>
+    <span class="mark">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="5" y="3" width="14" height="18" rx="2.5" fill="var(--accent-strong)"/>
+        <path d="M7 4.4 L14.5 6 L14.5 18 L7 19.6 Z" fill="var(--bg)"/>
+        <circle cx="13" cy="12" r=".9" fill="var(--accent-strong)"/>
+      </svg>
+      Ajar
+    </span>
+    <a href="/parent/">Sign in</a>
+  </nav>
+</div>
+
+<div class="wrap">
+
+  <header class="hero">
+    <h1>What we hold, and what we promise</h1>
+    <p class="lede">
+      Ajar is a product about other people's children, so this page is short and
+      specific rather than long and defensive. Last updated 1 September 2026.
+    </p>
+  </header>
+
+  <section id="privacy">
+    <h2>Privacy</h2>
+    <div class="plain">
+      <ul>
+        <li><strong>There is no browsing history in this product.</strong> Not
+          summarised, not sampled, not held briefly. Approving a request does not
+          need one, so the design does not collect one — and a filter decision is
+          made on your child's own device against a policy already stored there,
+          not by asking a server about each page.</li>
+        <li><strong>What we store about a child:</strong> the first name you type,
+          their time zone, the devices you set up for them, what they have asked
+          to open, and what you decided. That is the list.</li>
+        <li><strong>What we store about you:</strong> your email address, your
+          name, a hash of your password, and the sessions you are signed in on.</li>
+        <li><strong>What a blocked page tells us:</strong> only what your child
+          explicitly asks about. A page they were stopped at and walked away from
+          is not recorded anywhere.</li>
+        <li><strong>Deleting your account deletes it.</strong> Not an
+          anonymisation, not a soft flag: your family, your children's records,
+          your devices and every ask and decision are removed. It is in the
+          console under "Close your account".</li>
+        <li><strong>We do not sell anything, and there are no third-party
+          trackers or analytics on any Ajar surface.</strong></li>
+      </ul>
+    </div>
+    <p>
+      Ajar is designed for a parent to operate on behalf of their own child, and
+      the parent is the account holder. If you are in the EU/UK or the US, that
+      makes you the person who consents on your child's behalf and who can ask
+      for their data back or removed — do that from the console, or write to us.
+      This paragraph describes how the product works; it is not legal advice, and
+      it does not replace advice about your own obligations.
+    </p>
+  </section>
+
+  <section id="terms">
+    <h2>Terms</h2>
+    <div class="plain">
+      <ul>
+        <li><strong>Ajar is in early testing and is offered as-is.</strong> It can
+          be wrong, it can be down, and a filter can fail to stop something. Do
+          not use it as the only thing standing between a child and the internet.</li>
+        <li><strong>It is not hidden from your child, and it must not be.</strong>
+          Ajar shows itself on the device, tells your child when something is
+          closed, and gives them a way to ask. Using it to monitor someone without
+          their knowledge is not what it is for.</li>
+        <li><strong>Set it up on devices you are responsible for.</strong> A
+          parent or guardian, for a child in their care.</li>
+        <li><strong>You can stop at any time</strong> by removing the device or
+          closing your account, and nothing holds your data hostage when you do.</li>
+        <li><strong>The software is MIT-licensed.</strong> You can read it, run
+          your own copy, and change it. See the LICENSE file in the repository.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="data">
+    <h2>Where the category lists come from</h2>
+    <p>
+      When Ajar closes a whole category — "social media", "adult" — it is matching
+      against published domain lists compiled by other people. That data is
+      licensed, the licence requires credit, and compiling it into the filter your
+      device downloads produces adapted material that carries the same terms. So
+      the credit belongs here, on a page, and not only in a file:
+    </p>
+    <ul id="attribution">
+      <li>Loading&hellip;</li>
+    </ul>
+    <p>
+      Category data is licensed <strong>CC BY-SA 4.0</strong>. Anyone who receives
+      the compiled filter set may redistribute it under the same terms.
+    </p>
+  </section>
+
+</div>
+
+<div class="wrap">
+  <footer>
+    <span>Ajar — open, just enough.</span>
+    <span><a href="/">Home</a> · <a href="/parent/">Sign in</a> · <a href="/signup.html">Create an account</a></span>
+  </footer>
+</div>
+
+<script>
+  // The attribution is rendered from the SAME constant the compiled filter set
+  // carries (shared/categories/attribution.ts), served by the backend, rather
+  // than retyped here. A credit that has to be kept in step by hand is a credit
+  // that goes stale, and this one is a licence obligation.
+  (async () => {
+    const box = document.getElementById("attribution");
+    try {
+      const res = await fetch("/v1/categories/attribution");
+      if (!res.ok) throw new Error(String(res.status));
+      const a = await res.json();
+      box.innerHTML = (a.sources || []).map((s) => {
+        const name = document.createTextNode(s.name).textContent
+          .replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+        const url = /^https?:\/\//.test(s.url || "") ? s.url : null;
+        return "<li>" + (url ? '<a href="' + url.replace(/"/g, "&quot;") + '" rel="noopener">' + name + "</a>" : name)
+             + " — " + String(s.license || "").replace(/[&<>]/g, "") + "</li>";
+      }).join("") || "<li>No category data is loaded on this deployment.</li>";
+    } catch {
+      // Never leave a licence obligation showing a spinner.
+      box.innerHTML = '<li>Université Toulouse Capitole — blacklists (UT1), '
+        + '<a href="https://dsi.ut-capitole.fr/blacklists/" rel="noopener">dsi.ut-capitole.fr/blacklists</a> — CC-BY-SA-4.0</li>';
+    }
+  })();
+</script>
+
+</body>
+</html>

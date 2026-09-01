@@ -595,6 +595,22 @@ export const openapiDocument = {
       get: { tags: ["policy"], summary: "List policy rules", security: userAuth, parameters: [familyIdParam],
         responses: { "200": { description: "Rules", content: json({ type: "array", items: { $ref: "#/components/schemas/PolicyRule" } }) }, "403": errorResponses["403"] } },
     },
+    "/v1/categories/attribution": {
+      get: { tags: ["categories"], summary: "Credit required by the category data's licence", security: [],
+        description: "Public on purpose: it is a credit, and gating a credit behind a login defeats it. Rendered by /legal.html from this endpoint rather than retyped, so it cannot go stale.",
+        responses: { "200": { description: "Attribution", content: json({ type: "object", properties: { license: { type: "string" }, sources: { type: "array", items: { type: "object", properties: { name: { type: "string" }, url: { type: "string" }, license: { type: "string" } } } } } }) } } },
+    },
+    "/v1/families/{familyId}/grants": {
+      get: { tags: ["policy"], summary: "List live temporary grants (not expired, not spent)", security: userAuth,
+        parameters: [familyIdParam],
+        responses: { "200": { description: "Grants", content: json({ type: "array", items: { $ref: "#/components/schemas/TemporaryRule" } }) }, "401": errorResponses["401"], "403": errorResponses["403"] } },
+    },
+    "/v1/families/{familyId}/grants/{grantId}": {
+      delete: { tags: ["policy"], summary: "Take back a live grant before it runs out", security: userAuth,
+        description: "A permanent decision could always be deleted; a timed one could not, so a misfired \"30 minutes\" had to be waited out. Deletes rather than marking consumed \u2014 \"consumed\" means a ONCE grant was spent, and reusing it here would make the audit log say the child opened something they never did.",
+        parameters: [familyIdParam, { name: "grantId", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Revoked", content: json({ type: "object", properties: { revoked: { const: true } } }) }, "401": errorResponses["401"], "403": errorResponses["403"], "404": errorResponses["404"] } },
+    },
     "/v1/families/{familyId}/rules/{ruleId}": {
       delete: { tags: ["policy"], summary: "Delete a policy rule", security: userAuth,
         parameters: [familyIdParam, { name: "ruleId", in: "path", required: true, schema: { type: "string" } }],

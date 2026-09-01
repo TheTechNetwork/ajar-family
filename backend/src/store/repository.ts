@@ -135,6 +135,8 @@ export interface Repository {
   /** Mark a grant spent. Returns false if it was already consumed (idempotent
    *  callers get a definitive "someone beat you to it"). */
   markTemporaryRuleConsumed(id: string, at: string): Promise<boolean>;
+  /** Delete one temporary grant. Scoped to the family, like deleteRule. */
+  deleteTemporaryRule(familyId: string, id: string): Promise<void>;
 
   // policy version per (child, device)
   bumpPolicyVersion(familyId: string, childId: string): Promise<number>;

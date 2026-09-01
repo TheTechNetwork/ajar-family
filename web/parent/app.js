@@ -651,9 +651,12 @@ async function selectFamily(fid) {
   $("requestsCard").classList.remove("hide");
   $("rulesCard").classList.remove("hide");
   $("defaultsCard").classList.remove("hide");
+  $("devicesCard").classList.remove("hide");
   await refreshChildren();
   refreshRules();
+  refreshGrants();
   refreshDefaults();
+  refreshDevices();
   fillRuleWho();
   startLiveRequests();
   try { renderFamilyPick((await api("/v1/me")).families); } catch { /* picker is cosmetic */ }
@@ -1095,6 +1098,7 @@ async function decide(r, decision, scope, duration) {
 // ---------------------------------------------------------------------------
 async function refreshRules() {
   if (!state.familyId) return;
+  refreshGrants();
   const box = $("rules");
   box.setAttribute("aria-busy", "true");
   let rules = [];
@@ -1359,5 +1363,147 @@ async function saveDefault(sel, rows) {
     const m = friendly(e); toast(m); announceAlert(m);
   } finally {
     sel.removeAttribute("aria-disabled");
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// IS IT ACTUALLY RUNNING?
+//
+// The backend has tracked `lastSeenAt`, `lastSyncedVersion`, `upToDate` and a
+// `stale` flag per device since heartbeats landed, and no client ever read any
+// of it — not this console, not the iOS app. So a deleted app, a Safari
+// extension switched off in Settings, a laptop that has not phoned home in
+// three weeks, and a quiet week all looked exactly the same: nothing.
+//
+// A parent who believes the filter is running when it is not is worse off than
+// one who knows it is off, because the second one can do something.
+// ---------------------------------------------------------------------------
+
+async function refreshDevices() {
+  const box = $("devices");
+  if (!box || !state.familyId) return;
+  box.setAttribute("aria-busy", "true");
+  let devices = [];
+  try { devices = await api(`/v1/families/${state.familyId}/devices`); }
+  catch (e) {
+    box.removeAttribute("aria-busy");
+    box.innerHTML = `<li class="muted">Couldn't check. ${escapeHtml(friendly(e))}</li>`;
+    return;
+  }
+  box.removeAttribute("aria-busy");
+  if (!devices.length) {
+    box.innerHTML = `<li class="empty">No devices set up yet. Until one is, Ajar isn't filtering anything.</li>`;
+    return;
+  }
+  devices.sort((a, b) => Number(b.stale) - Number(a.stale) || (a.displayName || "").localeCompare(b.displayName || ""));
+  box.innerHTML = devices.map((d) => {
+    const who = state.childName[d.childId] || "a kid";
+    const seen = d.lastSeenAt ? ago(d.lastSeenAt) : `set up ${ago(d.enrolledAt)}`;
+    // Three states, and they are genuinely different things to tell someone.
+    //  stale       — we have not heard from it at all. Something is wrong.
+    //  !upToDate   — it is alive but has not picked up your latest decision.
+    //  otherwise   — running, current.
+    const state_ = d.stale
+      ? { tag: "Not checking in", cls: "tag-warn",
+          sub: `Last heard from ${seen}. Ajar may have been turned off or removed on this device.` }
+      : !d.upToDate
+        ? { tag: "Catching up", cls: "tag-warn",
+            sub: `Seen ${seen}, but it hasn't picked up your latest change yet.` }
+        : { tag: "Running", cls: "tag-ok", sub: `Seen ${seen}.` };
+    return `<li>
+      <span class="grow">
+        <span class="rt">${escapeHtml(d.displayName || "A device")}</span>
+        <span class="sub2">${escapeHtml(who)} · ${escapeHtml(String(d.platform || "").toLowerCase())} · ${escapeHtml(state_.sub)}</span>
+      </span>
+      <span class="tag ${state_.cls}">${escapeHtml(state_.tag)}</span>
+      <button type="button" class="btn-danger" data-rmdev="${escapeAttr(d.id)}"
+              data-label="${escapeAttr(d.displayName || "this device")}">Remove<span class="sr-only"> ${escapeHtml(d.displayName || "this device")}</span></button>
+    </li>`;
+  }).join("");
+  box.querySelectorAll("[data-rmdev]").forEach((b) => (b.onclick = () => removeDevice(b)));
+
+  const bad = devices.filter((d) => d.stale).length;
+  if (bad) announce(`${bad} ${bad === 1 ? "device is" : "devices are"} not checking in`);
+}
+
+async function removeDevice(btn) {
+  const id = btn.dataset.rmdev, label = btn.dataset.label;
+  if (!confirm(`Remove ${label}?\n\nAjar stops filtering it, and its setup, grants and asks are deleted. `
+             + `You can set it up again with a new code.`)) return;
+  btn.dataset.busy = "1"; btn.setAttribute("aria-disabled", "true");
+  try {
+    await api(`/v1/families/${state.familyId}/devices/${id}`, { method: "DELETE" });
+    toast(`Removed ${label}`);
+    await refreshDevices();
+  } catch (e) {
+    const m = friendly(e); toast(m); announceAlert(m);
+    delete btn.dataset.busy; btn.removeAttribute("aria-disabled");
+  }
+}
+
+if ($("btnRefreshDevices")) $("btnRefreshDevices").onclick = () => refreshDevices();
+
+
+// ---------------------------------------------------------------------------
+// TAKING BACK A LIVE GRANT
+//
+// "the API can delete a rule, but a timed grant has no removal endpoint" — a
+// comment this file used to carry, describing the thing a parent needs most at
+// the moment they realise they got it wrong. There is an endpoint now.
+// ---------------------------------------------------------------------------
+
+/** "in 4 minutes" / "in about an hour" — a countdown, not a timestamp. */
+function until(iso) {
+  const ms = Date.parse(iso) - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return "any moment";
+  const mins = Math.round(ms / 60000);
+  if (mins < 1) return "in under a minute";
+  if (mins < 60) return `in ${mins} minute${mins === 1 ? "" : "s"}`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `in ${hrs} hour${hrs === 1 ? "" : "s"}`;
+  const days = Math.round(hrs / 24);
+  return `in ${days} day${days === 1 ? "" : "s"}`;
+}
+
+async function refreshGrants() {
+  const box = $("grants"), wrap = $("grantsBox");
+  if (!box || !wrap || !state.familyId) return;
+  let grants = [];
+  try { grants = await api(`/v1/families/${state.familyId}/grants`); }
+  catch { wrap.classList.add("hide"); return; }   // never a blocker on this card
+  if (!grants.length) { wrap.classList.add("hide"); box.innerHTML = ""; return; }
+  wrap.classList.remove("hide");
+  box.innerHTML = grants.map((g) => {
+    const who = g.scope?.childId ? (state.childName[g.scope.childId] || "one kid")
+      : g.scope?.deviceId ? "one device" : "everyone";
+    const open = g.action === "ALLOW";
+    return `<li>
+      <span class="grow">
+        <span class="rt">${escapeHtml(g.value)}</span>
+        <span class="sub2">${escapeHtml(TYPE_LABEL[g.target] ?? g.target)} · for ${escapeHtml(who)} · ${open ? "closes" : "reopens"} ${escapeHtml(until(g.expiresAt))}</span>
+      </span>
+      <span class="tag ${open ? "tag-open" : "tag-closed"}">${open ? "Open" : "Closed"}</span>
+      <button type="button" class="btn-danger" data-rmg="${escapeAttr(g.id)}"
+              data-label="${escapeAttr(g.value)}" data-open="${open ? "1" : ""}">
+        ${open ? "Close it now" : "Undo"}<span class="sr-only"> — ${escapeHtml(g.value)}</span></button>
+    </li>`;
+  }).join("");
+  box.querySelectorAll("[data-rmg]").forEach((b) => (b.onclick = () => revokeGrant(b)));
+}
+
+async function revokeGrant(btn) {
+  const id = btn.dataset.rmg, label = btn.dataset.label, wasOpen = !!btn.dataset.open;
+  btn.dataset.busy = "1"; btn.setAttribute("aria-disabled", "true");
+  try {
+    await api(`/v1/families/${state.familyId}/grants/${id}`, { method: "DELETE" });
+    // The device is told by the version bump the server does; say so plainly
+    // rather than implying it is already gone from the kid's screen.
+    toast(wasOpen ? `${label} is closing on their device now` : `${label} is back on your defaults`);
+    announce(wasOpen ? `${label} closed` : `${label} back on your defaults`);
+    await refreshGrants();
+  } catch (e) {
+    const m = friendly(e); toast(m); announceAlert(m);
+    delete btn.dataset.busy; btn.removeAttribute("aria-disabled");
   }
 }

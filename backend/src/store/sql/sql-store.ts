@@ -429,6 +429,9 @@ export class SqlStore implements Repository {
   }
   /** Single-use consumption: the UPDATE itself is the guard, so two devices
    *  racing on the same grant cannot both spend it. */
+  async deleteTemporaryRule(familyId: string, id: string) {
+    await this.db.run("DELETE FROM temp_rules WHERE id=? AND family_id=?", [id, familyId]);
+  }
   async markTemporaryRuleConsumed(id: string, at: string) {
     const before = await this.getTemporaryRule(id);
     if (!before || before.consumedAt) return false;

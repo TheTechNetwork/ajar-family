@@ -841,6 +841,52 @@ export class PolicyService {
     return created;
   }
 
+  /**
+   * The live grants a parent could still want back.
+   *
+   * Expired and consumed ones are filtered out here rather than shown greyed:
+   * a grant that has run out is not a thing to act on, and a list that mixes
+   * "still open" with "over" is a list a parent has to read carefully at the
+   * exact moment they are worried.
+   */
+  async listActiveGrants(familyId: string, actingUserId: string, nowMs = Date.now()) {
+    const m = await this.repo.getMembership(familyId, actingUserId);
+    if (!m) throw new DomainError("not a member of this family", "FORBIDDEN");
+    const visible = m.role === "LIMITED_GUARDIAN" ? new Set(m.assignedChildIds) : null;
+    return (await this.repo.listTemporaryRules(familyId))
+      .filter((t) => !t.consumedAt && Date.parse(t.expiresAt) > nowMs)
+      .filter((t) => !visible || (t.scope.childId ? visible.has(t.scope.childId) : false))
+      .sort((a, b) => Date.parse(a.expiresAt) - Date.parse(b.expiresAt));
+  }
+
+  /**
+   * Take back a live grant before it runs out.
+   *
+   * THERE WAS NO WAY TO DO THIS. A permanent decision could be deleted, but a
+   * timed one could not — the console said so in a comment and shrugged. So a
+   * parent who tapped "30 minutes" by accident, or approved something and then
+   * learned more about it, had to wait it out. The moment a parent most wants a
+   * control is the moment they realise they got it wrong.
+   *
+   * Deleted, not marked consumed: "consumed" means a ONCE grant was spent, and
+   * reusing it here would make the audit log say the child used something they
+   * never opened.
+   */
+  async revokeGrant(familyId: string, actingUserId: string, grantId: string): Promise<void> {
+    await this.requireManage(familyId, actingUserId);
+    const grant = (await this.repo.listTemporaryRules(familyId)).find((t) => t.id === grantId);
+    if (!grant) throw new DomainError("unknown grant", "NOT_FOUND");
+    await this.repo.deleteTemporaryRule(familyId, grantId);
+    // Devices must find out. Without this the child keeps the grant until their
+    // next full sync, which is exactly the window a parent is trying to close.
+    await this.bumpForScope(familyId, grant.scope);
+    await this.repo.addAuditEvent({
+      id: uid(), familyId, actorId: actingUserId, kind: "grant.revoked",
+      detail: { grantId, target: grant.target, value: grant.value, childId: grant.scope.childId },
+      createdAt: now(),
+    });
+  }
+
   async removeRule(familyId: string, actingUserId: string, ruleId: string) {
     await this.requireManage(familyId, actingUserId);
     await this.repo.deleteRule(familyId, ruleId);
@@ -981,6 +1027,23 @@ export class PolicyService {
 
 /** Outer bound on an unconsumed "just once" grant. See ApprovalService.consumeGrant. */
 export const ONCE_GRANT_TTL_MS = 5 * 60_000;
+
+/**
+ * How long an unanswered ask stays worth answering.
+ *
+ * `AccessRequestStatus` has declared "EXPIRED" since the model was written, and
+ * `GET .../requests?status=EXPIRED` is published in the OpenAPI — and NOTHING
+ * EVER SET IT. There is no sweeper and no TTL, so an ask stayed PENDING for
+ * ever: the console's "Waiting on you" list only grew, filling with things a
+ * child wanted three weeks ago and has long since stopped caring about, and the
+ * count beside it stopped meaning anything.
+ *
+ * The child's side already gives up honestly — the iOS app after ~10 minutes,
+ * the block pages on their own timer — so the ask a parent is looking at was
+ * already abandoned on the other end. Three days is long enough that a parent
+ * away for a weekend still sees it, and short enough that the list is about now.
+ */
+export const REQUEST_EXPIRES_AFTER_MS = 3 * 24 * 60 * 60_000;
 
 /**
  * Turn a duration into a concrete expiry, in the CHILD's time zone.
@@ -1264,6 +1327,28 @@ export class ApprovalService {
   }
 
   /** Parent decides. Server-authoritative; records who decided; produces a rule. */
+  /**
+   * Age out asks nobody answered.
+   *
+   * Lazy rather than a background job: this backend runs on Workers as well as
+   * a single binary, and a scheduled sweep exists on neither by default. Every
+   * read of the request list pays for its own tidying, which is cheap and — more
+   * to the point — cannot drift out of sync with what a parent is looking at.
+   *
+   * Returns the number expired, so a caller can decide whether to wake the feed.
+   */
+  async expireStaleRequests(familyId: string, nowMs = Date.now()): Promise<number> {
+    const pending = await this.repo.listAccessRequests(familyId, "PENDING");
+    let n = 0;
+    for (const r of pending) {
+      const age = nowMs - Date.parse(r.createdAt);
+      if (!Number.isFinite(age) || age < REQUEST_EXPIRES_AFTER_MS) continue;
+      await this.repo.updateAccessRequest({ ...r, status: "EXPIRED" });
+      n++;
+    }
+    return n;
+  }
+
   async decide(input: {
     familyId: string; requestId: string; decidedBy: string;
     decision: "ALLOW" | "BLOCK"; scope: ApprovalScope; duration: ApprovalDuration;

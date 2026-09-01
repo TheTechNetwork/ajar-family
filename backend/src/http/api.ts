@@ -12,6 +12,7 @@ import { openapiDocument } from "./openapi.js";
 import { RateLimiter, clientKey } from "./rate-limit.js";
 import * as v from "./validate.js";
 import type { AccessRequest, ApprovalDuration } from "../domain/model.js";
+import { CATEGORY_DATA_ATTRIBUTION } from "@ajar/shared/categories";
 
 /**
  * Every route that reads a body reads it through one of these. Before this, a
@@ -638,6 +639,12 @@ ${safe ? `<script>
     await requireUser(app, req);
     return ok({ version: await app.categories.version(), categories: await app.categories.listCategories() });
   });
+  // The credit the category data's licence requires, served so a public page can
+  // render it from the SAME constant the compiled filter set carries. It was
+  // only ever inside the signed asset — technically travelling with the data,
+  // and visible to nobody. CC BY-SA attribution is a distribution obligation.
+  // Public: it is a credit, and gating a credit behind a login defeats it.
+  r.get("/v1/categories/attribution", async () => ok(CATEGORY_DATA_ATTRIBUTION));
   r.get("/v1/categories/lookup", async (req) => {
     await requireUser(app, req);
     const host = (req.query.get("host") ?? "").trim();
@@ -996,6 +1003,18 @@ ${safe ? `<script>
     });
     return ok(rule, 201);
   });
+  // Live temporary grants, and a way to take one back before it runs out. A
+  // permanent decision could always be deleted; a timed one could not, so a
+  // misfired "30 minutes" had to be waited out.
+  r.get("/v1/families/:familyId/grants", async (req) => {
+    const userId = await requireUser(app, req);
+    return ok(await app.policy.listActiveGrants(req.params.familyId!, userId));
+  });
+  r.del("/v1/families/:familyId/grants/:grantId", async (req) => {
+    const userId = await requireUser(app, req);
+    await app.policy.revokeGrant(req.params.familyId!, userId, req.params.grantId!);
+    return ok({ revoked: true });
+  });
   r.del("/v1/families/:familyId/rules/:ruleId", async (req) => {
     const userId = await requireUser(app, req);
     await app.policy.removeRule(req.params.familyId!, userId, req.params.ruleId!);
@@ -1049,6 +1068,10 @@ ${safe ? `<script>
     const userId = await requireUser(app, req);
     const visible = await app.family.visibleChildIds(req.params.familyId!, userId);
     const status = req.query.get("status") ?? undefined;
+    // Age out asks nobody answered, before answering. `EXPIRED` has been a
+    // published status since the model was written and nothing ever set it, so
+    // "Waiting on you" only ever grew.
+    await app.approvals.expireStaleRequests(req.params.familyId!);
     const list = await app.repo.listAccessRequests(req.params.familyId!, status);
     return ok(visible ? list.filter((x) => visible.has(x.childId)) : list);
   });
@@ -1076,6 +1099,7 @@ ${safe ? `<script>
     // `count` is compared against the FILTERED list, so a guardian does not get
     // woken — or told they are out of date — by an ask about a child they cannot
     // see, which would leak its existence through the length alone.
+    await app.approvals.expireStaleRequests(req.params.familyId!);
     const pending = forThisUser(await app.repo.listAccessRequests(req.params.familyId!, "PENDING"));
     if (pending.length !== known) return ok({ requests: pending });
     const remaining = deadline - Date.now();
