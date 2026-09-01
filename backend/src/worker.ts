@@ -48,6 +48,16 @@ export interface Env {
   /** Ops secret gating the global category-dataset import. */
   CATEGORY_ADMIN_TOKEN?: string;
   /**
+   * WebAuthn relying-party identity: the registrable domain ("ajar.family") and
+   * the exact origin the browser reports ("https://ajar.family"). Not secrets —
+   * they are in wrangler.toml [vars] — but they are load-bearing: a passkey is
+   * bound to the rpId it was created under, so changing either after parents
+   * enrol invalidates every passkey with no migration path.
+   */
+  PASSKEY_RP_ID?: string;
+  PASSKEY_ORIGIN?: string;
+  PASSKEY_RP_NAME?: string;
+  /**
    * Static site + parent console, uploaded by `[assets]` in wrangler.toml.
    * Typed structurally rather than as workers-types' `Fetcher` so the backend
    * keeps zero dependencies. Optional because a Worker deployed from a config
@@ -141,6 +151,13 @@ async function getRouter(env: Env): Promise<Router> {
           mailFrom: env.MAIL_FROM,
           resetUrlBase: env.PASSWORD_RESET_URL,
           verifyUrlBase: env.VERIFY_EMAIL_URL,
+          // A passkey is bound to the rpId it was created under. Getting these
+          // wrong does not fail at boot — the browser simply refuses every
+          // ceremony, which reads as "passkeys are broken" rather than as a
+          // misconfiguration. See wrangler.toml [vars].
+          passkeyRpId: env.PASSKEY_RP_ID,
+          passkeyOrigin: env.PASSKEY_ORIGIN,
+          passkeyRpName: env.PASSKEY_RP_NAME,
         },
         // Workers has no raw DNS — follow CNAME chains over DNS-over-HTTPS.
         cnameResolver: new DohCnameResolver(),

@@ -13,6 +13,7 @@ import type {
   PolicyRule, TemporaryRule, DefaultPolicy, RuleScope, Role, Platform,
   RuleAction, PolicyTargetType, ApprovalScope, ApprovalDuration,
   CategoryDomain, PasswordResetToken, EmailVerificationToken, PendingRegistration, TemporaryGrant,
+  WebAuthnCredential, WebAuthnChallenge,
 } from "../../domain/model.js";
 
 const s = (v: unknown) => (v == null ? null : String(v));
@@ -86,6 +87,57 @@ export class SqlStore implements Repository {
   }
 
   // password reset tokens
+  // --- passkeys -----------------------------------------------------------
+  async createWebAuthnCredential(c: WebAuthnCredential) {
+    await this.db.run(
+      "INSERT INTO webauthn_credentials(id,user_id,public_key_cose,alg,sign_count,label,backed_up,created_at,last_used_at)"
+      + " VALUES(?,?,?,?,?,?,?,?,?)",
+      [c.id, c.userId, c.publicKeyCose, c.alg, c.signCount, c.label, c.backedUp ? 1 : 0, c.createdAt, s(c.lastUsedAt)]);
+    return c;
+  }
+  async getWebAuthnCredential(id: string) {
+    return this.mapCredential(await this.db.get("SELECT * FROM webauthn_credentials WHERE id=?", [id]));
+  }
+  async listWebAuthnCredentials(userId: string) {
+    const rows = await this.db.all("SELECT * FROM webauthn_credentials WHERE user_id=? ORDER BY created_at", [userId]);
+    return rows.map((r) => this.mapCredential(r)!).filter(Boolean);
+  }
+  async updateWebAuthnCredential(c: WebAuthnCredential) {
+    await this.db.run("UPDATE webauthn_credentials SET sign_count=?, last_used_at=?, label=?, backed_up=? WHERE id=?",
+      [c.signCount, s(c.lastUsedAt), c.label, c.backedUp ? 1 : 0, c.id]);
+    return c;
+  }
+  async deleteWebAuthnCredential(id: string) {
+    await this.db.run("DELETE FROM webauthn_credentials WHERE id=?", [id]);
+  }
+  private mapCredential(r: SqlRow | null): WebAuthnCredential | null {
+    return r ? {
+      id: r.id as string, userId: r.user_id as string, publicKeyCose: r.public_key_cose as string,
+      alg: Number(r.alg), signCount: Number(r.sign_count), label: r.label as string,
+      backedUp: Number(r.backed_up) === 1, createdAt: r.created_at as string,
+      lastUsedAt: (r.last_used_at as string | null) ?? undefined,
+    } : null;
+  }
+  async createWebAuthnChallenge(c: WebAuthnChallenge) {
+    await this.db.run(
+      "INSERT INTO webauthn_challenges(challenge,user_id,kind,expires_at,created_at) VALUES(?,?,?,?,?)",
+      [c.challenge, s(c.userId), c.kind, c.expiresAt, c.createdAt]);
+    return c;
+  }
+  async takeWebAuthnChallenge(challenge: string) {
+    const r = await this.db.get("SELECT * FROM webauthn_challenges WHERE challenge=?", [challenge]);
+    // Delete unconditionally — spent whether it was valid, expired or absent.
+    // Leaving expired rows is how this table grows forever; leaving USED ones is
+    // how an assertion gets replayed.
+    await this.db.run("DELETE FROM webauthn_challenges WHERE challenge=?", [challenge]);
+    return r ? {
+      challenge: r.challenge as string,
+      userId: (r.user_id as string | null) ?? undefined,
+      kind: r.kind as WebAuthnChallenge["kind"],
+      expiresAt: r.expires_at as string, createdAt: r.created_at as string,
+    } : null;
+  }
+
   async createPasswordResetToken(t: PasswordResetToken) {
     await this.db.run(
       "INSERT INTO password_reset_tokens(id,user_id,token_hash,expires_at,created_at,used_at) VALUES(?,?,?,?,?,?)",
@@ -243,6 +295,45 @@ export class SqlStore implements Repository {
       await this.db.run("UPDATE memberships SET assigned_child_ids=? WHERE id=?",
         [JSON.stringify(m.assignedChildIds.filter((c) => c !== childId)), m.id]);
     }
+  }
+
+  async deleteFamilyCascade(familyId: string) {
+    for (const c of await this.listChildren(familyId)) {
+      await this.deleteChildCascade(familyId, c.id);
+    }
+    // Rows scoped to the FAMILY rather than to any child survive the loop above,
+    // so they are swept explicitly. A family-scoped rule left behind would be a
+    // dangling permission with nothing to check it against.
+    await this.db.run("DELETE FROM devices WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM rules WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM temp_rules WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM access_requests WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM approval_decisions WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM enrollment_tokens WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM memberships WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM default_policy WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM policy_versions WHERE family_id=?", [familyId]);
+    // The audit log goes too. It is a record OF this family — who approved what
+    // for which child — so keeping it after an erasure request would keep the
+    // most sensitive thing we hold about them.
+    await this.db.run("DELETE FROM audit_events WHERE family_id=?", [familyId]);
+    await this.db.run("DELETE FROM families WHERE id=?", [familyId]);
+  }
+
+  async deleteUserCascade(userId: string) {
+    // Read the address before the row goes: a pending sign-up for the same
+    // address would otherwise outlive the account and let a link from before the
+    // deletion recreate it.
+    const user = await this.getUser(userId);
+    await this.db.run("DELETE FROM sessions WHERE user_id=?", [userId]);
+    await this.db.run("DELETE FROM webauthn_credentials WHERE user_id=?", [userId]);
+    await this.db.run("DELETE FROM webauthn_challenges WHERE user_id=?", [userId]);
+    await this.db.run("DELETE FROM notification_endpoints WHERE user_id=?", [userId]);
+    await this.db.run("DELETE FROM password_reset_tokens WHERE user_id=?", [userId]);
+    await this.db.run("DELETE FROM email_verification_tokens WHERE user_id=?", [userId]);
+    await this.db.run("DELETE FROM memberships WHERE user_id=?", [userId]);
+    if (user) await this.db.run("DELETE FROM pending_registrations WHERE email=?", [user.email]);
+    await this.db.run("DELETE FROM users WHERE id=?", [userId]);
   }
 
   async deleteDeviceCascade(familyId: string, deviceId: string) {

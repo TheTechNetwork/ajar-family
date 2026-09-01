@@ -20,7 +20,7 @@
  */
 
 import { normalizeYouTube, youTubePolicyKey, isPlaybackSupportUrl } from "./youtube-normalize.js";
-import { getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest } from "./backend-client.js";
+import { getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest, consumeGrant } from "./backend-client.js";
 import { makeResolver } from "./cname-resolve.js";
 import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
 
@@ -90,6 +90,12 @@ function connectNativeHost() {
 /** Apply a verified snapshot from either policy source (native host or backend). */
 function applySnapshot(snapshot, serverNowMs) {
   SNAPSHOT = snapshot;
+  // Forget grants that are no longer in the policy at all. Without this the set
+  // grows for the life of the service worker, and a grant id reissued later
+  // (it will not be, but nothing here guarantees that) would arrive pre-spent.
+  for (const id of [...SPENT]) {
+    if (!snapshot.temporaryRules?.some((t) => t.id === id)) SPENT.delete(id);
+  }
   if (typeof serverNowMs === "number") {
     CLOCK_ANCHOR = { serverNowMs, perfNowAtAnchor: performance.now() };
   }
@@ -398,7 +404,7 @@ function matchTarget(r, ctx, yt, hosts, hostCats) {
 }
 
 /**
- * @returns {{action:"ALLOW"|"BLOCK", reason:string, matchedKey?:string}}
+ * @returns {{action:"ALLOW"|"BLOCK", reason:string, matchedRuleId?:string, matchedKey?:string}}
  */
 export function evaluate(snapshot, ctx) {
   const yt = normalizeYouTube(ctx.url);
@@ -440,7 +446,9 @@ export function evaluate(snapshot, ctx) {
     );
   for (const t of temps) {
     const hit = matchTarget(t, ctx, yt, hosts, hostCats);
-    if (hit) return { action: t.action, reason: `temporary:${t.grantKind}`, matchedKey: hit };
+    // matchedRuleId is what makes a "just once" grant spendable: the caller has
+    // to be able to name the grant it is about to use up.
+    if (hit) return { action: t.action, reason: `temporary:${t.grantKind}`, matchedRuleId: t.id, matchedKey: hit };
   }
 
   // Standing rules, ordered by target tier then priority/scope.
@@ -520,7 +528,58 @@ function decide(url, type) {
     nowMs: nowMs(),
     resolvedHosts: host ? CNAME.chainFor(host) : [],
   };
-  return evaluate(SNAPSHOT, ctx);
+  // Top-level navigations see a policy with this device's already-spent
+  // one-time grants removed; sub-resources see the whole thing, so the page a
+  // grant just paid for finishes loading.
+  const snapshot = (type === "main_frame" && SPENT.size > 0)
+    ? { ...SNAPSHOT, temporaryRules: (SNAPSHOT.temporaryRules ?? []).filter((t) => !SPENT.has(t.id)) }
+    : SNAPSHOT;
+  // Pure on purpose. Spending a one-time grant is a side effect of an actual
+  // navigation, and decide() is also called speculatively — reevaluateOpenTabs()
+  // re-decides every open tab whenever a snapshot lands. Spending here would
+  // burn a grant the child never used, and would then block the very navigation
+  // reevaluateOpenTabs was about to start. spendOnce() is called from the two
+  // places a page genuinely loads instead.
+  return evaluate(snapshot, ctx);
+}
+
+// ---------------------------------------------------------------------------
+// "Just once"
+//
+// A ONCE grant is meant to end at the first load. The server cannot know when
+// that happened — it hands the device a signed snapshot and hears nothing until
+// the next poll — so the DEVICE reports it, and until this existed the option
+// meant "as many times as you like for five minutes" (the backstop TTL).
+//
+// Two things make this behave:
+//
+//   1. Only a TOP-LEVEL NAVIGATION spends it. A favicon or a stylesheet would
+//      otherwise burn the grant before the page the parent approved had even
+//      rendered.
+//   2. Spending it does not immediately blind the page that is loading. `SPENT`
+//      is only consulted for main_frame decisions, so the sub-resources of the
+//      one allowed load still get through while the new snapshot is in flight.
+//
+// Consumption is client-attested and best-effort — see
+// ApprovalService.consumeGrant for the residual risk, which is bounded by the
+// same five-minute backstop.
+// ---------------------------------------------------------------------------
+
+/** Grant ids this device has already spent, pending the next snapshot. */
+const SPENT = new Set();
+
+function spendOnce(res) {
+  const id = res.matchedRuleId;
+  if (!id || res.reason !== "temporary:ONCE" || res.action !== "ALLOW") return;
+  if (SPENT.has(id)) return;
+  SPENT.add(id);
+  if (!BACKEND_MODE) return; // native-host mode has no channel for this yet
+  consumeGrant(id).then((done) => {
+    // A failure leaves it in SPENT: this device stops re-using it either way,
+    // and the server's TTL closes the window. Re-trying would risk spending a
+    // grant the child never actually got to use.
+    if (!done) console.warn("[ajar] could not report a spent one-time grant");
+  });
 }
 
 function blockedUrlFor(url, res) {
@@ -533,6 +592,7 @@ function onBeforeRequestBlocking(details) {
   // (googlevideo) is handled by the playback-support carve-out inside decide().
   const url = details.url;
   const res = decide(url, details.type);
+  if (res.action === "ALLOW" && details.type === "main_frame") spendOnce(res);
   if (res.action === "BLOCK") {
     // Redirect only real page navigations to the friendly block page; for
     // sub-resources cancel instead (a redirect would break the parent page).
@@ -574,7 +634,11 @@ if (chrome.webNavigation?.onBeforeNavigate) {
 chrome.webNavigation.onHistoryStateUpdated.addListener(
   (details) => {
     if (details.frameId !== 0) return;
+    // YouTube swaps the video with pushState and no document request, so this
+    // is a real load as far as a parent is concerned even though no main_frame
+    // request fired.
     const res = decide(details.url, "main_frame");
+    if (res.action === "ALLOW") spendOnce(res);
     if (res.action === "BLOCK") {
       const target =
         `${EXT_BLOCK_PAGE}?u=${encodeURIComponent(details.url)}&reason=${encodeURIComponent(res.reason)}` +

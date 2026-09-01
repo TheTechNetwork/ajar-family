@@ -11,6 +11,7 @@ import { generateSigningKeyPair } from "./domain/signing.js";
 import {
   AuthService, FamilyService, EnrollmentService, PolicyService, ApprovalService, DeviceService,
 } from "./domain/services.js";
+import { PasskeyService } from "./domain/passkeys.js";
 import { RepositoryCategoryProvider, seedCategoriesIfEmpty, type CategoryProvider } from "./categories/provider.js";
 import { NullResolver, type CnameResolver } from "./categories/resolver.js";
 
@@ -37,6 +38,27 @@ export interface AppConfig {
   /** Base URL of the parent console page that completes email confirmation;
    *  the emailed link is `<base>?verify=<raw>`. Omitted = code-only email. */
   verifyUrlBase?: string;
+
+  /**
+   * WebAuthn relying-party identity. These are not cosmetic and they are not
+   * guessable at runtime: a passkey is bound to the rpId it was created under,
+   * and the browser refuses a ceremony whose rpId is not a suffix of the page's
+   * own origin. Change either after parents have enrolled and every existing
+   * passkey stops working — there is no migration.
+   *
+   * `passkeyRpId` is a registrable domain, no scheme and no port
+   * ("ajar.family"); `passkeyOrigin` is the exact origin the browser reports
+   * ("https://ajar.family"). They must describe the SAME host the console is
+   * served from, which is why the site, the signup flow and the API all live on
+   * one Worker on one origin.
+   *
+   * The defaults are local-development values and are wrong everywhere else.
+   * Production sets them in wrangler.toml [vars]; a durable deployment that
+   * leaves them alone gets a startup warning rather than silent breakage.
+   */
+  passkeyRpId?: string;
+  passkeyOrigin?: string;
+  passkeyRpName?: string;
 }
 
 export class App {
@@ -59,6 +81,7 @@ export class App {
   readonly approvals: ApprovalService;
   readonly categories: CategoryProvider;
   readonly cnameResolver: CnameResolver;
+  readonly passkeys: PasskeyService;
 
   private constructor(repo: Repository, notifier: Notifier, mail: MailSender, hub: EventHub, cfg: AppConfig,
                       signingPublicKeyB64: string, signingPrivateKeyB64: string, resolver: CnameResolver) {
@@ -79,6 +102,11 @@ export class App {
     this.devices = new DeviceService(repo);
     this.policy = new PolicyService(repo, signingPrivateKeyB64, this.categories);
     this.approvals = new ApprovalService(repo, notifier, hub);
+    this.passkeys = new PasskeyService(repo, {
+      rpId: cfg.passkeyRpId ?? "localhost",
+      origin: cfg.passkeyOrigin ?? "http://localhost:8787",
+      rpName: cfg.passkeyRpName ?? "Ajar",
+    });
   }
 
   static async create(opts: {

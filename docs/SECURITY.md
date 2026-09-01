@@ -153,14 +153,33 @@ living document for an alpha, not a completed audit.
   is never silently running with zero endpoints. Message bodies are deliberately
   terse (a notification about a blocked page discloses what a child tried to
   reach, and inboxes are often read on shared screens).
-- **"Just once" is single use.** A `grantKind: "ONCE"` approval was an ordinary
-  5-minute temporary rule with unlimited replays inside the window — the
-  narrowest option a parent could pick was materially wider than advertised. The
-  device now reports consumption
-  (`POST /v1/devices/{deviceId}/grants/{ruleId}/consume`); the grant is marked
-  spent server-side, the policy version bumps, and it is absent from every later
-  snapshot. Consumption state never travels to devices, so the signed wire shape
+- **"Just once" is single use — in the browser extensions.** A `grantKind:
+  "ONCE"` approval was an ordinary 5-minute temporary rule with unlimited replays
+  inside the window: the narrowest option a parent could pick was materially
+  wider than advertised. `POST /v1/devices/{deviceId}/grants/{ruleId}/consume`
+  marks it spent, bumps the policy version, and drops it from every later
+  snapshot; consumption state never travels to devices, so the signed wire shape
   is unchanged.
+
+  **This entry was written when the endpoint existed and no client called it.**
+  That is the defect class this document keeps finding in itself — a documented
+  safety that nothing implements — so read the scope carefully:
+
+  - **Windows and macOS Safari: enforced.** The extensions spend the grant on the
+    first top-level navigation, keep it spent locally while the new snapshot is
+    in flight, and report it. Only a top-level navigation counts: a favicon would
+    otherwise burn the grant before the page the parent approved had rendered.
+    Sub-resources of that one load still see the grant, which is what lets the
+    approved page finish loading.
+  - **iOS: NOT enforced. `ONCE` is still the 5-minute window there**, and the two
+    reasons are structural rather than unfinished work. `NEFilterFlow` does not
+    distinguish a top-level navigation from a sub-resource, so a filter that
+    spent the grant on the first flow it saw would spend it on the page's own
+    scripts and the approved video would not play. And the data provider
+    deliberately holds no device token — it is app-only precisely so the two
+    extensions cannot talk to the backend — so it has nothing to report with.
+    Solving it needs a way to identify a page load inside the filter; until then
+    an iOS "just once" is honestly a "just now".
 - **Local-time approvals.** `UNTIL_END_OF_DAY` expired at **UTC** midnight, i.e.
   5pm in California (the child was cut off after school on a grant the parent
   thought lasted until bedtime) and 9am the following morning in UTC+10 (most of
@@ -170,14 +189,48 @@ living document for an alpha, not a completed audit.
   and the version the device actually pulled;
   `GET /v1/families/{id}/devices` reports both plus a `stale` flag, so a parent
   can see that protection stopped running rather than assume it is fine. Device
-  tokens (30 days) can be renewed at
+  tokens (30 days) are renewed at
   `POST /v1/devices/{deviceId}/token/refresh` — previously they simply expired
   and the device went silent with no recovery short of re-enrollment.
+
+  **The endpoint shipped and nothing called it**, which meant every enrolled
+  device was still on the day-31 cliff. All three clients now renew a third of
+  the way through the lifetime, from inside the loop they already run. Renewal
+  has to be PROACTIVE: `/token/refresh` authenticates with the token it is
+  replacing, so a client that waits for its first 401 has already lost. Asking
+  at ten days leaves twenty days of failed attempts before anything breaks.
+
+  A device enrolled before the issue date was recorded reads no date and renews
+  immediately — one extra request, against the alternative of a device that
+  silently stops filtering. **The signing key returned by a renewal is ignored
+  on every client**: `enrollSigningKey` is write-once and this is a routine
+  unattended call, so honouring it would make "wait for a renewal" a way to swap
+  the key that verifies every policy the device enforces.
 - **Erasure.** `DELETE` a child or a device cascades their rules, temporary
   grants, access requests, default policy, and any `LIMITED_GUARDIAN`
-  assignment naming them. A device token is now checked against a live device
-  row on every request, so a removed device's long-lived token stops working
-  immediately instead of surviving until expiry.
+  assignment naming them. A device token is checked against a live device row on
+  every request, so a removed device's long-lived token stops working immediately
+  instead of surviving until expiry.
+
+  **`DELETE /v1/me` closes a whole account**, re-authenticating with the current
+  password first — this is the most destructive call in the API and a live
+  session on a shared computer is not enough for it. What goes with it is a
+  decision, not a cascade: a family where somebody ELSE is also an `OWNER`
+  survives minus this membership, so a co-parent keeps their children and nothing
+  on a child's device changes; a family where this account was the last `OWNER`
+  is erased with it — children, devices, rules, grants, requests, decisions,
+  enrollment codes, memberships **and the audit log**, which is the record of
+  what a named child was told they could not look at and so the last thing that
+  should survive an erasure request.
+
+  Two limits, stated rather than implied. The devices of an erased family cannot
+  be reached: they stop authenticating (every request checks the device row) and
+  keep enforcing the last policy they hold, exactly as they do when the network
+  is down. There is no remote wipe, and a filter that failed OPEN on deletion
+  would be the worse answer. And erasure is verified against a reopened SQLite
+  file (`store/sql/sql-store.test.ts`) rather than only against the in-memory
+  store, because a Map that forgets a key and a table with a row still in it look
+  identical from the domain's side.
 - **Request dedupe.** An identical still-`PENDING` request from the same
   (child, device, target) is returned rather than re-created, so a reloading
   blocked page can no longer mint dozens of rows and dozens of notifications for
@@ -195,6 +248,59 @@ living document for an alpha, not a completed audit.
   `ALLOWED_ORIGIN` (Node) / `env.ALLOWED_ORIGIN` (Workers) to lock it down.
 
 ## Deferred / known limitations
+
+- **The second factor is a passkey, and the recovery story is the weak part.**
+  Sign-in is two steps: `POST /v1/auth/login` checks the password and, for an
+  account with a passkey enrolled, returns a short-lived `mfa` token and **no
+  session**; only `POST /v1/auth/passkeys/login` turns that into a token pair.
+  The `mfa` kind is its own token kind rather than a user token with a flag, so a
+  route that does nothing special refuses it by default — including
+  `/v1/me/passkeys/options`, which would otherwise let someone with a password
+  enrol their own passkey and then finish the sign-in honestly. Both the
+  challenge and the credential are bound to the account, so a genuine assertion
+  from an attacker's own enrolled passkey is not a sign-in as somebody else.
+
+  A passkey rather than a code because **the adversary lives in the house**: they
+  can watch a password being typed, try the ones a parent reuses, and reach a
+  shared computer where a session may still be open. A six-digit code can be read
+  out to someone who asks for it; an assertion bound to this origin cannot be, and
+  there is nothing for a phishing page on another domain to collect.
+
+  **What is honestly still open:**
+
+  - **Two ways to hold an account with no second factor.** An account created
+    before this existed has no passkey, and `POST /v1/auth/login` still returns a
+    session for it, flagged `passkeyRequired`. And a browser that cannot do
+    WebAuthn at all can skip the enrolment step at sign-up. Both are deliberate —
+    refusing would lock people out with no way in to fix it — and both mean "every
+    parent has a second factor" is **not** a claim this document makes. The
+    console asks; nothing enforces.
+  - **Losing every passkey means losing the account.** There is no recovery code,
+    and email is deliberately not a way around the passkey: a fallback to "click
+    the link we sent you" makes the second factor exactly as strong as the
+    parent's inbox, which is to say it stops being one. A password reset changes
+    the password and nothing else. Synced passkeys (iCloud Keychain, Google
+    Password Manager) survive a lost phone, which is why `backedUp` is shown in
+    the console — but a device-bound passkey on a single lost device is an
+    account with no way in. **Recovery codes are the intended answer and are not
+    built.** Until they are, the mitigation is social: the console shows what is
+    enrolled and pushes for a second one.
+  - **`PASSKEY_RP_ID` / `PASSKEY_ORIGIN` cannot be changed after parents enrol.**
+    A passkey is bound by the browser to the rpId it was created under. Changing
+    either invalidates every enrolled passkey at once, with no migration. They are
+    committed in `wrangler.toml` rather than left to be set, because getting them
+    wrong does not fail at boot — the browser simply refuses every ceremony, which
+    reads as "passkeys are broken".
+  - **Sign-in is where it stops.** Approving a request, changing a policy and
+    removing a device all ride on a session that a passkey opened; none of them
+    ask again. A step-up on an already-open session is the obvious next control
+    and is not built.
+
+  Verification: `backend/src/domain/passkeys.test.ts` (real captured ceremonies
+  from py_webauthn, plus the negatives), `backend/test/passkey-workerd.test.mjs`
+  (the same ceremonies inside workerd, which has no `node:crypto`), and
+  `backend/src/http/passkey-routes.test.ts` (that the HTTP surface actually
+  withholds a session until the second step happens).
 
 - **Enumeration resistance is about STATUS and shape, not wall-clock time.**
   Register's two branches were made to do the same work — one PBKDF2 hash, one

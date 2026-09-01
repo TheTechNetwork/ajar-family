@@ -73,19 +73,33 @@ async function api(path, { method = "GET", body, auth = true } = {}) {
   return data;
 }
 
-/** Move to step n: swap panels, light the dot, put focus where typing resumes. */
-function step(n) {
-  for (let i = 1; i <= 5; i++) {
-    const panel = $(`s${i}`);
-    if (panel) panel.hidden = i !== n;
+/**
+ * The flow, in order. `sCheck` is not in here because it is not a step the
+ * parent DOES — it is waiting for an email — and giving it a dot would tell
+ * them they are further along than they are.
+ *
+ * Indexed by position rather than by the number in the id, because "add a
+ * passkey" was inserted in the middle and renumbering every panel id would have
+ * been a much better way to introduce a bug than to avoid one.
+ */
+const PANELS = ["s1", "sKey", "s2", "s3", "s4", "s5"];
+/** The last panel is the result, not a step, so it gets no dot of its own. */
+const DOTS = PANELS.length - 1;
+
+/** Move to a step: swap panels, light the dots, put focus where typing resumes. */
+function step(id) {
+  const n = PANELS.indexOf(id) + 1;
+  for (const panelId of PANELS) {
+    const panel = $(panelId);
+    if (panel) panel.hidden = panelId !== id;
   }
   $("sCheck").hidden = true;
-  for (let i = 1; i <= 4; i++) {
+  for (let i = 1; i <= DOTS; i++) {
     const dot = $(`d${i}`);
-    if (dot) dot.toggleAttribute("data-on", i <= Math.min(n, 4));
+    if (dot) dot.toggleAttribute("data-on", i <= Math.min(n, DOTS));
   }
   clearError();
-  const focusable = $(`s${n}`)?.querySelector("input, select, button");
+  const focusable = $(id)?.querySelector("input, select, button:not([hidden])");
   focusable?.focus();
 }
 
@@ -172,7 +186,7 @@ wire($("s1"), "Creating your account…", async () => {
 });
 
 function showCheckEmail() {
-  step(1);                       // resets the dots to the first step
+  step("s1");                    // resets the dots to the first step
   $("s1").hidden = true;
   $("sCheck").hidden = false;
   $("checkSub").textContent =
@@ -214,17 +228,77 @@ async function resumeFromEmail(code) {
     out = await api("/v1/auth/verify", { method: "POST", auth: false, body: { token: code } });
   } catch (err) {
     showError(`${err.message} You can ask for a new link from the sign-in page.`);
-    step(1);
+    step("s1");
     return;
   }
   if (!out?.accessToken) { location.href = "/parent/"; return; }
   state.token = out.accessToken;
   localStorage.setItem("cf_access", out.accessToken);
   localStorage.setItem("cf_refresh", out.refreshToken);
-  step(2);
+  await offerPasskey();
 }
 
-// 2 · family ------------------------------------------------------------------
+// 2 · passkey -----------------------------------------------------------------
+//
+// This step sits BEFORE the family, on purpose: the account that says yes is
+// protected before it has anything to say yes about. Doing it last would put it
+// after "here is your setup code", which is where a parent stops reading.
+//
+// It is also the only step that can be skipped, and only when the browser cannot
+// do it at all. That is not a loophole so much as an admission: an account with
+// no passkey is exactly as protected as every account was before this existed,
+// the console keeps asking, and docs/SECURITY.md says so plainly rather than
+// claiming a second factor everyone has.
+
+async function offerPasskey() {
+  step("sKey");
+  if (!window.AjarPasskeys?.supported()) {
+    $("keyWhat").textContent =
+      "This browser can't create a passkey. You can finish here and add one later — "
+      + "opening ajar.family on your phone is usually the quickest way.";
+    $("addKey").hidden = true;
+    $("skipKey").hidden = false;
+    $("skipKey").textContent = "Continue";
+    $("skipKey").focus();
+    return;
+  }
+  // Softens the wording when there is no Face ID / Touch ID / Hello on this
+  // machine — a security key still works, and saying "Face ID" to someone
+  // holding a desktop PC is how a step stops making sense.
+  if (!(await window.AjarPasskeys.hasPlatformAuthenticator())) {
+    $("keyWhat").textContent =
+      "Use a security key, or your phone — your browser will offer a QR code to scan. "
+      + "Nothing is sent to us that anyone could reuse.";
+  }
+}
+
+$("addKey").addEventListener("click", async () => {
+  clearError();
+  const btn = $("addKey");
+  btn.disabled = true;
+  btn.textContent = "Waiting for your device…";
+  announce("Waiting for your device.");
+  try {
+    await window.AjarPasskeys.enroll(
+      (path, opts) => api(path, opts),
+      window.AjarPasskeys.defaultLabel(),
+    );
+    announce("Passkey added.");
+    step("s2");
+  } catch (err) {
+    showError(err.message);
+    // A failed or cancelled attempt is not a dead end: offer the way past it,
+    // because a parent stuck on step two of six abandons the product entirely.
+    $("skipKey").hidden = false;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Create a passkey";
+  }
+});
+
+$("skipKey").addEventListener("click", () => { step("s2"); });
+
+// 3 · family ------------------------------------------------------------------
 wire($("s2"), "Setting up…", async () => {
   const fam = await api("/v1/families", { method: "POST", body: { name: $("family").value.trim() } });
   state.familyId = fam.id;
@@ -232,10 +306,10 @@ wire($("s2"), "Setting up…", async () => {
   // A wrong guess here is harmless and a right one saves typing an IANA name.
   try { $("tz").value = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; }
   catch { $("tz").value = "UTC"; }
-  step(3);
+  step("s3");
 });
 
-// 3 · first child -------------------------------------------------------------
+// 4 · first child -------------------------------------------------------------
 wire($("s3"), "Adding them…", async () => {
   const child = await api(`/v1/families/${encodeURIComponent(state.familyId)}/children`, {
     method: "POST",
@@ -243,10 +317,10 @@ wire($("s3"), "Adding them…", async () => {
   });
   state.childId = child.id;
   state.childName = child.displayName;
-  step(4);
+  step("s4");
 });
 
-// 4 · setup code --------------------------------------------------------------
+// 5 · setup code --------------------------------------------------------------
 wire($("s4"), "Making a code…", async () => {
   const out = await api(`/v1/families/${encodeURIComponent(state.familyId)}/enroll`, {
     method: "POST",
@@ -259,7 +333,7 @@ wire($("s4"), "Making a code…", async () => {
     ? "It works once."
     : `Works once, until ${when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`;
   $("doneSub").textContent = `Open Ajar on ${state.childName ? state.childName + "'s" : "their"} device and enter this code.`;
-  step(5);
+  step("s5");
   announce("Setup code ready.");
 });
 
@@ -268,7 +342,7 @@ $("skipCode").addEventListener("click", () => {
   $("doneSub").textContent = "You can make a setup code from your console whenever their device is to hand.";
   $("code").hidden = true;
   $("expires").hidden = true;
-  step(5);
+  step("s5");
 });
 
 // Entry: a confirmation link resumes the flow; anything else starts it.
@@ -278,8 +352,8 @@ if (verifyCode) {
   // single-use credential and it does not belong in history, a bookmark, or a
   // Referer header on the next request this page makes.
   history.replaceState(null, "", location.pathname);
-  step(1);
+  step("s1");
   resumeFromEmail(verifyCode);
 } else {
-  step(1);
+  step("s1");
 }

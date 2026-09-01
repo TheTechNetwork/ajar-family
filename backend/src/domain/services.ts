@@ -384,6 +384,55 @@ export class AuthService {
     return this.repo.updateUser({ ...user, passwordHash, tokenVersion: user.tokenVersion + 1 });
   }
 
+  /**
+   * Close an account and erase what belongs to it.
+   *
+   * WHY IT EXISTS. An app that lets someone create an account has to let them
+   * delete it from inside the app (App Store 5.1.1(v)), and a service holding a
+   * record of what a named child was told they could not look at has a stronger
+   * reason than the rule. There was no way to do either.
+   *
+   * WHAT GOES WITH IT — the part that needs a decision rather than a DELETE.
+   * A family is not this person's property; it may have another parent in it and
+   * children whose devices are enforcing policy right now. So:
+   *
+   *   - a family where somebody ELSE is also an OWNER survives, minus this
+   *     person's membership. Their co-parent keeps the children, the devices and
+   *     the rules, and nothing on a child's device changes.
+   *   - a family where this person is the last OWNER is erased with them:
+   *     children, devices, rules, grants, requests, decisions, enrollment codes
+   *     and the audit log. Leaving it would leave a family nobody can administer
+   *     and, worse, a record of a specific child's blocked requests belonging to
+   *     an account that no longer exists.
+   *
+   * The devices of an erased family stop being able to authenticate, because
+   * every request checks the device row still exists. They keep enforcing the
+   * last policy they hold, offline, which is the same thing they do when the
+   * network is down — there is no way to reach out and wipe them, and a filter
+   * that failed open on deletion would be a worse answer.
+   *
+   * Re-authentication is required. This is the most destructive thing the API
+   * can do, and a live session on a shared computer should not be enough.
+   */
+  async deleteAccount(userId: string, password: string): Promise<{ familiesDeleted: number }> {
+    const user = await this.repo.getUser(userId);
+    if (!user) throw new DomainError("unknown user", "NOT_FOUND");
+    if (!(await verifyPassword(password, user.passwordHash)))
+      throw new DomainError("that password is incorrect", "UNAUTHORIZED");
+
+    let familiesDeleted = 0;
+    for (const m of await this.repo.listMembershipsForUser(userId)) {
+      if (m.role !== "OWNER") continue;
+      const others = await this.repo.listMemberships(m.familyId);
+      const anotherOwner = others.some((o) => o.userId !== userId && o.role === "OWNER");
+      if (anotherOwner) continue;
+      await this.repo.deleteFamilyCascade(m.familyId);
+      familiesDeleted += 1;
+    }
+    await this.repo.deleteUserCascade(userId);
+    return { familiesDeleted };
+  }
+
   /** Sign out EVERYWHERE: bump tokenVersion (kills all tokens) and mark every
    *  session record revoked so the session list reflects it. */
   async revokeAllSessions(userId: string): Promise<User> {

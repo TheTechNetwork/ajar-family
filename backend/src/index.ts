@@ -44,6 +44,11 @@ async function main(): Promise<void> {
       mailFrom: process.env.MAIL_FROM,
       resetUrlBase: process.env.PASSWORD_RESET_URL,
       verifyUrlBase: process.env.VERIFY_EMAIL_URL,
+      // Defaults to localhost:8787 — right for `npm run dev`, wrong for anything
+      // reachable from outside this machine.
+      passkeyRpId: process.env.PASSKEY_RP_ID,
+      passkeyOrigin: process.env.PASSKEY_ORIGIN,
+      passkeyRpName: process.env.PASSKEY_RP_NAME,
     },
     // Follow CNAME chains for category lookups via the host's system resolver.
     cnameResolver: new NodeCnameResolver(),

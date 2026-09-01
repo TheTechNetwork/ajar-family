@@ -443,3 +443,61 @@ a channel that does not fit. Implementing APNs is the work that closes it.
 depth, but it is no longer what protects the core loop. A request path that never
 touches mail cannot fail because mail is down, which is a better property than
 catching the error.
+
+## ADR-017 — The second factor is a passkey, and there is no email way around it
+
+**Status.** Accepted. Implemented in `backend/src/domain/passkeys.ts`,
+`backend/src/http/api.ts`, `web/parent/webauthn.js`.
+
+**Context.** A parent's password was the whole of the security on an account
+that decides what their children can reach. `docs/ARCHITECTURE.md` §7 had listed
+"parent MFA" as part of the design since Phase 0, `docs/SECURITY.md` had not
+mentioned its absence at all, and nothing was built. That is the same defect
+class this project has now hit four times: *a documented safety that nothing
+implements*.
+
+The threat model is what makes the choice, not the checklist. **The adversary
+lives in the house.** A child can watch the password being typed, try the ones a
+parent reuses across sites, and reach a shared computer where a session may still
+be open. And the account is not a mailbox: it approves what a child may reach,
+and it can approve silently, with the audit log recording a parent doing it.
+
+**Decision.** A passkey (WebAuthn), required at sign-up, verified as a second
+step at sign-in.
+
+- **Not TOTP.** A six-digit code can be read out to whoever asks for it, and the
+  person most likely to ask lives in the same house and is good at asking. An
+  assertion is bound by the browser to `ajar.family`; there is nothing to say out
+  loud and nothing for a lookalike domain to collect.
+- **Not "sign in with" anything.** The constraint that has held since Phase 0
+  stands: parent authentication is self-contained, no external identity provider.
+- **Not hand-rolled.** `@simplewebauthn/server`, pinned exact, is the first and
+  only runtime dependency in this repository — see the note at the top of
+  `domain/passkeys.ts`. The primitives were never the risk; CBOR over
+  attacker-controlled bytes, COSE key marshalling and DER-to-raw conversion are.
+- **Its own token kind.** The half-finished sign-in is an `mfa` token, not a user
+  token with a flag. A flag makes every route that forgets to check it a way to
+  sign in with a password alone; a kind means a route that does nothing special
+  refuses it by default.
+
+**And no email fallback.** This is the part worth writing down, because it is the
+one that will be argued with the first time a parent is locked out. A recovery
+path of "click the link we sent you" makes the second factor exactly as strong as
+the parent's inbox — which is to say it stops being a second factor, while
+letting this document claim one. A password reset therefore changes the password
+and nothing else.
+
+**What it costs, plainly.** Losing every passkey means losing the account.
+Synced passkeys (iCloud Keychain, Google Password Manager) survive a lost phone
+and are the common case, which is why the console shows `backedUp` per key and
+pushes for a second one — but a device-bound passkey on a single lost device is
+an account with no way in. **Recovery codes are the intended answer and are not
+built yet.** Naming that is better than shipping the email fallback and calling
+the problem solved.
+
+Two further gaps are deliberate rather than overlooked: an account created before
+this existed still signs in with a password alone (flagged `passkeyRequired`),
+and a browser that cannot do WebAuthn can skip enrolment at sign-up. Refusing
+either would lock people out with no way in to fix it. Both are stated in
+`docs/SECURITY.md` rather than papered over — "every parent has a second factor"
+is not a claim this project makes.

@@ -531,11 +531,25 @@ network) and redirect to a block page. All call the same `normalizeYouTube()`.
   pushes the change. Approval scope choices default to the **narrowest useful**
   permission (this request / this exact URL / this video / this channel / this
   domain / this device / this child / whole family) and never auto-broaden.
-- **Security**: Sign in with Apple / passkeys / email; parent MFA; per-device
+- **Security** *(intent; see the status note below)*: Sign in with Apple /
+  passkeys / email; parent MFA; per-device
   keypair generated at enrollment; short-lived access tokens + refresh rotation;
   signed device commands with replay protection; rate limiting; full audit log.
   **Approvals are server-authoritative and cryptographically signed** so a child
   device cannot fabricate one.
+
+  > **Status, 2026-09-01: built, with one piece named and missing.** Parent auth
+  > is a password plus a **passkey**, verified as a second step at sign-in
+  > (ADR-017). Sign in with Apple is not there and will not be: parent auth is
+  > self-contained by decision, no external IdP. Everything after "per-device
+  > keypair" in that list is implemented.
+  >
+  > What is NOT built is **recovery**: losing every passkey means losing the
+  > account, because an emailed way around the passkey would make the second
+  > factor exactly as strong as the parent's inbox. Recovery codes are the
+  > intended answer. `docs/SECURITY.md` carries that, and the two remaining ways
+  > to hold an account with no passkey at all, as named limitations rather than
+  > leaving them to be discovered at signup.
 
 ## 8. Policy synchronization
 

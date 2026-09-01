@@ -1,0 +1,11 @@
+# A throwaway Worker whose only job is to run the passkey ceremonies inside
+# workerd. Deliberately minimal — no D1, no assets, no routes — so that a failure
+# here is unambiguously about the crypto and not about the rest of the config.
+#
+# compatibility_flags mirrors the real wrangler.toml. `nodejs_compat` is not
+# decoration: domain/passkeys.ts uses Buffer to move COSE keys in and out of
+# base64url, and the production Worker runs with the same flag.
+name = "ajar-passkey-workerd-probe"
+main = "passkey-worker.mjs"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]

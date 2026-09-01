@@ -96,6 +96,7 @@ export async function enroll(backendUrl, code, displayName, opts = {}) {
   await setConfig({
     backendUrl: url,
     deviceToken: body.deviceToken,
+    tokenIssuedAt: Date.now(),
     deviceId: body.device.id,
     childId: body.device.childId,
     signingKeyB64: body.signingPublicKeyB64,
@@ -105,12 +106,62 @@ export async function enroll(backendUrl, code, displayName, opts = {}) {
   return body.device;
 }
 
+/**
+ * Device tokens last 30 days and NOTHING renewed them.
+ *
+ * The renewal endpoint has existed since device tokens were introduced and no
+ * client called it, so on day 31 a child's device stopped syncing policy —
+ * silently, weeks after anyone touched it — and the only recovery was a parent
+ * re-enrolling the device by hand. That is the worst shape a failure can take
+ * in this product: enforcement quietly stops being updated while the app still
+ * looks enrolled.
+ *
+ * Renewal has to be PROACTIVE. `/token/refresh` authenticates with the token
+ * being replaced, so a device that waits for a 401 has already lost: an expired
+ * token cannot mint its successor. The loop below asks a third of the way
+ * through the lifetime, which leaves twenty days of failed attempts before
+ * anything breaks.
+ *
+ * A device enrolled before this existed has no issue date recorded. It is
+ * treated as due immediately: refreshing a healthy token costs one request, and
+ * guessing "probably fine" costs a device that stops filtering.
+ */
+const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TOKEN_REFRESH_AFTER_MS = TOKEN_TTL_MS / 3;
+
+export async function refreshDeviceTokenIfDue() {
+  const cfg = await getConfig();
+  if (!cfg.backendUrl || !cfg.deviceToken || !cfg.deviceId) return false;
+  const issued = typeof cfg.tokenIssuedAt === "number" ? cfg.tokenIssuedAt : 0;
+  if (Date.now() - issued < TOKEN_REFRESH_AFTER_MS) return false;
+  try {
+    const res = await fetch(
+      `${cfg.backendUrl}/v1/devices/${encodeURIComponent(cfg.deviceId)}/token/refresh`,
+      { method: "POST", headers: { authorization: `Bearer ${cfg.deviceToken}` } });
+    if (!res.ok) return false; // keep the old token; it may still have weeks left
+    const body = await res.json();
+    if (!body || typeof body.deviceToken !== "string") return false;
+    // The signing key is NOT re-pinned here. Renewal is a routine, unattended
+    // call; letting it change the trust anchor would make "wait for a refresh"
+    // a way to swap the key that verifies every policy this device enforces.
+    // Anchor changes stay a deliberate act at enrollment (trust-anchor.js).
+    await setConfig({ deviceToken: body.deviceToken, tokenIssuedAt: Date.now() });
+    return true;
+  } catch {
+    return false; // offline; the old token keeps working and we retry next loop
+  }
+}
+
 /** Long-poll the backend forever; call onSnapshot(snapshot, serverNowMs) per
  *  new, signature-verified snapshot. */
 export async function startPolicySync(onSnapshot) {
   for (;;) {
-    const cfg = await getConfig();
+    let cfg = await getConfig();
     if (!cfg.backendUrl || !cfg.deviceToken || !cfg.deviceId) { await sleep(3000); continue; }
+    // Renew before polling, and re-read: the poll below must use the token the
+    // refresh may have just replaced, or the first request after a renewal
+    // would be the one that fails.
+    if (await refreshDeviceTokenIfDue()) cfg = await getConfig();
     try {
       const url = `${cfg.backendUrl}/v1/devices/${cfg.deviceId}/policy/wait?since=${cfg.version ?? 0}&timeout=25000`;
       const res = await fetch(url, { headers: { authorization: `Bearer ${cfg.deviceToken}` } });
@@ -151,6 +202,33 @@ export async function startCategoryFilterSync(onFilters) {
       }
     } catch { /* keep cached set */ }
     await sleep(6 * 60 * 60 * 1000);
+  }
+}
+
+/**
+ * Report that a single-use ("just once") grant has been spent.
+ *
+ * Without this call `grantKind: "ONCE"` is an unlimited-replay window that
+ * happens to be five minutes long: the TTL is only the server's backstop, and
+ * the grant is meant to end at the first load. The endpoint has existed since
+ * the grant semantics landed and no client called it, which made "just once" the
+ * one option in the console that did not do what it said.
+ *
+ * Best-effort: consumption is client-attested (see ApprovalService.consumeGrant),
+ * so a failure costs at most the rest of the backstop window and must never stop
+ * the page the parent just approved.
+ */
+export async function consumeGrant(ruleId) {
+  const cfg = await getConfig();
+  if (!cfg.backendUrl || !cfg.deviceToken || !cfg.deviceId) return false;
+  try {
+    const res = await fetch(
+      `${cfg.backendUrl}/v1/devices/${encodeURIComponent(cfg.deviceId)}/grants/${encodeURIComponent(ruleId)}/consume`,
+      { method: "POST", headers: { authorization: `Bearer ${cfg.deviceToken}` } });
+    // 410 GONE means it was already spent — the outcome we wanted.
+    return res.ok || res.status === 410;
+  } catch {
+    return false;
   }
 }
 

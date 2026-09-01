@@ -5,6 +5,13 @@
  * token version, so a logout / password change can revoke every outstanding
  * token by bumping it), and `device` tokens minted at enrollment. Passwords are
  * verified in auth/password.ts — no external identity provider.
+ *
+ * A fourth kind, `mfa`, is the half-finished sign-in: minted when a password
+ * checks out but the account still owes a passkey assertion. It is deliberately
+ * NOT a `user` token — it carries no session, expires in minutes, and the only
+ * routes that accept it are the two that complete the passkey ceremony. If it
+ * were a user token with a flag, every route that forgot to check the flag would
+ * be a way to sign in with a password alone.
  */
 const enc = new TextEncoder();
 const b64url = (buf: ArrayBuffer | Uint8Array) =>
@@ -16,7 +23,8 @@ const unb64url = (s: string) =>
 export type Principal =
   | { kind: "user"; userId: string; tv: number; sid?: string }
   | { kind: "refresh"; userId: string; tv: number; sid?: string }
-  | { kind: "device"; deviceId: string; familyId: string; childId: string };
+  | { kind: "device"; deviceId: string; familyId: string; childId: string }
+  | { kind: "mfa"; userId: string; tv: number };
 
 interface Payload extends Record<string, unknown> { exp: number }
 
@@ -43,6 +51,8 @@ export async function verifyToken(secret: string, token: string): Promise<Princi
     return { kind: "user", userId: payload.userId, tv: Number(payload.tv ?? 0), sid: payload.sid as string | undefined };
   if (payload.kind === "refresh" && typeof payload.userId === "string")
     return { kind: "refresh", userId: payload.userId as string, tv: Number(payload.tv ?? 0), sid: payload.sid as string | undefined };
+  if (payload.kind === "mfa" && typeof payload.userId === "string")
+    return { kind: "mfa", userId: payload.userId, tv: Number(payload.tv ?? 0) };
   if (payload.kind === "device" && typeof payload.deviceId === "string")
     return { kind: "device", deviceId: payload.deviceId as string, familyId: payload.familyId as string, childId: payload.childId as string };
   return null;

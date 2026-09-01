@@ -195,8 +195,17 @@ async function auth(register) {
       awaitConfirmation(email);
       return;
     }
-    setTokens(await api("/v1/auth/login", { method: "POST", auth: false, body: { email, password } }));
+    const out = await api("/v1/auth/login", { method: "POST", auth: false, body: { email, password } });
+    // The password is only half of it now. An account with a passkey gets an
+    // `mfaToken` and NO session — see backend/src/http/api.ts. Anything this page
+    // stores from here would be a token that does not work, so nothing is.
+    if (out.mfaRequired) { beginPasskeyStep(out.mfaToken); return; }
+    setTokens(out);
     await afterLogin();
+    // No passkey on this account. Say so where they are looking rather than
+    // burying it, but do not block: the account still works, and refusing here
+    // would strand everyone who signed up before passkeys existed.
+    if (out.passkeyRequired) promptForPasskey();
   } catch (e) {
     failAuth(friendly(e), "password");
   } finally {
@@ -204,6 +213,91 @@ async function auth(register) {
     btn.removeAttribute("aria-disabled");
   }
 }
+/**
+ * Step two of sign-in.
+ *
+ * The mfa token lives in a local variable and never reaches localStorage. It is
+ * good for five minutes and for exactly two routes, so persisting it would buy
+ * nothing and would leave half a sign-in lying around on a shared computer.
+ */
+let pendingMfaToken = null;
+
+function beginPasskeyStep(token) {
+  pendingMfaToken = token;
+  $("authForm").classList.add("hide");
+  $("passkeyStep").classList.remove("hide");
+  $("authH").textContent = "One more step";
+  $("authErr").textContent = "";
+  announce("Confirm it's you with your passkey.");
+  $("btnPasskey").focus();
+  // Some browsers will fill this in without a tap. Offering it immediately is
+  // the difference between a second step and a second chore — and if the parent
+  // dismisses the sheet, the button is still there.
+  usePasskey();
+}
+
+function endPasskeyStep() {
+  pendingMfaToken = null;
+  $("passkeyStep").classList.add("hide");
+  $("authForm").classList.remove("hide");
+  $("authH").textContent = "Welcome back";
+  $("password").value = "";
+}
+
+async function usePasskey() {
+  if (!pendingMfaToken) return;
+  const btn = $("btnPasskey");
+  btn.setAttribute("aria-disabled", "true");
+  $("authErr").textContent = "";
+  try {
+    const out = await window.AjarPasskeys.completeSignIn((path, opts) =>
+      rawApiOrThrow(path, Object.assign({}, opts, { bearer: pendingMfaToken })));
+    setTokens(out);
+    endPasskeyStep();
+    await afterLogin();
+  } catch (e) {
+    // Whatever went wrong, the mfa token may or may not still be good — a spent
+    // challenge is gone either way, so the next attempt fetches a fresh one.
+    // Only a token that is genuinely dead sends them back to the password.
+    const msg = e && e.message ? e.message : "That didn't work. Try again.";
+    $("authErr").classList.remove("note");
+    $("authErr").textContent = isAuthError(e) ? "That sign-in timed out. Start again." : msg;
+    announceAlert($("authErr").textContent);
+    if (isAuthError(e)) endPasskeyStep();
+  } finally {
+    btn.removeAttribute("aria-disabled");
+  }
+}
+
+$("btnPasskey").onclick = usePasskey;
+$("btnPasskeyCancel").onclick = () => { endPasskeyStep(); $("email").focus(); };
+
+/**
+ * A request with an explicit bearer token, bypassing `api()`'s refresh logic.
+ *
+ * The refresh path is wrong for both passkey flows: during sign-in there is no
+ * session to refresh, and a 401 there means "start again", not "renew". Sharing
+ * `api()` would have meant threading a flag through it — this is smaller and the
+ * behaviour is visible where it is used.
+ */
+async function rawApiOrThrow(path, opts = {}) {
+  const headers = { "content-type": "application/json" };
+  if (opts.bearer) headers.authorization = `Bearer ${opts.bearer}`;
+  else if (state.token) headers.authorization = `Bearer ${state.token}`;
+  let res;
+  try {
+    res = await fetch(state.backendUrl + path, {
+      method: opts.method || "GET", headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+  } catch { throw new Error("OFFLINE"); }
+  const text = await res.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
+  if (!res.ok) throw new Error(data.error || String(res.status));
+  return data;
+}
+
 function failAuth(msg, focusId) {
   $("authErr").classList.remove("note");
   $("authErr").textContent = msg;
@@ -211,6 +305,162 @@ function failAuth(msg, focusId) {
   $(focusId).setAttribute("aria-invalid", "true");
   $(focusId).focus();
 }
+
+// ---------------------------------------------------------------------------
+// passkeys
+//
+// The list is not decoration. A parent who cannot see which passkeys are on
+// their account cannot notice one they did not add, and "remove a device I no
+// longer have" is the only self-service answer to a lost phone.
+// ---------------------------------------------------------------------------
+async function loadPasskeys() {
+  if (!window.AjarPasskeys) return;
+  const list = $("pkList");
+  try {
+    const keys = await api("/v1/me/passkeys");
+    renderPasskeys(keys);
+  } catch {
+    // Never a blocking failure: the console's job is approvals, and a passkey
+    // list that would not load must not stand between a parent and those.
+    list.innerHTML = "";
+  }
+}
+
+function renderPasskeys(keys) {
+  const list = $("pkList");
+  list.innerHTML = "";
+  if (!keys.length) {
+    $("pkWhy").textContent =
+      "You have no passkey yet. Without one, your password is the only thing "
+      + "protecting what your children can see.";
+    return;
+  }
+  $("pkWhy").textContent =
+    "A passkey is what stops someone who has your password from changing what your children can see.";
+  for (const k of keys) {
+    const li = document.createElement("li");
+    const name = document.createElement("strong");
+    name.textContent = k.label;
+    const when = document.createElement("span");
+    when.className = "help";
+    const used = k.lastUsedAt ? `last used ${new Date(k.lastUsedAt).toLocaleDateString()}` : "never used yet";
+    // `backedUp` is the honest answer to "what happens if I lose this device?",
+    // and it is the difference between a passkey that survives a lost phone and
+    // one that does not.
+    when.textContent = k.backedUp ? `${used} · synced to your other devices` : `${used} · this device only`;
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "btn-ghost";
+    del.textContent = "Remove";
+    del.onclick = () => removePasskey(k.id, k.label);
+    li.append(name, document.createTextNode(" "), when, document.createTextNode(" "), del);
+    list.append(li);
+  }
+}
+
+async function removePasskey(id, label) {
+  $("pkErr").textContent = "";
+  if (!confirm(`Remove the passkey "${label}"? You'll need another way to sign in.`)) return;
+  try {
+    await api(`/v1/me/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" });
+    announce("Passkey removed.");
+    await loadPasskeys();
+  } catch (e) {
+    // The 409 here carries a message written for a parent — "add another passkey
+    // before removing this one" — so it is shown as-is rather than mapped to a
+    // status-code phrase that would explain nothing.
+    $("pkErr").textContent = String(e && e.message ? e.message : e);
+    announceAlert($("pkErr").textContent);
+  }
+}
+
+$("btnAddPasskey").onclick = async () => {
+  const btn = $("btnAddPasskey");
+  $("pkErr").textContent = "";
+  if (!window.AjarPasskeys?.supported()) {
+    $("pkErr").textContent = "This browser can't create a passkey. Try opening ajar.family on your phone.";
+    return;
+  }
+  btn.setAttribute("aria-disabled", "true");
+  announce("Waiting for your device.");
+  try {
+    await window.AjarPasskeys.enroll((path, opts) => api(path, opts), window.AjarPasskeys.defaultLabel());
+    announce("Passkey added.");
+    await loadPasskeys();
+  } catch (e) {
+    $("pkErr").textContent = String(e && e.message ? e.message : e);
+    announceAlert($("pkErr").textContent);
+  } finally {
+    btn.removeAttribute("aria-disabled");
+  }
+};
+
+/** Signed in with a password and nothing else. Point at the card rather than
+ *  opening a modal: an approval may be waiting, and that comes first. */
+function promptForPasskey() {
+  $("passkeysCard").scrollIntoView({ block: "nearest", behavior: "smooth" });
+  announce("Your account has no passkey yet. Add one to protect it.");
+}
+
+// ---------------------------------------------------------------------------
+// closing the account
+//
+// Required to exist: an app that lets you create an account has to let you
+// delete it from inside the app (App Store 5.1.1(v)). Required to be careful:
+// for the last owner of a family it takes the children, their devices and every
+// rule with it, and nothing here can undo that.
+//
+// Two deliberate frictions, and no more than two. Revealing the form is one act
+// and typing the password is another, which is enough to make it hard to do by
+// accident — while "type DELETE to confirm" would only teach a parent to type
+// DELETE. The password is the same re-authentication the server insists on.
+// ---------------------------------------------------------------------------
+
+$("btnCloseAccount").onclick = () => {
+  $("closeForm").classList.remove("hide");
+  $("btnCloseAccount").classList.add("hide");
+  $("closePw").focus();
+};
+
+$("btnCloseCancel").onclick = () => {
+  $("closeForm").classList.add("hide");
+  $("btnCloseAccount").classList.remove("hide");
+  $("closePw").value = "";
+  $("closeErr").textContent = "";
+  $("btnCloseAccount").focus();
+};
+
+$("closeForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("closeErr").textContent = "";
+  const password = $("closePw").value;
+  if (!password) { $("closeErr").textContent = "Type your password to confirm."; $("closePw").focus(); return; }
+
+  const btn = $("btnCloseConfirm");
+  btn.setAttribute("aria-disabled", "true");
+  announce("Closing your account…");
+  try {
+    await api("/v1/me", { method: "DELETE", body: { password } });
+    // Nothing to sign out of any more — the session went with the account. Clear
+    // the tokens before reloading or the console comes back trying to use them.
+    clearTokens();
+    localStorage.removeItem("cf_family");
+    document.body.innerHTML =
+      '<main class="wrap"><section class="card"><h2>Your account is closed</h2>'
+      + '<p>Everything has been deleted. If any devices are still set up, remove Ajar from them '
+      + 'when you get the chance — they can no longer be managed from here.</p></section></main>';
+  } catch (err) {
+    // The 401 here means "that password is wrong", not "your session ended", so
+    // the generic status copy would actively mislead.
+    $("closeErr").textContent = isAuthError(err)
+      ? "That password is not right."
+      : friendly(err);
+    announceAlert($("closeErr").textContent);
+    $("closePw").focus();
+  } finally {
+    btn.removeAttribute("aria-disabled");
+  }
+});
 
 $("signout").onclick = async () => {
   try { await api("/v1/auth/logout", { method: "POST" }); } catch { /* revoke best-effort */ }
@@ -225,6 +475,9 @@ async function afterLogin() {
   $("signout").classList.remove("hide");
   $("authCard").classList.add("hide");
   $("familyCard").classList.remove("hide");
+  $("passkeysCard").classList.remove("hide");
+  $("dangerCard").classList.remove("hide");
+  loadPasskeys();
   renderFamilyPick(me.families);
   if (!state.familyId && me.families[0]) await selectFamily(me.families[0].familyId);
   else if (state.familyId) await selectFamily(state.familyId);

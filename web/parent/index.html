@@ -147,7 +147,59 @@
           <button type="button" class="btn-ghost" id="btnMode">Create an account</button>
         </div>
       </form>
+      <!-- Step two of sign-in. Hidden until the password is accepted and the
+           server says the account has a passkey; the form above is hidden then,
+           because going back and retyping the password would start over. -->
+      <div id="passkeyStep" class="hide">
+        <p>Now confirm it's you with your passkey.</p>
+        <div class="actions">
+          <button type="button" class="btn-primary" id="btnPasskey">Use your passkey</button>
+          <button type="button" class="btn-ghost" id="btnPasskeyCancel">Start again</button>
+        </div>
+      </div>
       <p class="errline" id="authErr"></p>
+    </section>
+
+    <!-- ================= Passkeys ================= -->
+    <section class="card hide" id="passkeysCard" aria-labelledby="pkH">
+      <div class="cardhead">
+        <h2 id="pkH">Passkeys</h2>
+      </div>
+      <p class="help" id="pkWhy">A passkey is what stops someone who has your password from changing what your children can see.</p>
+      <ul class="reqlist" id="pkList"></ul>
+      <div class="actions">
+        <button type="button" class="btn-primary" id="btnAddPasskey">Add a passkey</button>
+      </div>
+      <p class="errline" id="pkErr"></p>
+    </section>
+
+    <!-- ================= Closing the account ================= -->
+    <section class="card hide" id="dangerCard" aria-labelledby="dangerH">
+      <div class="cardhead">
+        <h2 id="dangerH">Close your account</h2>
+      </div>
+      <p class="help" id="dangerWhat">
+        This deletes your account and everything in it. If you are the only grown-up on a family,
+        that family goes too — children, their devices, every rule and every request. It cannot be undone.
+      </p>
+      <p class="help">
+        Devices already set up will stop receiving updates. They keep enforcing the last rules they
+        were given until they are removed from the device.
+      </p>
+      <div class="actions">
+        <button type="button" class="btn-ghost" id="btnCloseAccount">Close my account…</button>
+      </div>
+      <form id="closeForm" class="hide" novalidate>
+        <div class="field">
+          <label for="closePw">Type your password to confirm</label>
+          <input id="closePw" type="password" autocomplete="current-password" />
+        </div>
+        <div class="actions">
+          <button type="submit" class="btn-primary" id="btnCloseConfirm">Delete everything</button>
+          <button type="button" class="btn-ghost" id="btnCloseCancel">Keep my account</button>
+        </div>
+      </form>
+      <p class="errline" id="closeErr"></p>
     </section>
 
     <!-- ================= 1. THE JOB: asks ================= -->
@@ -224,6 +276,7 @@
     <button type="button" class="hide" id="toastUndo">Undo</button>
   </div>
 
-  <script src="app.js"></script>
+  <script src="webauthn.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

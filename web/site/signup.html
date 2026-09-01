@@ -58,7 +58,7 @@
   </a>
 
   <div class="dots" aria-hidden="true">
-    <i id="d1" data-on></i><i id="d2"></i><i id="d3"></i><i id="d4"></i>
+    <i id="d1" data-on></i><i id="d2"></i><i id="d3"></i><i id="d4"></i><i id="d5"></i>
   </div>
 
   <p class="sr" id="sr" role="status" aria-live="polite"></p>
@@ -99,7 +99,17 @@
     <button class="link" type="button" id="resend">Send it again</button>
   </div>
 
-  <!-- 2 · family -->
+  <!-- 2 · passkey. Before the family, deliberately: the account that says yes
+       is protected before it has anything to say yes about. -->
+  <div id="sKey" hidden>
+    <h1>Add a passkey</h1>
+    <p class="sub">One touch instead of a password — and the thing that stops someone who has your password from changing what your children can see.</p>
+    <p class="note" id="keyWhat">Your device will ask for Face&nbsp;ID, Touch&nbsp;ID, a fingerprint or your screen lock. Nothing is sent to us that anyone could reuse, and there is no code for someone to talk you into reading out.</p>
+    <button class="primary" type="button" id="addKey">Create a passkey</button>
+    <button class="link" type="button" id="skipKey" hidden>Continue without one for now</button>
+  </div>
+
+  <!-- 3 · family -->
   <form id="s2" hidden>
     <h1>Name your family</h1>
     <p class="sub">Only you and any other grown-ups you add will see this.</p>
@@ -110,7 +120,7 @@
     <button class="primary" type="submit">Continue</button>
   </form>
 
-  <!-- 3 · first child -->
+  <!-- 4 · first child -->
   <form id="s3" hidden>
     <h1>Who is this for?</h1>
     <p class="sub">Add one child now — you can add more later.</p>
@@ -125,7 +135,7 @@
     <button class="primary" type="submit">Continue</button>
   </form>
 
-  <!-- 4 · device + code -->
+  <!-- 5 · device + code -->
   <form id="s4" hidden>
     <h1>Set up their device</h1>
     <p class="sub">Pick the device Ajar will run on. You'll get a code to type into it.</p>
@@ -142,7 +152,7 @@
     <button class="link" type="button" id="skipCode">I'll do this later</button>
   </form>
 
-  <!-- 5 · done -->
+  <!-- 6 · done -->
   <div id="s5" hidden>
     <h1 id="doneHead">Type this on their device</h1>
     <p class="sub" id="doneSub">Open Ajar there and enter the code. It works once.</p>
@@ -151,6 +161,7 @@
     <button class="primary" type="button" onclick="location.href='/parent/'">Go to your console</button>
   </div>
 </div>
+<script src="../parent/webauthn.js"></script>
 <script src="signup.js"></script>
 </body>
 </html>

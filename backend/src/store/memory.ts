@@ -6,6 +6,8 @@
 import type { Repository } from "./repository.js";
 import { hostCandidates, normalizeHost } from "@ajar/shared/categories";
 import type {
+  WebAuthnCredential,
+  WebAuthnChallenge,
   Session,
   User,
   Family,
@@ -65,6 +67,26 @@ export class MemoryStore implements Repository {
   async updateSession(s: Session) { this.sessions.set(s.id, clone(s)); return clone(s); }
   async listSessionsForUser(userId: string) {
     return [...this.sessions.values()].filter((s) => s.userId === userId).map(clone);
+  }
+
+  // --- passkeys -----------------------------------------------------------
+  private credentials = new Map<string, WebAuthnCredential>();
+  private challenges = new Map<string, WebAuthnChallenge>();
+
+  async createWebAuthnCredential(c: WebAuthnCredential) { this.credentials.set(c.id, clone(c)); return clone(c); }
+  async getWebAuthnCredential(id: string) { const c = this.credentials.get(id); return c ? clone(c) : null; }
+  async listWebAuthnCredentials(userId: string) {
+    return [...this.credentials.values()].filter((c) => c.userId === userId).map(clone);
+  }
+  async updateWebAuthnCredential(c: WebAuthnCredential) { this.credentials.set(c.id, clone(c)); return clone(c); }
+  async deleteWebAuthnCredential(id: string) { this.credentials.delete(id); }
+  async createWebAuthnChallenge(c: WebAuthnChallenge) { this.challenges.set(c.challenge, clone(c)); return clone(c); }
+  async takeWebAuthnChallenge(challenge: string) {
+    const c = this.challenges.get(challenge);
+    // Deleted whether or not it had expired: a used challenge is spent either
+    // way, and leaving expired rows behind is how this map grows without bound.
+    this.challenges.delete(challenge);
+    return c ? clone(c) : null;
   }
 
   async createPasswordResetToken(t: PasswordResetToken) { this.resetTokens.set(t.id, clone(t)); return clone(t); }
@@ -148,6 +170,49 @@ export class MemoryStore implements Repository {
       if (m.familyId !== familyId || !m.assignedChildIds.includes(childId)) continue;
       this.memberships.set(id, { ...clone(m), assignedChildIds: m.assignedChildIds.filter((c) => c !== childId) });
     }
+  }
+
+  async deleteFamilyCascade(familyId: string) {
+    for (const c of [...this.children.values()]) {
+      if (c.familyId === familyId) await this.deleteChildCascade(familyId, c.id);
+    }
+    // Devices, rules and grants scoped to the FAMILY rather than to any child
+    // survive deleteChildCascade, so they are swept explicitly. A family-scoped
+    // rule left behind would be a dangling permission with nothing to check it
+    // against.
+    for (const [id, d] of [...this.devices]) if (d.familyId === familyId) this.devices.delete(id);
+    for (const [id, r] of [...this.rules]) if (r.scope.familyId === familyId) this.rules.delete(id);
+    for (const [id, t] of [...this.tempRules]) if (t.scope.familyId === familyId) this.tempRules.delete(id);
+    for (const [id, r] of [...this.requests]) if (r.familyId === familyId) this.requests.delete(id);
+    for (const [id, d] of [...this.decisions]) if (d.familyId === familyId) this.decisions.delete(id);
+    for (const [id, e] of [...this.enrollments]) if (e.familyId === familyId) this.enrollments.delete(id);
+    for (const [id, m] of [...this.memberships]) if (m.familyId === familyId) this.memberships.delete(id);
+    for (const k of [...this.defaults.keys()]) if (k.startsWith(`${familyId}:`)) this.defaults.delete(k);
+    for (const k of [...this.versions.keys()]) if (k.startsWith(`${familyId}:`)) this.versions.delete(k);
+    // The audit log goes too. It is a record OF this family — who approved what
+    // for which child — so keeping it after an erasure request would keep the
+    // most sensitive thing we hold about them.
+    this.audit = this.audit.filter((a) => a.familyId !== familyId);
+    this.families.delete(familyId);
+  }
+
+  async deleteUserCascade(userId: string) {
+    for (const [id, s] of [...this.sessions]) if (s.userId === userId) this.sessions.delete(id);
+    for (const [id, c] of [...this.credentials]) if (c.userId === userId) this.credentials.delete(id);
+    for (const [k, c] of [...this.challenges]) if (c.userId === userId) this.challenges.delete(k);
+    for (const [id, e] of [...this.endpoints]) if (e.userId === userId) this.endpoints.delete(id);
+    for (const [k, t] of [...this.resetTokens]) if (t.userId === userId) this.resetTokens.delete(k);
+    for (const [k, t] of [...this.verifyTokens]) if (t.userId === userId) this.verifyTokens.delete(k);
+    for (const [id, m] of [...this.memberships]) if (m.userId === userId) this.memberships.delete(id);
+    const user = this.users.get(userId);
+    // A pending sign-up for the same address would otherwise outlive the account
+    // and let it be recreated by a link from before the deletion.
+    if (user) {
+      for (const [k, p] of [...this.pendingRegistrations]) {
+        if (p.email === user.email) this.pendingRegistrations.delete(k);
+      }
+    }
+    this.users.delete(userId);
   }
 
   async deleteDeviceCascade(familyId: string, deviceId: string) {
