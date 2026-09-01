@@ -262,6 +262,11 @@ living document for an alpha, not a completed audit.
   rather than failing the request that triggered it (a child's access request
   must not 500 because the mail provider is down), so a notification can be lost
   silently. There is no delivery receipt, retry queue or bounce handling, and
+  On Workers the default path is now Cloudflare Email Sending (`[[send_email]]`,
+  `env.EMAIL.send()`), which carries NO credential — it is authorised by being
+  bound, so there is nothing to leak and nothing to rotate, and no third party
+  sees the subject lines. The paragraph below describes the provider path, still
+  supported and still what a self-hosted deployment uses:
   `MAIL_TOKEN` is a long-lived bearer credential for a third party that can see
   the subject lines. Reset codes travel in plain-text email and are therefore
   only as strong as the parent's inbox — hence the 30-minute, single-use bound.

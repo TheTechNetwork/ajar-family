@@ -21,10 +21,14 @@ const $ = (id) => document.getElementById(id);
 const API = (() => {
   const q = new URLSearchParams(location.search).get("api");
   if (q && localStorage.getItem("cf_dev") === "1") return q.replace(/\/+$/, "");
-  if (/(^|\.)ajar\.family$/.test(location.hostname) && location.hostname !== "api.ajar.family")
-    return "https://api.ajar.family";
+  // Same origin, always — the Worker that serves this page also serves /v1.
+  // This used to special-case *.ajar.family to https://api.ajar.family, written
+  // when the site had no host of its own. That is now actively wrong: it would
+  // send a cross-origin request (needing CORS to keep working) from a page whose
+  // whole design is that there is only ever one origin. Matches
+  // resolveBackendUrl() in web/parent/app.js, which the console already used.
   if (location.origin && location.origin !== "null") return location.origin;
-  return "http://localhost:8787";
+  return "http://localhost:8787"; // file:// during local development only
 })();
 
 const state = { token: null, familyId: null, childId: null, childName: "" };

@@ -90,6 +90,9 @@ export class App {
     // Real email delivery whenever a provider is configured (MAIL_ENDPOINT +
     // MAIL_TOKEN); tests inject an in-memory MailSender; otherwise nothing is
     // configured and outbound mail is dropped with a warning rather than faked.
+    // Order matters. An injected sender wins (tests, and the Worker passing its
+    // own Email Sending binding); then a configured HTTPS provider; then nothing
+    // is configured and mail is dropped LOUDLY rather than faked.
     const mail = opts.mail
       ?? (opts.config.mailEndpoint && opts.config.mailToken
         ? new FetchMailSender({

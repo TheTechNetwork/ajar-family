@@ -226,7 +226,7 @@ matter are not:
 | No paired iOS device | **Resolved** — iPhone 16 Pro Max, iOS 27.0, Developer Mode on |
 | No App IDs / App Group registered | **Resolved** — all three App IDs + the App Group exist in `2BPX4R682U` |
 | Family Controls entitlement (development) | **Resolved** — see below; granted without Apple review |
-| Family Controls entitlement (distribution) | **STILL BLOCKED** — not requested; TestFlight impossible until granted |
+| Family Controls entitlement (distribution) | **Resolved (2026-09-01)** — granted. Proven, not just reported: `testflight.yml` run 8 archived `-configuration Release` from `7360050` and UPLOADED, with `com.apple.developer.family-controls` declared in `AjarFilter.entitlements`. codesign refuses an entitlement the profile does not carry, so a successful signed upload is itself the evidence the grant had landed and the distribution profiles carry it. |
 | **A child/teen Apple ID on the test device** | **STILL BLOCKED — the new critical path** (see below) |
 
 **The app is signed, installed and running on hardware (2026-08-31).** Xcode

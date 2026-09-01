@@ -44,6 +44,37 @@ export class InMemoryMailSender implements MailSender {
   async send(msg: MailMessage): Promise<void> { this.sent.push(msg); }
 }
 
+/**
+ * Cloudflare Email Sending, via the Worker's `send_email` binding.
+ *
+ * Preferred over FetchMailSender on Workers for one reason that outranks
+ * convenience: there is no long-lived bearer token. MAIL_TOKEN is a credential
+ * for a third party that can read every subject line we send, and it is the kind
+ * of secret that leaks and then has to be rotated everywhere at once. This has
+ * none — the binding is authorised by being bound.
+ *
+ * The sender address must belong to a domain onboarded to Email Service, and a
+ * `from` that is not verified fails with E_SENDER_NOT_VERIFIED. That is a
+ * configuration error, not a transient one, so it is worth reading the message
+ * rather than assuming a retry helps.
+ */
+export interface EmailBinding {
+  send(msg: { from: string; to: string; subject: string; text?: string; html?: string }):
+    Promise<{ messageId: string }>;
+}
+
+export class WorkersEmailSender implements MailSender {
+  constructor(private binding: EmailBinding, private from: string) {}
+
+  async send(msg: MailMessage): Promise<void> {
+    // text only, deliberately, for the same reasons FetchMailSender gives: less
+    // to get wrong, no remote images to leak a read receipt, renders everywhere.
+    await this.binding.send({
+      from: this.from, to: msg.to, subject: msg.subject, text: msg.text,
+    });
+  }
+}
+
 export interface FetchMailSenderOptions {
   /** Absolute https URL of the provider's send endpoint. */
   endpoint: string;
