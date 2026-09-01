@@ -23,7 +23,7 @@ struct ContentView: View {
         }
         .animation(reduceMotion ? nil : .default, value: controller.isEnrolled)
         .animation(reduceMotion ? nil : .default, value: controller.filterEnabled)
-        // The block page's "Ask to unlock" opens ajar://request?u=…
+        // The block page's "Ask to open it" opens ajar://request?u=…
         .onOpenURL { url in Task { await controller.handleIncoming(url: url) } }
         .sheet(isPresented: Binding(
             get: { controller.requestState != .idle },
@@ -122,7 +122,7 @@ struct SetUpView: View {
                 // child is deciding whether to trust this, not buried in a policy.
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "shield").ajarFont(16).foregroundStyle(Ajar.accentInk)
-                    Text("Ajar records what you ask to unlock. It does not record everything you visit.")
+                    Text("Ajar records what you ask to open. It does not record everything you visit.")
                         .ajarFont(14, relativeTo: .footnote).foregroundStyle(Ajar.accentInk)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -232,7 +232,7 @@ struct ProtectedView: View {
     }
 }
 
-// MARK: - After "Ask to unlock"
+// MARK: - After "Ask to open it"
 
 struct RequestStatusView: View {
     @ObservedObject var controller: FilterController

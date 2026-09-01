@@ -745,7 +745,7 @@ const DEFAULT_DURATION_I = 1; // 30 min — the narrowest-useful default (§3)
  * This MUST be derived from the request, not hardcoded: a THIS_VIDEO grant
  * becomes a YOUTUBE_VIDEO rule whose value is matched against a canonical video
  * id, so applying it to a DOMAIN/CATEGORY/URL request produces a rule that can
- * never match — the parent is told "unlocked" and the child stays blocked.
+ * never match — the parent is told "opened" and the child stays blocked.
  *
  * Note CATEGORY: a child blocked by "all social media" is granted THIS site,
  * never the whole category. Say yes to the thing asked for, nothing wider.

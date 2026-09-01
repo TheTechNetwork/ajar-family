@@ -443,7 +443,7 @@ export function buildRouter(app: App): Router {
     // promise without gendering anyone (docs/UX_PRINCIPLES.md §4, §9).
     const askLabel = named ? `Ask ${escapeHtml(ally)}` : "Send request";
     const subhead = named
-      ? `Ask ${escapeHtml(ally)} to unlock it — you’ll hear back right away.`
+      ? `Ask ${escapeHtml(ally)} to open it — you’ll hear back right away.`
       : "Send a request — you’ll hear back right away.";
 
     return html(`<!doctype html>
@@ -458,11 +458,13 @@ export function buildRouter(app: App): Router {
     --bg:#F6F4EE; --surface:#FFFFFF; --surface-2:#EFEDE4; --line:#E3E1D8;
     --field-line:#767468; --ink:#12241F; --ink-2:#3E4F49; --muted:#5C6B64;
     --accent-ink:#0b6355; --accent-wash:#E7F4F1; --yes:#FF8A5B; --yes-ink:#12241F;
+    --accent-strong:#0D6D5E; --on-accent:#FFFFFF;
   }
   @media (prefers-color-scheme: dark) { :root {
     --bg:#12211D; --surface:#1A2A26; --surface-2:#223531; --line:#2B3A35;
     --field-line:#7b8d87; --ink:#EAF1EE; --ink-2:#C3D2CC; --muted:#9FB1AA;
     --accent-ink:#5FD3BE; --accent-wash:#1F322D; --yes:#FF8A5B; --yes-ink:#2A1208;
+    --accent-strong:#35B7A2; --on-accent:#0B1512;
   } }
   * { box-sizing: border-box; }
   /* "safe center" and not plain "center" (no backticks anywhere in this file's
@@ -498,12 +500,18 @@ export function buildRouter(app: App): Router {
   .url { font:12px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
          color:var(--muted); word-break:break-all; margin-top:8px; }
   /* Coral is FILL ONLY and carries dark ink — white on it measures 2.32:1. */
-  /* border is required, not decorative: coral measures 2.32:1 on this card, so
-     the ask button had no perceivable boundary (SC 1.4.11). tokens.css states
-     the rule; this inline copy re-implemented the button and dropped it. */
+  /* TEAL, not coral, and this is the brand rule rather than a preference.
+     BRAND.md reserves coral for THE YES — the parent's action. This button is
+     the child's ASK, which is not a yes, and both extension block pages have
+     always drawn it in accent-strong. Three block pages disagreeing on the
+     colour of the same control is exactly the variability UX_PRINCIPLES §7 says
+     stops the reflex forming; and spending coral here left it meaning two
+     different things in one loop.
+     No border needed: on-accent on accent-strong is a text pair that clears
+     4.5:1 (check-contrast.mjs), unlike white on coral at 2.32:1. */
   .btn { display:flex; align-items:center; justify-content:center; width:100%;
-         min-height:52px; background:var(--yes); color:var(--yes-ink); text-decoration:none;
-         border:1px solid var(--yes-ink);
+         min-height:52px; background:var(--accent-strong); color:var(--on-accent);
+         text-decoration:none;
          border-radius:999px; font-size:16px; font-weight:600; }
   /* --line is documented decorative-only (1.31:1) and this is a real control —
      the child's way back to the page. --field-line is the border token that
@@ -531,7 +539,7 @@ export function buildRouter(app: App): Router {
     </svg>
     ajar
   </div>
-  ${safe ? `<h1>You can ask to unlock this page</h1>
+  ${safe ? `<h1>You can ask to open this page</h1>
   <p class="sub">${subhead}</p>
   <div class="target">
     <div class="name">${shown.replace(/^https?:\/\/(www\.)?/i, "").split("/")[0] || "This page"}</div>

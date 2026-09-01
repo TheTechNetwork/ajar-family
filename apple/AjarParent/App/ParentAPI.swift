@@ -71,7 +71,7 @@ enum ApprovalScope: String, Codable, CaseIterable {
     /// The scopes that can actually MATCH a given target.
     ///
     /// This is not cosmetic. Offering a scope the target cannot produce is how
-    /// the backend once minted an unmatchable rule: the parent saw "Unlocked"
+    /// the backend once minted an unmatchable rule: the parent saw "Opened"
     /// and the child stayed blocked. Keep in step with `applicableScopes` in
     /// backend/src/domain/services.ts.
     static func applicable(to target: PolicyTargetType) -> [ApprovalScope] {
@@ -86,31 +86,37 @@ enum ApprovalScope: String, Codable, CaseIterable {
     }
 
     /// The label on the primary button — a full sentence about what will happen,
-    /// not a chip to decode. "Unlock this video" reads as a decision; "video"
+    /// not a chip to decode. "Open this video" reads as a decision; "video"
     /// next to a duration pill reads as a form to fill in.
     var actionLabel: String {
         switch self {
-        case .thisRequest: return "Unlock just this"
-        case .thisURL:     return "Unlock this page"
-        case .thisVideo:   return "Unlock this video"
-        case .thisChannel: return "Unlock this channel"
-        case .thisDomain:  return "Unlock this site"
-        case .thisDevice:  return "Unlock on this device"
-        case .thisChild:   return "Unlock for this child"
-        case .wholeFamily: return "Unlock for everyone"
+        case .thisRequest: return "Open just this"
+        case .thisURL:     return "Open this page"
+        case .thisVideo:   return "Open this video"
+        case .thisChannel: return "Open this channel"
+        case .thisDomain:  return "Open this site"
+        case .thisDevice:  return "Open on this device"
+        case .thisChild:   return "Open for this child"
+        case .wholeFamily: return "Open for everyone"
         }
     }
 
     var label: String {
         switch self {
-        case .thisRequest: return "Just this"
-        case .thisURL:     return "This page"
-        case .thisVideo:   return "This video only"
-        case .thisChannel: return "This whole channel"
+        // Word for word the console's SCOPE_LABEL (web/parent/app.js). The two
+        // surfaces described the same eight decisions differently — "This video
+        // only" against "This video", "Everyone" against "This, for everyone in
+        // the family" — so a parent who used both learned the product twice.
+        // The console's wording is the reference: it says what the decision
+        // covers rather than naming the thing.
+        case .thisRequest: return "Just this once"
+        case .thisURL:     return "This exact page"
+        case .thisVideo:   return "This video"
+        case .thisChannel: return "Everything from this channel"
         case .thisDomain:  return "This whole site"
-        case .thisDevice:  return "This device"
-        case .thisChild:   return "This child"
-        case .wholeFamily: return "Everyone"
+        case .thisDevice:  return "This, on this device"
+        case .thisChild:   return "This, on all of this child's devices"
+        case .wholeFamily: return "This, for everyone in the family"
         }
     }
 }
@@ -130,11 +136,18 @@ enum ApprovalDuration: Hashable {
 
     var label: String {
         switch self {
-        case .minutes(let m) where m % 60 == 0: return "\(m / 60)h"
+        // Same words as the console's DURATIONS (web/parent/app.js). They
+        // disagreed on both the OPTIONS and the WORDS: the app offered
+        // Once/30 min/2h/Today/Always and the console 15 min/30 min/1 hour/End
+        // of day/Just once/For good — and "Always" quietly undid the deliberate
+        // softening of "For good", on the surface where a permanent decision is
+        // hardest to undo.
+        case .minutes(let m) where m == 60: return "1 hour"
+        case .minutes(let m) where m % 60 == 0: return "\(m / 60) hours"
         case .minutes(let m): return "\(m) min"
-        case .untilEndOfDay: return "Today"
-        case .once: return "Once"
-        case .always: return "Always"
+        case .untilEndOfDay: return "End of day"
+        case .once: return "Just once"
+        case .always: return "For good"
         }
     }
 
@@ -147,8 +160,16 @@ enum ApprovalDuration: Hashable {
         }
     }
 
+    /// The same six options the console offers, in the same order
+    /// (web/parent/app.js DURATIONS). The app offered five different ones, so
+    /// the Change… sheet on the phone could not express decisions a parent had
+    /// already learned to make in the browser — and offered a 2-hour grant the
+    /// console has never had.
+    ///
+    /// Narrow → broad, with the two open-ended options last, so the list itself
+    /// argues for the shorter grant.
     static let choices: [ApprovalDuration] =
-        [.once, .minutes(30), .minutes(120), .untilEndOfDay, .always]
+        [.minutes(15), .minutes(30), .minutes(60), .untilEndOfDay, .once, .always]
 }
 
 /// The long-poll feed's envelope. The endpoint returns an OBJECT with a

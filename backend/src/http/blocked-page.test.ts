@@ -153,7 +153,7 @@ test("the page a child actually gets has the ask button on it", async () => {
   assert.equal(res.status, 200);
   const page = String(res.body);
 
-  assert.match(page, /You can ask to unlock this page/);
+  assert.match(page, /You can ask to open this page/);
   assert.match(page, /ajar:\/\/request\?u=/, "the deep link the button opens");
   assert.doesNotMatch(page, /This page is closed/);
   // The site name, not a uuid and not the raw string with its scheme.
@@ -186,7 +186,7 @@ test("end to end: a multi-param page reaches the button with its query whole", a
   const res = await get(r, "/blocked?u=example.com/article?id=123&page=2");
   const page = String(res.body);
 
-  assert.match(page, /You can ask to unlock this page/);
+  assert.match(page, /You can ask to open this page/);
   // The deep link carries the WHOLE thing; the app turns it into the URL rule.
   const link = /href="(ajar:\/\/request\?u=[^"]*)"/.exec(page)?.[1];
   assert.ok(link, "the ask button is a deep link");

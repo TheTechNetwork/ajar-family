@@ -4,7 +4,7 @@
  * Reads the blocked URL + reason from the query string that background.js put on
  * the redirect (blocked.html?u=<enc>&reason=<enc>&key=<enc>), shows a friendly
  * human label (the raw URL hides behind Details — UX_PRINCIPLES §4), and on
- * "Ask to unlock" posts the blocked canonical id to the service via the
+ * "Ask to open it" posts the blocked canonical id to the service via the
  * background worker's native-messaging connection.
  *
  * FOUR HONEST STATES (docs/UX_PRINCIPLES.md §2, §9)
@@ -86,7 +86,7 @@ function setStatus(text, kind) {
 
 // ---------------------------------------------------------------------------
 // Remembering the ask. Without this a reload resets the button to a virgin
-// "Ask to unlock" and files a duplicate, which the parent sees as spam.
+// "Ask to open it" and files a duplicate, which the parent sees as spam.
 // ---------------------------------------------------------------------------
 const ASKS_KEY = "ajarAsks";
 const askKey = key || (blockedUrl ? `URL:${blockedUrl}` : "");

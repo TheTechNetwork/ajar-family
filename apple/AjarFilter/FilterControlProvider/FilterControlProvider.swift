@@ -103,7 +103,7 @@ final class FilterControlProvider: NEFilterControlProvider {
                 // BRAND.md §6 names as the off-brand example, and it sets the
                 // child's read of everything that follows — a warm page after a
                 // helpdesk button teaches that the warmth is a veneer.
-                "requestAccessButton": "Ask to unlock" as NSString
+                "requestAccessButton": "Ask to open it" as NSString
             ],
         ]
         completionHandler(nil)

@@ -142,7 +142,10 @@ const CORAL_SURFACES = [
                             /\.btn-yes\b[^}]*\{[^}]*border-color:\s*var\(--yes-ink\)/],
   ["web/site/index.html", /background:\s*var\(--yes\)/, /border-color:\s*var\(--yes-ink\)/],
   ["web/site/signup.html", /background:\s*var\(--yes\)/, /border:\s*1px solid var\(--yes-ink\)/],
-  ["backend/src/http/api.ts", /background:var\(--yes\)/, /border:1px solid var\(--yes-ink\)/],
+  // The iOS block page is NOT in this list any more, and that is the point:
+  // BRAND.md reserves coral for the parent's yes, and this page carries the
+  // CHILD'S ASK, which both extension block pages have always drawn in teal.
+  // Asserted below as an absence, so it cannot drift back to coral unnoticed.
   // SwiftUI writes the same two facts as a fill and an overlay stroke.
   ["apple/AjarParent/App/Theme.swift", /\.background\(Ajar\.yes/, /\.stroke\(Ajar\.yesInk/],
   ["apple/AjarFilter/App/Theme.swift", /\.background\(Ajar\.yes/, /\.stroke\(Ajar\.yesInk/],
@@ -164,6 +167,19 @@ for (const [rel, fill, edge] of CORAL_SURFACES) {
   if (!edge.test(text)) {
     console.error(`✗ ${rel}: paints --yes but never draws its border (${edge}). ` +
       "Coral is 2.32:1 on a light surface; without an edge the control fails SC 1.4.11.");
+    failures++;
+  }
+}
+
+// The one surface that must NOT paint coral. Spending it on the child's ask
+// left the same colour meaning "ask" on one screen and "yes" on the next.
+{
+  const rel = "backend/src/http/api.ts";
+  const text = readFileSync(join(repoRoot, rel), "utf8");
+  const blockPage = text.slice(text.indexOf(".btn {"), text.indexOf(".foot {"));
+  if (/background:\s*var\(--yes\)/.test(blockPage)) {
+    console.error(`✗ ${rel}: the block page's ask button paints --yes. Coral is reserved ` +
+      "for the parent's yes (BRAND.md); the child's ask is --accent-strong on both other block pages.");
     failures++;
   }
 }

@@ -346,7 +346,13 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
   <main class="card">
     <span class="badge">ajar</span>
 
-    <h1 id="head">This one's closed right now</h1>
+    <!-- Agency-first, and the same sentence on all three block pages. The two
+         pages that grew the five-state machine kept the verdict-first headline
+         ("This one's closed right now") while the iOS page — the one with two
+         states — was the only one using the form UX_PRINCIPLES §7 prescribes.
+         The merge takes the headline from there and the state machine from
+         here, rather than picking a file and copying it. -->
+    <h1 id="head">You can ask to open this page</h1>
     <p id="lede">Send it over and a parent sees it right away. You will get an answer here.</p>
 
     <div class="resource">
@@ -367,8 +373,12 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
     <!-- Primary first, matching the Windows screen: same product, same muscle
          memory, same tab order (SC 3.2.3 / 3.2.4). -->
     <div class="row">
-      <button type="button" class="btn-primary" id="requestBtn">Ask to unlock</button>
-      <button type="button" id="backBtn">Not now</button>
+      <button type="button" class="btn-primary" id="requestBtn">Ask to open it</button>
+      <!-- "Go back", not "Not now". That string means "child, retreat" here and
+           "parent, decline" in the console and the parent app — one label, two
+           opposite actors, on the two screens most likely to be read by the two
+           different people in the same five minutes. -->
+      <button type="button" id="backBtn">Go back</button>
       <button type="button" class="btn-yes hide" id="openBtn">Open it</button>
     </div>
 

@@ -190,7 +190,7 @@ final class FilterController: ObservableObject {
     /// asked for rather than silently posting.
     @Published var lastRequest: String?
 
-    /// What the child is shown after tapping "Ask to unlock" on the block page.
+    /// What the child is shown after tapping "Ask to open it" on the block page.
     /// A string status could not drive a screen; this can.
     enum RequestState: Equatable {
         case idle

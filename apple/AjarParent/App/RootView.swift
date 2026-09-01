@@ -452,7 +452,7 @@ struct ChangeSheet: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text("How much to unlock")
+                Text("How much to open")
                     .ajarFont(22, .semibold, relativeTo: .title2).foregroundStyle(Ajar.ink)
                 Text(request.title ?? request.targetValue)
                     .ajarFont(14, relativeTo: .footnote).foregroundStyle(Ajar.muted)
