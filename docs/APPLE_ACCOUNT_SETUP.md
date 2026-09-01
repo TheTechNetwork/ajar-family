@@ -284,15 +284,15 @@ that value in its array. `FC` = `com.apple.developer.family-controls`.
 | Target | Entitlements | Verified |
 |---|---|---|
 | `family.ajar.filter` | `FC`, `NE[content-filter-provider]`, `AG` | ✅ in repo |
-| `…child.FilterDataProvider` | `NE[content-filter-provider]`, `AG` | ✅ in repo |
-| `…child.FilterControlProvider` | `NE[content-filter-provider]`, `AG` | ✅ in repo |
+| `family.ajar.filter.DataProvider` | `NE[content-filter-provider]`, `AG` | ✅ in repo |
+| `family.ajar.filter.ControlProvider` | `NE[content-filter-provider]`, `AG` | ✅ in repo |
 
 **B. `NEURLFilter` category blocklist — `apple/poc-urlfilter/` (PoC D, NOT merged)**
 
 | Target | Entitlements | Note |
 |---|---|---|
 | host app | `NE[url-filter-provider]` **added to the existing array**, so the child app ends up with *both* values | the entitlement is one key; the array carries both |
-| `…child.URLFilterControlProvider` | `NE[url-filter-provider]`, **`AG`** | an **ExtensionKit** extension (`EXExtensionPointIdentifier`), not a classic `.appex` |
+| `family.ajar.filter.URLFilterControlProvider` | `NE[url-filter-provider]`, **`AG`** | an **ExtensionKit** extension (`EXExtensionPointIdentifier`), not a classic `.appex` |
 
 > ⚠️ The scaffold's `.entitlements` today declares `NE[url-filter-provider]` and
 > **no App Group**. That is fine in isolation but will not survive merging: the
@@ -383,21 +383,35 @@ force SIWA. Enable it on a parent App ID only if/when a parent iOS app exists AN
 
 ## 5. Provisioning profiles
 
-> **Created by hand, like the certificate (§3.1).** Three App Store profiles —
+> **Created by hand, like the certificate (§3.1).** **Four** App Store profiles —
 > one per target — supplied to CI as base64 secrets (§8.1). Generate each AFTER
 > its App ID's capabilities are enabled (§4.1): a profile bakes in the
 > entitlements present at generation time, so enabling a capability later means
 > regenerating the profile, not just editing the `.entitlements` file.
 
+| Target | Secret | Workflow that reads it |
+|---|---|---|
+| `family.ajar.filter` | `APPLE_PROFILE_APP` | `testflight.yml` |
+| `family.ajar.filter.DataProvider` | `APPLE_PROFILE_DATA` | `testflight.yml` |
+| `family.ajar.filter.ControlProvider` | `APPLE_PROFILE_CONTROL` | `testflight.yml` |
+| `family.ajar.parent` | `APPLE_PROFILE_PARENT` | `testflight-parent.yml` |
+
+The two apps are separate workflows, so three-of-four is green until the day you
+dispatch the parent app and it stops at the preflight. Create all four together.
+
 - [ ] **Development** profiles — created by Xcode's *Automatically manage
       signing* when you sign a PoC build on a Mac, covering the app and both
       filter-provider extensions (§4).
-- [ ] **App Store** profiles — created by CI. The one precondition CI cannot
+- [ ] **App Store** profiles — created **by hand in the developer portal**, not
+      by CI: the workflows use manual signing and read whatever base64 you paste
+      into the secrets above (§8.1). The one precondition nothing in CI can
       satisfy for itself: the **Family Controls distribution entitlement** must
-      already be granted ([§6](#6-family-controls-distribution-entitlement-later)),
-      because a profile cannot carry an entitlement the account has not been
-      approved for. Until then, distribution signing fails no matter how correct
-      the workflow is.
+      already be granted ([§6](#6-family-controls-distribution-entitlement-later))
+      before the three filter profiles are generated, because a profile cannot
+      carry an entitlement the account has not been approved for. Until then,
+      distribution signing of the filter app fails no matter how correct the
+      workflow is. The parent app carries no restricted entitlement, so its
+      profile is not blocked on §6.
 
 ---
 
@@ -456,11 +470,31 @@ and does not expire like per-app certificates.
 
 ## 8. App Store Connect & TestFlight (LATER)
 
-- [ ] Create the App Store Connect app record for the **child app**
-      (`family.ajar.filter`) at <https://appstoreconnect.apple.com/>. There is no
-      parent app record — the parent console is the web app (§4).
+- [ ] Create an App Store Connect app record for **each** app at
+      <https://appstoreconnect.apple.com/> — `family.ajar.filter` and
+      `family.ajar.parent`. Two records, two apps. (This used to say there was no
+      parent record because the parent console was only `web/parent/`; there is
+      an `apple/AjarParent` app now, and it has its own TestFlight workflow.)
 - [ ] Use **TestFlight** for internal/external beta once distribution signing +
       the Family Controls distribution entitlement (§6) are in place.
+
+**Both TestFlight workflows now build on every commit to `main`** that touches
+their app, as well as on manual dispatch:
+
+| Workflow | Builds when `main` changes | Manual |
+|---|---|---|
+| `testflight.yml` | `apple/AjarFilter/**`, its own file, `.github/scripts/**` | dispatch, type `testflight` |
+| `testflight-parent.yml` | `apple/AjarParent/**`, its own file, `.github/scripts/**` | dispatch, type `testflight` |
+
+The paths filter exists so a docs or backend commit does not burn a macOS runner
+(billed at 10x) and consume a build number for a binary identical to the last
+one. Delete the `paths:` block in a workflow to build on every commit to `main`.
+
+The typed confirmation still gates a **manual** dispatch, but it cannot gate a
+push: `inputs` is null there, so a bare `inputs.confirm == '...'` job condition
+evaluates false and SKIPS the job — which GitHub reports as a grey check, not a
+failure. Both workflows guard with
+`github.event_name != 'workflow_dispatch' || inputs.confirm == 'testflight'`.
 - [ ] **Category: do NOT use the Kids Category.** Per ARCHITECTURE §12 the
       **parent is the buyer and account holder**, and the Kids Category's
       no-third-party-PII rules conflict with the server-side family model. Pick a
@@ -495,9 +529,22 @@ passwords and Fastlane Match; it both mints signing profiles and uploads).
 | `APPLE_DIST_P12` | secret | the distribution `.p12` (§3.1), **base64**: `base64 -i distribution.p12 \| pbcopy` |
 | `APPLE_DIST_P12_PASSWORD` | secret | the passphrase set at `openssl pkcs12 -export` |
 | `APPLE_PROFILE_APP` | secret | App Store profile for `family.ajar.filter`, **base64** |
-| `APPLE_PROFILE_DATA` | secret | profile for `…child.FilterDataProvider`, **base64** |
-| `APPLE_PROFILE_CONTROL` | secret | profile for `…child.FilterControlProvider`, **base64** |
+| `APPLE_PROFILE_DATA` | secret | profile for `family.ajar.filter.DataProvider`, **base64** |
+| `APPLE_PROFILE_CONTROL` | secret | profile for `family.ajar.filter.ControlProvider`, **base64** |
+| `APPLE_PROFILE_PARENT` | secret | App Store profile for `family.ajar.parent`, **base64** |
 | `APPLE_TEAM_ID` | **variable** | the 10-char Team ID (§2) |
+
+The first three profiles are read by `testflight.yml` (the filter app and its two
+extensions); `APPLE_PROFILE_PARENT` is read by `testflight-parent.yml` and by
+nothing else. They are separate workflows, so a missing parent profile does not
+show up until the parent app is dispatched — which is exactly how it was found:
+
+```
+##[error]Not configured: APPLE_PROFILE_PARENT
+```
+
+`ASC_*` and `APPLE_DIST_*` are shared by both workflows — one certificate for
+the whole Apple team — so only the profiles are per-app.
 
 Signing is **manual** (§3.1): the workflow imports the certificate into a
 throwaway keychain and installs the three profiles, rather than letting Xcode
@@ -517,7 +564,8 @@ them and you get terminal garbage, so base64 first.
 
 ```sh
 base64 -w0 distribution.p12                     # APPLE_DIST_P12
-base64 -w0 Ajar_Child_AppStore.mobileprovision  # APPLE_PROFILE_APP
+base64 -w0 Ajar_Filter_AppStore.mobileprovision   # APPLE_PROFILE_APP
+base64 -w0 Ajar_Parent_AppStore.mobileprovision   # APPLE_PROFILE_PARENT
 ```
 
 **macOS** (BSD `base64` — does not wrap, and `pbcopy` beats selecting 3 KB by hand):
@@ -576,7 +624,22 @@ a few minutes before the build appears to internal testers.
    `ITSAppUsesNonExemptEncryption: false` is now set in `project.yml` (§8.5), so
    uploads no longer stop. Listed here only so the old symptom is recognisable if
    a third-party crypto library is ever linked and the declaration stops holding.
-5. **The rest of the app record (§8.5).** Age rating, content rights and — for
+5. **A missing app icon (error 90713).** Every app target needs
+   `App/Assets.xcassets/AppIcon.appiconset` holding one **opaque** 1024x1024 PNG,
+   plus `ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon` in `project.yml`. The
+   setting alone does nothing: AjarParent had it, had no catalog, and was
+   rejected at UPLOAD — after a clean archive and export — with
+
+   ```
+   A value for the Info.plist key 'CFBundleIconName' is missing (90713)
+   ```
+
+   `CFBundleIconName` is written by the asset-catalog compiler, not by hand, so
+   an absent catalog produces a bundle that looks fine locally. Generate the icon
+   with `node tools/appicon/make-icon.mjs <filter|parent> <catalog path>`; an
+   icon with an **alpha channel** is rejected too, so the generator writes PNG
+   colour type 2.
+6. **The rest of the app record (§8.5).** Age rating, content rights and — for
    external testing — the privacy label. A build can upload perfectly and still
    reach nobody because a questionnaire is unanswered.
 
@@ -597,7 +660,7 @@ not in CI variables:
 
 | Identifier | What |
 |---|---|
-| `family.ajar.filter` | the child app (container) |
+| `family.ajar.filter` | the filter app (container) |
 | `family.ajar.filter.DataProvider` | content-filter data provider extension |
 | `family.ajar.filter.ControlProvider` | content-filter control provider extension |
 | `group.family.ajar.filter` | App Group shared by all three |
@@ -618,7 +681,6 @@ record is permanent):
 
 | Future identifier | Blocked on | Note |
 |---|---|---|
-| `family.ajar.parent` | no parent iOS app — `apple/AjarParent/` is a README stub and the parent console is `web/parent/` | correct name when it exists |
 | macOS container app + `…​.Extension` | `macos/safari-extension/` is loose JS with no Xcode project, container app or `Info.plist` | a Safari Web Extension cannot ship standalone; it needs a container app plus the native messaging host |
 
 **Decide before the first macOS upload:** one bundle id can span iOS **and**
@@ -747,7 +809,8 @@ Cloudflare/signing secrets live in `docs/DEPLOYMENT.md`.
 | `ASC_KEY_P8` | the App Store Connect **`.p8`** contents (§8.1) | `testflight.yml` — upload |
 | `APPLE_DIST_P12` | distribution cert + private key, base64 (§3.1) | `testflight.yml` — signing |
 | `APPLE_DIST_P12_PASSWORD` | its export passphrase | `testflight.yml` — signing |
-| `APPLE_PROFILE_APP` / `_DATA` / `_CONTROL` | the three App Store profiles, base64 (§5) | `testflight.yml` — signing |
+| `APPLE_PROFILE_APP` / `_DATA` / `_CONTROL` | the filter app's three App Store profiles, base64 (§5) | `testflight.yml` — signing |
+| `APPLE_PROFILE_PARENT` | the parent app's App Store profile, base64 (§5) | `testflight-parent.yml` — signing |
 
 GitHub **variables** (not secrets — both are public values):
 

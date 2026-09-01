@@ -1,10 +1,28 @@
 name: CI
 
 on:
+  # Every push to a branch WITH an open PR was running this twice — once for the
+  # push, once for the pull_request — which is why two identical build-test runs
+  # appeared per commit. main is the only branch that needs the push trigger;
+  # everything else is covered by the PR.
   push:
-    branches: ["**"]
+    branches: ["main"]
   pull_request:
     branches: ["**"]
+
+# A superseded CI check is waste, not a missed event: if two commits land close
+# together only the newest needs a verdict. (deploy.yml deliberately does NOT
+# cancel for the same reason inverted — a cancelled deploy is a thing that did
+# not ship while reporting nothing wrong.)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# CI reads the repo and nothing else. Without this block GITHUB_TOKEN inherits
+# the repository default, which can be read-write on every scope; this was the
+# one workflow here that had no permissions block at all.
+permissions:
+  contents: read
 
 jobs:
   build-test:
