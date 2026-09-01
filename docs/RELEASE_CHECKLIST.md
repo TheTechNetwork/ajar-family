@@ -26,13 +26,15 @@
       `docs/DEPLOYMENT.md §5.1`), and `GET /v1/signing-key` returns a **stable**
       public key across redeploys (not the per-isolate ephemeral fallback).
       `AUTH_SECRET` also set.
-- [ ] **Durable-store decision recorded.** The alpha ships the in-memory store,
-      which is **not durable on Workers** (`backend/src/worker.ts`). The follow-up
-      (D1/KV `Repository` behind the existing interface) is written down as the
-      next step in `docs/DEPLOYMENT.md §1` and the commented `[[d1_databases]]`
-      binding in `backend/wrangler.toml`. The alpha does **not** need durability;
-      it needs the decision to be explicit so no one mistakes the demo store for
-      production persistence.
+- [x] **Durable store — DONE, not a decision to record.** This item described
+      the alpha as shipping the in-memory store with D1 as "the follow-up" and a
+      "commented `[[d1_databases]]` binding". Both are out of date: `SqlStore`
+      over D1 is selected in `backend/src/worker.ts` whenever the `DB` binding is
+      present, and the binding in `backend/wrangler.toml` is live rather than
+      commented. Confirm before a release that `DB` is actually bound in the
+      deploying account — without it the Worker silently falls back to the
+      in-memory store, which IS what this item used to describe and is a
+      local-dev fallback, never a deployment.
 
 ## (b) Apple prep
 

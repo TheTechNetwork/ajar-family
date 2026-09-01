@@ -8,12 +8,18 @@
  * putting the pages anywhere else would break that handoff silently. Routing
  * mirrors node-server.ts so the two adapters cannot drift.
  *
- * PERSISTENCE NOTE (alpha): this uses the in-memory store, which lives only for
- * the lifetime of a warm isolate and is NOT shared across isolates or restarts.
- * That is fine for a single-isolate demo but NOT durable. The production path is
- * a D1 (SQLite) or KV-backed Repository implementation selected here from `env`;
- * see docs/DEPLOYMENT.md. Secrets (AUTH_SECRET, SIGNING_*_KEY_B64) come from
- * `wrangler secret put`.
+ * PERSISTENCE: D1, when the `DB` binding is present — see the selection below
+ * and the [[d1_databases]] block in wrangler.toml, which is committed precisely
+ * so a deployment cannot quietly come up without it.
+ *
+ * This paragraph used to say the Worker "uses the in-memory store… NOT durable",
+ * describing the D1 work as still to come after it had already landed. Read
+ * today that is not a stale detail but a false safety claim in the opposite
+ * direction: it tells you an alpha loses every family on isolate recycle when it
+ * does not. Without `DB` the store IS in-memory and non-durable, which is a
+ * local-dev fallback, never a deployment.
+ *
+ * Secrets (AUTH_SECRET, SIGNING_*_KEY_B64) come from `wrangler secret put`.
  */
 import { App } from "./app.js";
 import { DohCnameResolver } from "./categories/resolver.js";
