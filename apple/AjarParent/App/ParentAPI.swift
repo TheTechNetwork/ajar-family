@@ -58,6 +58,22 @@ enum ApprovalScope: String, Codable, CaseIterable {
         }
     }
 
+    /// The label on the primary button — a full sentence about what will happen,
+    /// not a chip to decode. "Unlock this video" reads as a decision; "video"
+    /// next to a duration pill reads as a form to fill in.
+    var actionLabel: String {
+        switch self {
+        case .thisRequest: return "Unlock just this"
+        case .thisURL:     return "Unlock this page"
+        case .thisVideo:   return "Unlock this video"
+        case .thisChannel: return "Unlock this channel"
+        case .thisDomain:  return "Unlock this site"
+        case .thisDevice:  return "Unlock on this device"
+        case .thisChild:   return "Unlock for this child"
+        case .wholeFamily: return "Unlock for everyone"
+        }
+    }
+
     var label: String {
         switch self {
         case .thisRequest: return "Just this"

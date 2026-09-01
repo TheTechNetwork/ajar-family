@@ -49,6 +49,12 @@ jobs:
       - name: Contrast ratios are computed, not claimed
         run: node web/parent/check-contrast.mjs
 
+      # sync-tokens and check-contrast both stop at the web surfaces. The two
+      # SwiftUI apps hold the palette again, in a syntax neither tool can read,
+      # and they are the copies that reach a real device. Check them too.
+      - name: Swift theme matches the canonical tokens
+        run: node apple/check-theme-tokens.mjs
+
       # The OpenAPI document is the client contract; fail if the committed file
       # drifts from the one the code generates.
       - name: OpenAPI is in sync
