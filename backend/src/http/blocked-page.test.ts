@@ -1,0 +1,195 @@
+/**
+ * The block page's `u` parameter.
+ *
+ * This is the screen whose entire job is to let a child ask, and it is reflected
+ * input on an unauthenticated page — so it has to be permissive enough to work
+ * and strict enough not to become a redirect into `javascript:`.
+ *
+ * The bug that prompted these tests: iOS substitutes the flow URL into
+ * `remediationMap`, and for a socket flow there is no full URL, so it passes the
+ * HOST. A real child hitting a real block got `?u=www.youtube.com/`, the
+ * `^https?://` guard rejected it, and the page rendered "No address came
+ * through" with no button. The fix must not be "drop the guard".
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { normalizeBlockedTarget, blockedTargetParam, buildRouter } from "./api.js";
+import { App } from "../app.js";
+import type { HttpRequest } from "./router.js";
+
+test("a bare host gets a scheme instead of being thrown away", async () => {
+  // Exactly what iOS sent in the report.
+  assert.equal(normalizeBlockedTarget("www.youtube.com/"), "https://www.youtube.com/");
+  assert.equal(normalizeBlockedTarget("www.youtube.com"), "https://www.youtube.com/");
+  assert.equal(normalizeBlockedTarget("youtu.be/dQw4w9WgXcQ"), "https://youtu.be/dQw4w9WgXcQ");
+  assert.equal(
+    normalizeBlockedTarget("www.youtube.com/watch?v=dQw4w9WgXcQ"),
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  );
+});
+
+test("a host with a port is a host, not a scheme", async () => {
+  // `.` and `-` are legal scheme characters, so matching /^[a-z][a-z0-9+.-]*:/
+  // against the whole string reads this as the scheme "www.youtube.com" and
+  // discards an ordinary URL. The port has to be told apart from a scheme.
+  assert.equal(normalizeBlockedTarget("example.com:8080/x"), "https://example.com:8080/x");
+  assert.equal(normalizeBlockedTarget("localhost:8787/blocked"), "https://localhost:8787/blocked");
+});
+
+test("http and https still pass through", async () => {
+  assert.equal(normalizeBlockedTarget("https://example.com/a?b=c"), "https://example.com/a?b=c");
+  assert.equal(normalizeBlockedTarget("http://example.com/"), "http://example.com/");
+  assert.equal(normalizeBlockedTarget("HTTPS://EXAMPLE.com/A"), "https://example.com/A");
+});
+
+test("every other scheme is refused", async () => {
+  // The whole reason the guard exists. Each of these is reflected into an href
+  // if it gets through.
+  for (const hostile of [
+    "javascript:alert(1)",
+    "JavaScript:alert(1)",
+    "java\tscript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "file:///etc/passwd",
+    "ajar://request?u=x",
+    "vbscript:msgbox(1)",
+    "  javascript:alert(1)",
+  ]) {
+    assert.equal(normalizeBlockedTarget(hostile), "", `accepted ${JSON.stringify(hostile)}`);
+  }
+});
+
+test("a protocol-relative URL is refused", async () => {
+  // `//evil.com` inherits the page's scheme and is a redirect in disguise. Its
+  // authority is empty, which is what the shape check has to catch.
+  assert.equal(normalizeBlockedTarget("//evil.com/x"), "");
+  assert.equal(normalizeBlockedTarget("///evil.com"), "");
+});
+
+test("nothing, or nonsense, comes back as nothing", async () => {
+  for (const empty of ["", "   ", "/", "?x=1", "#frag", ":", "http://"]) {
+    assert.equal(normalizeBlockedTarget(empty), "", `accepted ${JSON.stringify(empty)}`);
+  }
+});
+
+// --- and through the real route ------------------------------------------
+
+function get(router: ReturnType<typeof buildRouter>, path: string) {
+  const url = new URL(path, "http://localhost");
+  const req: HttpRequest = {
+    method: "GET", path: url.pathname, query: url.searchParams,
+    // Both live adapters pass this; the block page is the one route that needs
+    // it, and testing without it would test the lossy fallback instead.
+    rawQuery: url.search.replace(/^\?/, ""),
+    headers: {}, params: {}, json: async () => ({}) as never,
+  };
+  return router.handle(req);
+}
+
+/** A request shaped like the one iOS actually sends: `u` substituted raw. */
+const rawReq = (rawQuery: string): HttpRequest => ({
+  method: "GET", path: "/blocked",
+  query: new URLSearchParams(rawQuery),
+  rawQuery,
+  headers: {}, params: {}, json: async () => ({}) as never,
+});
+
+test("a target with its own query survives intact — & does not end it", async () => {
+  // THE case this exists for, and it is not YouTube. iOS substitutes the flow
+  // URL unencoded, so URLSearchParams would hand back "…?id=123" and drop
+  // "&page=2" — and a non-YouTube block becomes a URL rule for that exact
+  // string, so the parent approves a URL the child is not on.
+  assert.equal(
+    blockedTargetParam(rawReq("u=https://example.com/a?id=123&page=2")),
+    "https://example.com/a?id=123&page=2",
+  );
+  assert.equal(
+    blockedTargetParam(rawReq("u=example.com/search?q=frogs&safe=off&page=3")),
+    "example.com/search?q=frogs&safe=off&page=3",
+  );
+  // And the same shape through normalisation, end to end.
+  assert.equal(
+    normalizeBlockedTarget(blockedTargetParam(rawReq("u=example.com/a?id=1&page=2"))),
+    "https://example.com/a?id=1&page=2",
+  );
+});
+
+test("YouTube was the only case the old parse survived", async () => {
+  // Kept as a regression marker: `v` precedes the first `&`, which is why the
+  // truncation looked harmless. It is not a reason to stop reading at the `&`.
+  assert.equal(
+    blockedTargetParam(rawReq("u=https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=30s&pp=xyz")),
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=30s&pp=xyz",
+  );
+});
+
+test("params before u are still parsed as params", async () => {
+  // The ordering contract: `u` runs to the end, so everything else goes first.
+  const req = rawReq("ally=Dad&u=example.com/a?x=1&y=2");
+  assert.equal(req.query.get("ally"), "Dad");
+  assert.equal(blockedTargetParam(req), "example.com/a?x=1&y=2");
+});
+
+test("a parameter merely ENDING in u is not mistaken for u", async () => {
+  assert.equal(blockedTargetParam(rawReq("menu=x")), "");
+  assert.equal(blockedTargetParam(rawReq("nu=x&u=example.com/")), "example.com/");
+});
+
+test("an encoded target is decoded exactly once", async () => {
+  // The extensions percent-encode properly; iOS does not. Both have to work.
+  assert.equal(
+    blockedTargetParam(rawReq(`u=${encodeURIComponent("https://example.com/a?id=1&page=2")}`)),
+    "https://example.com/a?id=1&page=2",
+  );
+  // A malformed escape must not throw and take the page down with it.
+  assert.equal(blockedTargetParam(rawReq("u=example.com/100%discount")), "example.com/100%discount");
+});
+
+test("the page a child actually gets has the ask button on it", async () => {
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+
+  const res = await get(r, "/blocked?u=www.youtube.com/");
+  assert.equal(res.status, 200);
+  const page = String(res.body);
+
+  assert.match(page, /You can ask to unlock this page/);
+  assert.match(page, /ajar:\/\/request\?u=/, "the deep link the button opens");
+  assert.doesNotMatch(page, /This page is closed/);
+  // The site name, not a uuid and not the raw string with its scheme.
+  assert.match(page, /youtube\.com/);
+});
+
+test("a hostile target still renders the closed page, not a link", async () => {
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+
+  const res = await get(r, `/blocked?u=${encodeURIComponent("javascript:alert(1)")}`);
+  assert.match(String(res.body), /This page is closed/);
+  assert.doesNotMatch(String(res.body), /javascript:/i);
+});
+
+test("the child's name is shown when the device passes one", async () => {
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const res = await get(r, "/blocked?u=www.youtube.com/&ally=Dad");
+  assert.match(String(res.body), /Ask Dad/);
+});
+
+test("end to end: a multi-param page reaches the button with its query whole", async () => {
+  // The engine was never the problem — normalizeExactUrl sorts params and drops
+  // the fragment, so an exact-URL rule matches robustly. It only ever gets the
+  // URL the block page captured, which is why the capture had to be exact.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+
+  const res = await get(r, "/blocked?u=example.com/article?id=123&page=2");
+  const page = String(res.body);
+
+  assert.match(page, /You can ask to unlock this page/);
+  // The deep link carries the WHOLE thing; the app turns it into the URL rule.
+  const link = /href="(ajar:\/\/request\?u=[^"]*)"/.exec(page)?.[1];
+  assert.ok(link, "the ask button is a deep link");
+  const carried = new URL(link!.replace(/&amp;/g, "&")).searchParams.get("u");
+  assert.equal(carried, "https://example.com/article?id=123&page=2");
+});

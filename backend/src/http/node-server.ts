@@ -102,6 +102,7 @@ function routeApi(nreq: IncomingMessage, nres: ServerResponse, router: Router) {
       method: nreq.method ?? "GET",
       path: url.pathname,
       query: url.searchParams,
+      rawQuery: url.search.replace(/^\?/, ""),
       headers,
       params: {},
       json: async () => (rawBody ? JSON.parse(rawBody) : {}),

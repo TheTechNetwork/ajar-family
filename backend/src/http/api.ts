@@ -224,6 +224,114 @@ function escapeHtml(v: string): string {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
+/**
+ * Pull `u` out of the block page's query string WITHOUT letting a `&` inside it
+ * end the value.
+ *
+ * iOS builds this URL by substituting the blocked flow URL into `?u=…`, and the
+ * substitution is not percent-encoded — the substitution is the system's, not
+ * ours, so there is nowhere to add the encoding. A target that carries its own
+ * query therefore arrives with live `&`s, and `URLSearchParams` splits it:
+ *
+ *     ?u=https://example.com/a?id=123&page=2
+ *        → u = "https://example.com/a?id=123"   and a stray page=2
+ *
+ * That truncation is not cosmetic. A non-YouTube block becomes a `URL` rule for
+ * the exact string (FilterController.handleIncoming), so the parent approves
+ * `…?id=123`, the child's actual page is `…?id=123&page=2`, and the rule does
+ * not match it. The approval silently does nothing.
+ *
+ * It was very nearly written off because the ONE case that survives is YouTube —
+ * `v` sits before the first `&`, so the video id comes through intact. Every
+ * other site on the web is the case that does not survive, and this product
+ * filters URLs, not YouTube.
+ *
+ * So `u` is read from the raw query string and runs to the END of it. That makes
+ * the ordering a contract: **`u` must be last**. Anything else the page reads
+ * goes before it (see `ally`), and the iOS remediation URL is built that way.
+ *
+ * Falls back to the parsed value when no raw query is available — a test
+ * harness, or an adapter that has not been taught to pass one. The fallback is
+ * lossy in exactly the way described above, which is why both live adapters
+ * supply `rawQuery`.
+ */
+export function blockedTargetParam(req: HttpRequest): string {
+  const raw = req.rawQuery;
+  if (raw !== undefined) {
+    // Only at a parameter boundary: `?maybe_u=x` must not be mistaken for `u=x`.
+    const at = raw.startsWith("u=") ? 0 : raw.indexOf("&u=") + 1;
+    if (at > 0 || raw.startsWith("u=")) {
+      // Everything after `u=`, decoded ONCE. A client that did encode its target
+      // (the extensions do) is decoded correctly; iOS's unencoded one has
+      // nothing to decode and passes through, except that a literal `%` would
+      // throw — hence the fallback to the raw slice.
+      const value = raw.slice(at + 2);
+      try {
+        return decodeURIComponent(value).slice(0, 2048);
+      } catch {
+        return value.slice(0, 2048);
+      }
+    }
+    return "";
+  }
+  return (req.query.get("u") ?? "").slice(0, 2048);
+}
+
+/**
+ * The `u` parameter of the block page, made safe to reflect — or dropped.
+ *
+ * TWO THINGS ARE TRUE AT ONCE and the first version only honoured one of them.
+ *
+ * 1. `u` is reflected into an `ajar://` link and into the page. Emitting it
+ *    unchecked makes this a redirect into any scheme a browser will honour —
+ *    `javascript:`, `data:`, `file:`. So the scheme must be an allowlist.
+ * 2. **iOS does not always send a scheme.** `remediationMap` substitutes
+ *    `NEFilterProviderRemediationURLFlowURL`, and for a socket flow there is no
+ *    full URL to substitute — the system passes the host. A real child hitting a
+ *    real block got `?u=www.youtube.com/`, which the old `^https?://` test
+ *    rejected, so the page said "No address came through" and the Request Access
+ *    button was not rendered at all. The one screen whose entire job is to let a
+ *    child ask was a dead end on the most common kind of block.
+ *
+ * So: accept http(s) as before, ADD a scheme to something that has none, and
+ * still refuse anything carrying a different one.
+ *
+ * The scheme test deliberately looks at the authority — everything before the
+ * first `/`, `?` or `#` — rather than matching `^[a-z][a-z0-9+.-]*:` against the
+ * whole string. Scheme characters include `.` and `-`, so that pattern reads
+ * `www.youtube.com:8080/x` as the scheme `www.youtube.com` and throws away a
+ * perfectly ordinary host and port. Requiring the part after any colon in the
+ * authority to be digits separates a port from `javascript:alert(1)`.
+ *
+ * Parsing at the end is not decoration: it rejects an empty or malformed host
+ * that survives the shape check, and returns the browser's own canonical form
+ * rather than whatever arrived.
+ */
+export function normalizeBlockedTarget(raw: string): string {
+  const target = raw.trim();
+  if (!target) return "";
+
+  let candidate: string;
+  if (/^https?:\/\//i.test(target)) {
+    candidate = target;
+  } else {
+    // `//evil.com` has an empty authority and is protocol-relative — a redirect
+    // in disguise — so the `[^:/?#]+` here has to require at least one char.
+    const authority = target.split(/[/?#]/, 1)[0] ?? "";
+    if (!/^[^:/?#]+(:\d+)?$/.test(authority)) return "";
+    candidate = `https://${target}`;
+  }
+
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    if (!url.hostname) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
 export function buildRouter(app: App): Router {
   const r = new Router();
 
@@ -261,10 +369,7 @@ export function buildRouter(app: App): Router {
    * normalization stays the single source of truth for what "this video" means.
    */
   r.get("/blocked", async (req) => {
-    const target = (req.query.get("u") ?? "").slice(0, 2048);
-    // Only ever emit an http(s) target. Without this the `u` parameter is a
-    // reflected redirect into any scheme the browser will honour.
-    const safe = /^https?:\/\//i.test(target) ? target : "";
+    const safe = normalizeBlockedTarget(blockedTargetParam(req));
     const shown = escapeHtml(safe);
     const deepLink = safe ? `ajar://request?u=${encodeURIComponent(safe)}` : "";
 

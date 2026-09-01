@@ -63,6 +63,37 @@ final class FilterControlProvider: NEFilterControlProvider {
                 // that does not resolve — so the page rendered, the button
                 // appeared, and tapping it went nowhere. That is why A3 was only
                 // ever recorded as a partial pass.
+                //
+                // WHAT THE SYSTEM ACTUALLY SUBSTITUTES, and why the page has to
+                // be forgiving about it. NE_FLOW_URL is replaced with the flow's
+                // URL when there IS one — a WebKit browser flow — and with the
+                // HOST when there is not, which is every socket flow. A real
+                // block therefore produced `?u=www.youtube.com/`, with no
+                // scheme, and the page's `^https?://` guard rejected it: the
+                // child got "No address came through" and no button. The server
+                // now adds the scheme rather than dropping the target
+                // (`normalizeBlockedTarget` in backend/src/http/api.ts) — it
+                // cannot be fixed here, because the substitution is the
+                // system's, not ours.
+                //
+                // The substitution is also NOT percent-encoded, so a flow URL
+                // carrying its own query arrives with live `&`s. The server
+                // therefore reads `u` from the RAW query string, to the end of
+                // it (`blockedTargetParam` in backend/src/http/api.ts) — which
+                // makes the ordering a contract:
+                //
+                //   *** u MUST BE THE LAST PARAMETER IN THIS URL ***
+                //
+                // Anything added here goes BEFORE it. Put a parameter after `u`
+                // and it is swallowed into the target.
+                //
+                // Reading only up to the first `&` looked survivable because the
+                // one case that survives it is YouTube: `v` sits before the `&`,
+                // so the video id came through. Every other site did not. A
+                // non-YouTube block becomes a URL rule for the exact string, so
+                // `example.com/a?id=1&page=2` was approved as `…?id=1` and the
+                // page the child was actually on never matched the rule — an
+                // approval that silently did nothing.
                 "requestAccess": "\(Self.blockPageBase)?u=\(NEFilterProviderRemediationURLFlowURL)" as NSString
             ],
             NEFilterProviderRemediationMapRemediationButtonTexts: [
