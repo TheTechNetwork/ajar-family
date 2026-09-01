@@ -70,7 +70,7 @@ test("a malformed address is never handed to the provider", async () => {
   assert.equal(mail.sent.length, 0);
 });
 
-test("registering a parent registers their email endpoint — so requests reach a human", async () => {
+test("an ask does NOT go by email — the medium has to match the message", async () => {
   const mail = new InMemoryMailSender();
   const app = await App.create({ mail, config: { authSecret: "test" } });
 
@@ -80,7 +80,7 @@ test("registering a parent registers their email endpoint — so requests reach 
   assert.deepEqual(
     endpoints.map((e) => [e.kind, e.token]),
     [["EMAIL", "owner@example.com"]],
-    "registration creates the parent's email endpoint (before: none, so notifications went nowhere)",
+    "registration still creates the endpoint — it carries the ACCOUNT lifecycle",
   );
 
   const fam = await app.family.createFamily("F", owner.id);
@@ -94,10 +94,22 @@ test("registering a parent registers their email endpoint — so requests reach 
     url: "https://www.youtube.com/watch?v=9bZkp7q19f0",
   });
 
-  assert.equal(mail.sent.length, 1, "the parent actually received an email");
-  assert.equal(mail.sent[0]!.to, "owner@example.com");
-  assert.match(mail.sent[0]!.subject, /Jane/, "the child is named in the subject");
-  assert.match(mail.sent[0]!.text, /Photosynthesis/, "the ask is in the body");
+  // This test used to assert the opposite, and the product is better for the
+  // change. "Say yes faster" is measured in seconds; email lands in a pile, has
+  // no receipt, and arrives whenever the provider gets to it. One message per
+  // ask is also how an inbox becomes something a parent stops opening — the same
+  // as no notification, only noisier.
+  //
+  // It also decouples the core loop from mail entirely. An unverified sending
+  // domain made a child's "Ask to unlock" return 500; a path that never touches
+  // mail cannot fail that way at all.
+  assert.equal(mail.sent.length, 0, "an ask must not be emailed");
+
+  // The ask is still delivered — by the channel built for it. Every parent
+  // client long-polls this feed, which is what makes an approval feel instant.
+  const pending = await app.repo.listAccessRequests(fam.id, "PENDING");
+  assert.equal(pending.length, 1, "the ask is in the feed the console long-polls");
+  assert.match(pending[0]!.title ?? "", /Photosynthesis/);
 });
 
 test("registering twice is idempotent for the email endpoint", async () => {

@@ -113,9 +113,12 @@ export class AuthService {
       id: uid(), email, displayName, passwordHash, tokenVersion: 0,
       emailVerifiedAt: opts.emailVerifiedAt, createdAt: now(),
     });
-    // Register the parent's email as a notification endpoint IMMEDIATELY. Before
-    // this, a family could run for weeks with zero endpoints, so every "your
-    // child asked for something" notification was fanned out to nobody at all.
+    // Register the parent's email as a notification endpoint. The original
+    // reason — that a family could otherwise run for weeks with every "your
+    // child asked for something" fanned out to nobody — no longer applies:
+    // asks deliberately do not go by email (see createRequest). What this
+    // endpoint carries now is the account lifecycle, which genuinely belongs in
+    // an inbox: password resets, and confirming the address itself.
     await this.registerEmailEndpoint(user);
     return user;
   }
@@ -1040,6 +1043,29 @@ export class ApprovalService {
       if (!canApprove(m.role)) continue;
       if (m.role === "LIMITED_GUARDIAN" && !m.assignedChildIds.includes(input.childId)) continue;
       for (const ep of await this.repo.listNotificationEndpoints(m.userId)) {
+        // An ask belongs in a push, not an inbox — the exact inverse of the rule
+        // on the password-reset path below, and for the same reason: the medium
+        // has to match the message.
+        //
+        // The product promise is "say yes faster", measured in seconds, before
+        // the impulse wins. Email is the wrong instrument for that at every
+        // level: it lands in a pile, it has no receipt, it arrives whenever the
+        // provider gets to it, and one email per ask turns a busy afternoon into
+        // an inbox a parent stops reading — which is the same as no notification
+        // at all, only noisier.
+        //
+        // It also coupled the CORE LOOP to a mail provider. That is not
+        // hypothetical: an unverified sending domain made a child's "Ask to
+        // unlock" return 500. A request path that never touches mail cannot fail
+        // that way at all, which is a better fix than catching the error.
+        //
+        // The real-time channel is the hub notify below, which every parent
+        // client already long-polls. APNs and Web Push are the transports that
+        // reach a parent whose client is closed; they are documented adapters,
+        // not implemented (docs/SECURITY.md), so until they land a parent is
+        // reached while a client is open and not otherwise. That gap is worth
+        // naming honestly — it is not worth papering over with email.
+        if (ep.kind === "EMAIL") continue;
         await this.notifier.send(ep, {
           title: `${child?.displayName ?? "Your child"} requested access`,
           body: input.title ?? `${input.targetType} ${input.targetValue}`,
