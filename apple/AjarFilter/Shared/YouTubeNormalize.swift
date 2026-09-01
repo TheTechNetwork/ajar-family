@@ -41,6 +41,53 @@ public enum YouTube {
         "jnn-pa.googleapis.com", "fonts.gstatic.com",
     ]
 
+    /// Paths on `www.youtube.com` that are genuinely player plumbing.
+    ///
+    /// That host serves the InnerTube API *and* every watch page, search page
+    /// and Short. Treating the whole host as playback support would mean that
+    /// while ANY video is approved, every other video and all of YouTube search
+    /// is allowed — the product's headline guarantee, silently void. The Windows
+    /// extension carries this same list and the same warning.
+    static let playerPathPrefixes: [String] = [
+        "/youtubei/",       // InnerTube player API
+        "/s/player/",       // base player JS/CSS
+        "/api/timedtext",   // captions
+        "/videoplayback",   // media (also served from googlevideo)
+        "/generate_204", "/error_204",  // beacons
+    ]
+
+    /// Does this host serve playback plumbing? Handles the one wildcard entry.
+    static func isPlaybackSupportHost(_ rawHost: String) -> Bool {
+        let host = Host.normalize(rawHost)
+        for entry in playbackSupportHosts {
+            if entry.hasPrefix("*.") {
+                let suffix = String(entry.dropFirst(2))
+                if host == suffix || host.hasSuffix(".\(suffix)") { return true }
+            } else if host == Host.normalize(entry) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Is this request the PLUMBING an already-approved video needs, rather than
+    /// a page?
+    ///
+    /// `pathIsKnown` is false for a socket flow, where the provider has a
+    /// hostname and nothing else. On the page host that is decisive: without a
+    /// path we cannot tell `/youtubei/v1/player` from `/watch?v=…`, so the host
+    /// must NOT qualify — otherwise one approved video opens all of YouTube
+    /// through the very carve-out meant to keep it shut. The other hosts serve
+    /// only plumbing, so a hostname alone is enough for them.
+    public static func isPlaybackSupport(host: String, path: String?, pathIsKnown: Bool) -> Bool {
+        guard isPlaybackSupportHost(host) else { return false }
+        let bare = Host.normalize(host)
+        let isPageHost = bare == "youtube.com" || bare == "www.youtube.com"
+        guard isPageHost else { return true }
+        guard pathIsKnown, let path else { return false }
+        return playerPathPrefixes.contains { path.hasPrefix($0) }
+    }
+
     static func isVideoId(_ s: String?) -> Bool {
         guard let s else { return false }
         return s.range(of: "^[A-Za-z0-9_-]{11}$", options: .regularExpression) != nil

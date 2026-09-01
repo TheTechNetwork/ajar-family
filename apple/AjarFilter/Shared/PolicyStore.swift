@@ -253,6 +253,28 @@ public final class PolicyStore {
     /// supplied by the network layer. DOMAIN and CATEGORY rules — and the safety
     /// floor — are evaluated against the request host AND every resolved name, so
     /// CNAME cloaking cannot bypass a block (or hide a crisis line).
+    /// Is a YouTube video approved on this device RIGHT NOW?
+    ///
+    /// The gate for the playback chain. `*.googlevideo.com` and the other
+    /// support hosts serve an approved video's bytes, and their URLs are opaque
+    /// — nothing in them says which video — so the chain can only ever be tied
+    /// to the GRANT, not to the video. Which is still infinitely better than
+    /// what it was tied to before: nothing at all. Those hosts are not YouTube
+    /// hosts, so they fell through to `webDefault: ALLOW` and were reachable
+    /// permanently, approved video or not.
+    ///
+    /// Standing ALLOW rules count as well as live grants: a parent who said
+    /// "for good" to a video has approved it, and the chain has to serve it.
+    public func hasActiveVideoGrant(now: Date = Date()) -> Bool {
+        guard let snap = current() else { return false }
+        let live = snap.temporaryRules.contains {
+            $0.action == .allow && $0.target == .ytVideo
+                && now >= $0.startsAt && now < $0.expiresAt
+        }
+        if live { return true }
+        return snap.rules.contains { $0.action == .allow && $0.target == .ytVideo }
+    }
+
     public func evaluate(_ urlString: String, appId: String? = nil, resolvedHosts: [String] = []) -> EvalResult {
         let yt = YouTube.normalize(urlString)
         let requestHost = URLComponents(string: urlString)?.host ?? ""

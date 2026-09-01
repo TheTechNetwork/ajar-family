@@ -350,7 +350,27 @@ so `isPlaybackSupportUrl` can allow the player plumbing while a main-frame load
 re-asks the worker. `NEFilterDataProvider` has neither: no request type, and no
 way to run script in the page.
 
-**The fix is architecturally significant and is not yet made.** Enforcing
+**Half of it was not a limitation at all — it was an unused list.**
+`YouTube.playbackSupportHosts` existed in `YouTubeNormalize.swift` and NOTHING
+referenced it. `*.googlevideo.com`, `i.ytimg.com` and the rest are not YouTube
+hosts, so they fell through to `webDefault: ALLOW` and were reachable
+**permanently, approved video or not** — the media CDN of a default-denied
+service, simply open. Now gated: the chain opens while a video grant is live and
+is blocked otherwise, which is the rule
+`shared/youtube/youtube-normalize.ts` writes down and the browser extensions
+already implement. On `www.youtube.com` the carve-out is restricted to player
+paths and never applies to a socket flow, where there is no path to check —
+without that guard one approved video would open all of YouTube through the very
+carve-out meant to keep it shut. It only ever overrides a DEFAULT, so an explicit
+parent rule still wins.
+
+**What that does NOT fix, and this is the honest part:** with video A approved
+the chain is open, and a media request carries nothing saying which video it is
+for, so clicking video B on the same page still plays. Tying the chain to the
+grant is as far as the URL data allows. Stopping B means gating the InnerTube
+request per-video, which means reading its body.
+
+**That remaining fix is architecturally significant and is not yet made.** Enforcing
 per-request on a reused connection means returning `.filterDataVerdict(...)`
 from `handleNewFlow` and implementing `handleOutboundData` to inspect each
 request — turning a connection-level filter into a data-inspecting one, with
