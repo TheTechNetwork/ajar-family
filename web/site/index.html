@@ -132,14 +132,13 @@
       <div class="card">
         <h3>Ajar</h3>
         <div class="row"><span class="verdict yes">yes</span><span class="k">Open just that video</span></div>
-        <!-- "yes" here was measured false on iOS on 2026-09-01: from an approved
-             video's page, clicking another video plays it, because YouTube
-             navigates in-page over a connection that was already approved and
-             the content filter is only asked once per connection. A fresh
-             navigation IS blocked, and the browser extensions on Windows and Mac
-             do not have the gap — they see the request type and run a content
-             script. Reduced to "mostly" with the caveat named rather than left
-             as an unqualified yes; docs/UX_PLAN.md carries the full chain. -->
+        <!-- "yes" was measured false on iOS (ADR-001, on hardware 2026-08-31,
+             re-reported 2026-09-01). Not a YouTube quirk: in-page navigation on
+             ANY single-page app arrives as socket flows carrying a hostname and
+             no URL, so within such a site the filter enforces at HOST level. A
+             top-level navigation IS still checked, and the Windows/macOS
+             extensions have no gap — they see every request with its full URL.
+             "mostly" with the caveat named, rather than an unqualified yes. -->
         <div class="row"><span class="verdict part">mostly</span><span class="k">Keep the rest of YouTube closed</span></div>
         <div class="row"><span class="verdict yes">yes</span><span class="k">Have it close again on its own</span></div>
         <p class="sub" style="margin:1rem 0 0">
@@ -147,10 +146,12 @@
           for thirty minutes, and nothing else moves.
         </p>
         <p class="sub" style="margin:.75rem 0 0">
-          One gap we will not paper over: on an iPhone or iPad, once a video is
-          open, YouTube's own page can reach other videos without asking us
-          again. Typing or opening a new address is still checked. On Windows and
-          Mac there is no gap.
+          One gap we will not paper over, and it is not only YouTube: on an
+          iPhone or iPad we check every address you go to, but a site that loads
+          new things without changing pages — YouTube, Reddit, most social apps —
+          can move on from an approved page without asking us again. Typing an
+          address or opening a link in a new tab is always checked. On Windows
+          and Mac there is no gap.
         </p>
       </div>
     </div>

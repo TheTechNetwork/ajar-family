@@ -305,7 +305,7 @@ Button radius follows the same pattern: 10px, 999px, 12px, and `Capsule()`.
 
 ---
 
-## Enforcement: an approved YouTube video opens every video from that page
+## Enforcement: inside a single-page app, iOS filters by host, not by URL
 
 Reported from a real device, iOS, 2026-09-01, and then narrowed by the reporter
 to the behaviour that matters: **from an approved video's page, clicking any
@@ -376,6 +376,27 @@ from `handleNewFlow` and implementing `handleOutboundData` to inspect each
 request — turning a connection-level filter into a data-inspecting one, with
 real performance and correctness cost, and a dependency on YouTube's private
 InnerTube shape. That is a decision for the product owner, not a patch.
+
+**IT IS NOT A YOUTUBE PROBLEM, and framing it as one is how it survived.**
+ADR-001 recorded this on hardware on 2026-08-31 — before it was reported again —
+and wrote it up as a YouTube qualification. The load-bearing sentence in it has
+no YouTube in it: *nothing that only sees browser flows can enforce per-URL
+policy across in-app navigation.* That applies to Reddit, X, Instagram, TikTok,
+Google Search and most modern news sites just as much. Approve one page on any
+of them and the site's own in-page navigation moves on unasked. ADR-001 now
+states it in the general form.
+
+The general statement:
+
+> On iOS, per-URL enforcement applies to **top-level navigations**. Content a
+> page fetches for itself arrives as socket flows carrying a hostname and
+> nothing else, so within a single-page app the product enforces at HOST level,
+> not URL level.
+
+The Windows and macOS extensions do not share this: they see every request with
+its full URL and a `requestType`. So the product's defining capability is
+materially weaker on iOS than on the other two platforms — for every SPA, not
+for one site.
 
 **This contradicts a shipped claim, and the claim has been corrected.**
 `web/site/index.html`'s comparison table answered "Keep the rest of YouTube

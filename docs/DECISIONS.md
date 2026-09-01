@@ -55,6 +55,29 @@ Resolving it needs a different lever — blocking the YouTube web app outright a
 approving videos through an owned surface, or app-level policy — and that
 belongs in a follow-up ADR before anything ships.
 
+**GENERALISED 2026-09-01, after the same behaviour was reported again from a
+device.** Everything above was written about YouTube, and reads as a YouTube
+qualification. It is not one. The sentence that matters — *nothing that only
+sees browser flows can enforce per-URL policy across in-app navigation* — has
+nothing to do with YouTube in it, and the limitation applies to **every site
+that loads content without a page change**: Reddit, X, Instagram, TikTok, Google
+Search, and most modern news sites. Approve one page on any of them and the
+site's own in-page navigation moves on without the filter being asked again.
+
+Stated without the YouTube framing, so nobody has to rediscover it a third time:
+
+> On iOS, per-URL enforcement applies to **top-level navigations** — typing an
+> address, opening a link in a new tab, following a link that causes a real page
+> load. Content a page fetches for itself arrives as socket flows carrying a
+> hostname and nothing else, so within a single-page app the product enforces at
+> HOST level, not URL level.
+
+The browser extensions on Windows and macOS do not share this limitation: they
+see every request with its full URL and a `requestType`, and a content script
+catches in-page route changes. So the product's defining capability is
+materially weaker on iOS than on the other two platforms, for every SPA rather
+than for one site — which is a claim question as much as an engineering one.
+
 A second decision falls out of the same experiment. `youTubeDefault: BLOCK`
 cannot be applied to socket flows: they carry no video id, so enforcing it there
 made `www.youtube.com` unreachable at connection level and an ALLOWED video
