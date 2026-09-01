@@ -18,6 +18,12 @@ apple/AjarFilter/App/Info.plist
 apple/AjarFilter/FilterDataProvider/Info.plist
 apple/AjarFilter/FilterControlProvider/Info.plist
 apple/AjarParent/App/Info.plist
+# The PoC path is gone (apple/poc-contentfilter -> apple/AjarFilter). Renaming
+# the ignore lines above un-ignored any generated Info.plist still sitting at the
+# old path in a working tree, and `git add -A` then committed three of them —
+# stale, generated, at a dead path, still displaying "ParentFilter PoC". Ignore
+# the whole directory so a stale checkout cannot resurrect it.
+apple/poc-contentfilter/
 apple/poc-urlfilter/App/Info.plist
 apple/poc-urlfilter/URLFilterControlProviderExtension/Info.plist
 
