@@ -9,7 +9,7 @@
 > is empty and the "Key unresolved" list is the point of the exercise.
 >
 > **This environment (Linux, no macOS, no Xcode, no Safari) cannot build, sign,
-> notarize, or run any of this.** The scaffold under `macos/safari-extension/`
+> notarize, or run any of this.** The scaffold under `apple/AjarSafari/`
 > is written to be opened in **Xcode** on macOS by a human, who records results
 > in the **Observed Results** table below and in `docs/DECISIONS.md` (ADR-004).
 
@@ -83,7 +83,7 @@ Docs: <https://developer.apple.com/documentation/networkextension/nefiltermanage
   test), **Xcode**, an Apple Developer account for signing + notarization.
 - A **standard (non-admin) child account** on the Mac (ADR-006). Also run the
   admin-child case to document the difference honestly.
-- The extension built from `macos/safari-extension/` (converted via
+- The extension built from `apple/AjarSafari/` (converted via
   `safari-web-extension-converter` or authored directly), signed, and **enabled
   by the user in Safari Settings → Extensions**.
 - A **native messaging host** (a signed helper app / the child agent) reachable
@@ -105,7 +105,7 @@ are comparable):
 
 Both reduce to `YOUTUBE_VIDEO:<id>` via `youtube-normalize` regardless of URL
 form; the extension MUST call the same normalization (the JS port in
-`macos/safari-extension/Extension/youtube-normalize.js`, kept in lockstep with
+`apple/AjarSafari/Extension/youtube-normalize.js`, kept in lockstep with
 the TypeScript spec).
 
 ### B1 — Block one canonical video, allow another, in Safari (never block Safari)
@@ -247,7 +247,7 @@ macOS direction. Record all numbers and the B5 finding in `docs/DECISIONS.md`
 
 ## Scaffold map
 
-`macos/safari-extension/` — see its `README.md`:
+`apple/AjarSafari/` — see its `README.md`:
 - `Extension/manifest.json` — MV3 manifest for the Safari Web Extension.
 - `Extension/background.js` — service worker: loads the synced policy snapshot,
   normalizes + evaluates each navigation, redirects blocked ones to `blocked.html`.

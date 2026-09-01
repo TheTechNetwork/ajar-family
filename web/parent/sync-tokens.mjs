@@ -27,8 +27,8 @@ const END = /\n\/\* ---- (?:block screen|setup page) layout/;
 const TARGETS = [
   "windows/extension/blocked.html",
   "windows/extension/options.html",
-  "macos/safari-extension/Extension/blocked.html",
-  "macos/safari-extension/Extension/options.html",
+  "apple/AjarSafari/Extension/blocked.html",
+  "apple/AjarSafari/Extension/options.html",
 ];
 
 const check = process.argv.includes("--check");

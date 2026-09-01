@@ -562,8 +562,12 @@ contain is the mistake this entry exists to stop being repeated.
 
 ### The mechanism that can
 
-**A Safari Web Extension on iOS.** Supported since iOS 15, and the repository
-already ships one for macOS (`macos/safari-extension/`) doing exactly this job:
+**A Safari Web Extension on iOS.** Supported since iOS 15. The repository had
+the web resources for one — and, it turned out, no packaging on EITHER platform:
+no Xcode project, no `Info.plist`, no `SFSafariWebExtensionHandler`, so nothing
+was installable anywhere. `docs/APPLE_ACCOUNT_SETUP.md` had recorded that gap
+and it had simply never been closed. It is now `apple/AjarSafari`, one target
+across both platforms, doing exactly this job:
 `webNavigation.onBeforeNavigate` for navigations, a content script for
 `pushState` route changes, `tabs.update` to redirect a blocked navigation to our
 own block page. It evaluates **locally**, against the cached signed snapshot,
@@ -587,7 +591,7 @@ So the coherent iOS design is three layers, and two of them do not exist:
 
 | Layer | Gives | Status |
 |---|---|---|
-| Safari Web Extension | per-request, on-device, in Safari | **missing** — exists for macOS only |
+| Safari Web Extension | per-request, on-device, in Safari | **BUILT** — `apple/AjarSafari`, one target for iOS + macOS |
 | ManagedSettings application policy | a native app blocked outright, so "host-level inside it" stops mattering | **missing** — named as the answer in FilterDataProvider.swift and ADR-014, never built |
 | `NEFilterDataProvider` | host-level backstop for everything else, plus the safety floor | exists |
 

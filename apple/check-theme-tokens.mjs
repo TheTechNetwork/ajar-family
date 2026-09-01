@@ -26,7 +26,14 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..");
 
-const SWIFT = ["apple/AjarParent/App/Theme.swift", "apple/AjarFilter/App/Theme.swift"];
+const SWIFT = [
+  "apple/AjarParent/App/Theme.swift",
+  "apple/AjarFilter/App/Theme.swift",
+  // Ajar for Safari's container app (ADR-018). Added with the target rather
+  // than after it: an unchecked copy is the one that drifts, and the whole
+  // point of this script is that a wrong hex on a real device fails CI.
+  "apple/AjarSafari/App/Theme.swift",
+];
 
 /** `--field-line` -> `fieldLine`, `--surface-2` -> `surface2`. */
 const swiftName = (cssVar) =>

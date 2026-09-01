@@ -1,0 +1,136 @@
+# XcodeGen definition for AJAR FOR SAFARI — per-request URL enforcement inside
+# Safari, on iPhone, iPad and Mac, from ONE codebase.
+#
+# WHY THIS EXISTS (docs/DECISIONS.md ADR-018). `NEFilterDataProvider` is asked
+# once per FLOW. A top-level navigation arrives as a browser flow carrying the
+# full URL and is enforced per-URL; everything a page fetches for itself arrives
+# as a socket flow carrying a hostname and nothing else. So inside any
+# single-page app — Reddit, X, Instagram, TikTok, Google Search, YouTube — the
+# content filter enforces at HOST level. That is not URL filtering.
+#
+# Inspecting flow data does not rescue it: those bytes are TLS ciphertext, and
+# reading them needs TLS interception, which this architecture rules out
+# unconditionally on Apple. A Safari Web Extension is the mechanism that sees
+# each request, and it decides LOCALLY against the cached signed snapshot — no
+# per-request network call, which is the on-device requirement rather than a
+# trade against it.
+#
+# WHAT WAS HERE BEFORE. The extension's web resources have existed since PoC B
+# under macos/safari-extension/Extension, and NOTHING PACKAGED THEM — no Xcode
+# project, no Info.plist, no SFSafariWebExtensionHandler. Neither platform had a
+# buildable extension. This file is that missing packaging, and it serves both
+# platforms from one target rather than growing a second copy to drift.
+#
+#   brew install xcodegen && xcodegen generate
+#
+# RE-RUN IT AFTER EVERY PULL THAT TOUCHES THIS FOLDER. The .xcodeproj is
+# generated and gitignored, so it does NOT update when you pull — it keeps
+# whatever file list it had when you last generated it. A source file added
+# upstream is simply absent from the target, and Swift reports that as
+# "cannot find <symbol> in scope" at every USE site rather than as a missing
+# file. CI cannot catch this for you: it runs `xcodegen generate` on a clean
+# checkout every time. Close the project in Xcode before regenerating.
+
+name: AjarSafari
+options:
+  bundleIdPrefix: family.ajar
+  deploymentTarget:
+    # Safari Web Extensions need iOS 15+; the content script's history patch and
+    # MV3 service-worker background want 16.4+. Matched to the rest of the
+    # product rather than reaching for the floor.
+    iOS: "26.0"
+    macOS: "26.0"
+  createIntermediateGroups: true
+
+# Named explicitly rather than inherited from XcodeGen's presets, for the same
+# reason AjarFilter does it: a Release build that still defined DEBUG would ship
+# development behaviour, and the guarantee should be readable in the file.
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+      GCC_PREPROCESSOR_DEFINITIONS: "DEBUG=1 $(inherited)"
+    Release:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: ""
+      GCC_PREPROCESSOR_DEFINITIONS: "$(inherited)"
+  base:
+    DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+
+targets:
+
+  # The container. A Safari Web Extension cannot be installed on its own — it
+  # ships inside an app, and on iOS that app is the only place a parent can be
+  # told to go and switch it on.
+  AjarSafari:
+    type: application
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: App
+    dependencies:
+      - target: AjarSafariExtension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.safari
+        PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_SAFARI_APP)
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Ajar for Safari
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        # Answered once here rather than per upload: the only encryption is the
+        # OS's own (HTTPS via URLSession, CryptoKit), which is exempt.
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+
+  # The extension itself. ONE target, both destinations: iOS and macOS Safari
+  # load the same MV3 resources, so a second target would only be a second copy
+  # to drift.
+  AjarSafariExtension:
+    type: app-extension
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: ExtensionShim
+      # The MV3 resources, copied in whole rather than listed file by file — a
+      # new .js added to the extension must not need a project edit to ship.
+      - path: Extension
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.safari.Extension
+        PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_SAFARI_EXT)
+    info:
+      path: ExtensionShim/Info.plist
+      properties:
+        CFBundleDisplayName: Ajar
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.Safari.web-extension
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SafariWebExtensionHandler
+
+schemes:
+  AjarSafari:
+    build:
+      targets:
+        AjarSafari: all
+    run:
+      config: Debug

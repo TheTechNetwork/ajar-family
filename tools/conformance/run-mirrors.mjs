@@ -36,7 +36,7 @@ function stubExtensionApis() {
 
 const MIRRORS = [
   { id: "windows", path: "../../windows/extension/background.js" },
-  { id: "macos", path: "../../macos/safari-extension/Extension/background.js" },
+  { id: "macos", path: "../../apple/AjarSafari/Extension/background.js" },
 ];
 
 stubExtensionApis();
