@@ -307,8 +307,16 @@ public final class PolicyStore {
         // above default-deny, above the "policy is untrusted" posture below — a
         // child must never have to ask a parent for a crisis line, and must never
         // be locked out of one by a tampered cache either.
-        for h in hosts where SafetyFloor.matches(h) {
-            return EvalResult(action: .allow, reason: "safety-floor", matchedKey: "SAFETY:\(h)")
+        //
+        // The REQUEST HOST only, never the resolved chain. `resolvedHosts` comes
+        // from DNS on the child's own device — a Wi-Fi resolver, a DoH profile —
+        // and the floor is the one tier where that untrusted list would produce
+        // an ALLOW. One crafted CNAME answer naming a floor domain returned
+        // ALLOW for any URL, above every rule, and a floor hit is never reported,
+        // so it left nothing for a parent to see. The chain stays an ANTI-evasion
+        // input everywhere below, where it can only add a block.
+        if SafetyFloor.matches(Host.normalize(requestHost)) {
+            return EvalResult(action: .allow, reason: "safety-floor", matchedKey: "SAFETY:\(Host.normalize(requestHost))")
         }
 
         let snap: DevicePolicySnapshot

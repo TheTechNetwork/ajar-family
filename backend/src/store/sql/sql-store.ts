@@ -393,7 +393,15 @@ export class SqlStore implements Repository {
       [r.id, r.scope.familyId, r.target, r.value, r.action, r.scope.type, s(r.scope.childId), s(r.scope.deviceId), r.priority ?? null, r.createdAt, r.createdBy]);
     return r;
   }
-  async deleteRule(_familyId: string, ruleId: string) { await this.db.run("DELETE FROM rules WHERE id=?", [ruleId]); }
+  // Scoped to the family, because the caller passes one and the tenancy check
+  // upstream is about a DIFFERENT family's membership. Ignoring it made
+  // `DELETE /v1/families/<mine>/rules/<a rule of yours>` return 200 and delete
+  // your rule — the one tenancy hole in an otherwise clean set. It needs a known
+  // rule id, so it was not remotely exploitable; it was still the store quietly
+  // not honouring an argument its own signature declares.
+  async deleteRule(familyId: string, ruleId: string) {
+    await this.db.run("DELETE FROM rules WHERE id=? AND family_id=?", [ruleId, familyId]);
+  }
   async listRules(familyId: string) {
     return (await this.db.all("SELECT * FROM rules WHERE family_id=?", [familyId])).map((r): PolicyRule => ({
       id: r.id as string, target: r.target as PolicyTargetType, value: r.value as string, action: r.action as RuleAction,

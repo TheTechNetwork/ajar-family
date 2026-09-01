@@ -241,7 +241,11 @@ export class MemoryStore implements Repository {
     this.defaults.set(versionKey(familyId, childId), clone(d));
   }
   async createRule(r: PolicyRule) { this.rules.set(r.id, clone(r)); return clone(r); }
-  async deleteRule(_familyId: string, ruleId: string) { this.rules.delete(ruleId); }
+  // See the SQL store: the familyId argument is honoured, not ignored.
+  async deleteRule(familyId: string, ruleId: string) {
+    const r = this.rules.get(ruleId);
+    if (r && r.scope.familyId === familyId) this.rules.delete(ruleId);
+  }
   async listRules(familyId: string) {
     return [...this.rules.values()].filter((r) => r.scope.familyId === familyId).map(clone);
   }

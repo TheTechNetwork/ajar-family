@@ -20,6 +20,17 @@ export interface AppConfig {
   authSecret: string;
   /** Ops secret gating the GLOBAL category-dataset import. Unset = disabled. */
   categoryAdminToken?: string;
+  /**
+   * True when a reverse proxy YOU control overwrites `x-forwarded-for` /
+   * `x-real-ip` on every inbound request.
+   *
+   * Off by default, and it must stay off for a server reachable directly from
+   * the internet: those headers are client input, and rate limiting keyed on
+   * them is no rate limiting at all — a rotating value gives every login attempt
+   * a fresh bucket. Cloudflare's `cf-connecting-ip` is trusted regardless,
+   * because the edge sets it and strips any client copy.
+   */
+  trustProxyHeaders?: boolean;
   /** Base64 SPKI/PKCS8 policy-signing keypair. Generated if omitted (dev only). */
   signingPublicKeyB64?: string;
   signingPrivateKeyB64?: string;
@@ -84,6 +95,7 @@ export class App {
   readonly authSecret: string;
   readonly signingPublicKeyB64: string;
   readonly categoryAdminToken?: string;
+  readonly trustProxyHeaders: boolean;
   readonly auth: AuthService;
   readonly family: FamilyService;
   readonly enrollment: EnrollmentService;
@@ -107,6 +119,7 @@ export class App {
     this.authSecret = cfg.authSecret;
     this.signingPublicKeyB64 = signingPublicKeyB64;
     this.categoryAdminToken = cfg.categoryAdminToken;
+    this.trustProxyHeaders = cfg.trustProxyHeaders === true;
     this.categories = new RepositoryCategoryProvider(repo);
     this.cnameResolver = resolver;
     this.auth = new AuthService(repo, notifier, mail);

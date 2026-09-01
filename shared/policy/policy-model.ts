@@ -222,10 +222,22 @@ export function evaluate(
   // temporary blocks. A child must never have to ask a parent for a crisis line.
   // Deliberately not overridable and deliberately not reported. See
   // shared/safety/safety-floor.ts.
-  for (const h of hosts) {
-    if (isSafetyFloorHost(h)) {
-      return { action: "ALLOW", reason: "safety-floor", matchedKey: `SAFETY:${h}` };
-    }
+  //
+  // `host` ONLY, never the resolved chain. This used to run over `hosts`, and
+  // `ctx.resolvedHosts` comes from DNS on the child's own device — a Wi-Fi
+  // resolver, a DoH profile, a hosts file, all of which a child sets without
+  // admin rights or a jailbreak. One crafted CNAME answer naming any floor
+  // domain returned ALLOW above every rule, above default-deny, for any URL. And
+  // because a floor hit is never reported, the bypass left no trace for a parent
+  // to see.
+  //
+  // The chain is an ANTI-evasion input everywhere else — it can only ADD a block,
+  // so a hostile answer cannot help. The floor is the one tier where the same
+  // untrusted list produces an ALLOW, so the floor does not read it. A crisis
+  // line reached through a CNAME the product cannot verify is not a case worth
+  // opening this hole for.
+  if (isSafetyFloorHost(host)) {
+    return { action: "ALLOW", reason: "safety-floor", matchedKey: `SAFETY:${host}` };
   }
 
   const applicable = snapshot.rules.filter((r) => ruleAppliesToScope(r, ctx));

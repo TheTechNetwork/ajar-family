@@ -31,21 +31,53 @@ async function familyFixture() {
   return { app, owner, fam, child, device };
 }
 
-// Every shape of block a child can actually hit, with the URL they were on.
-const CASES: { targetType: PolicyTargetType; targetValue: string; url: string }[] = [
-  { targetType: "YOUTUBE_VIDEO", targetValue: "9bZkp7q19f0", url: "https://www.youtube.com/watch?v=9bZkp7q19f0" },
-  { targetType: "DOMAIN", targetValue: "reddit.com", url: "https://www.reddit.com/r/space" },
-  { targetType: "CATEGORY", targetValue: "social", url: "https://tiktok.com/@nasa" },
-  { targetType: "URL", targetValue: "https://example.com/a", url: "https://example.com/a" },
+// Every shape of block a child can actually hit, with the URL they were on and
+// the target their DEVICE names when it asks.
+//
+// The block and the ask are separate columns on purpose. A parent may block a
+// whole CATEGORY; a child's device may not ASK about one, because a device may
+// only name a specific thing it hit (shared/policy/target-validate.ts — a device
+// that could name its own target could name "*"). So the category row blocks by
+// category and asks about the site, which is what actually happens on a device.
+const CASES: {
+  name: string;
+  block: { target: PolicyTargetType; value: string };
+  ask: { targetType: PolicyTargetType; targetValue: string };
+  url: string;
+}[] = [
+  {
+    name: "YOUTUBE_VIDEO",
+    block: { target: "YOUTUBE_VIDEO", value: "9bZkp7q19f0" },
+    ask: { targetType: "YOUTUBE_VIDEO", targetValue: "9bZkp7q19f0" },
+    url: "https://www.youtube.com/watch?v=9bZkp7q19f0",
+  },
+  {
+    name: "DOMAIN",
+    block: { target: "DOMAIN", value: "reddit.com" },
+    ask: { targetType: "DOMAIN", targetValue: "reddit.com" },
+    url: "https://www.reddit.com/r/space",
+  },
+  {
+    name: "CATEGORY (asked for as the site)",
+    block: { target: "CATEGORY", value: "social" },
+    ask: { targetType: "DOMAIN", targetValue: "tiktok.com" },
+    url: "https://tiktok.com/@nasa",
+  },
+  {
+    name: "URL",
+    block: { target: "URL", value: "https://example.com/a" },
+    ask: { targetType: "URL", targetValue: "https://example.com/a" },
+    url: "https://example.com/a",
+  },
 ];
 
 for (const c of CASES) {
-  test(`approving a ${c.targetType} block actually unblocks the child`, async () => {
+  test(`approving a ${c.name} block actually unblocks the child`, async () => {
     const { app, owner, fam, child, device } = await familyFixture();
 
     // Family blocks it (the standing rule the child hit).
     await app.policy.addRule(fam.id, owner.id, {
-      target: c.targetType, value: c.targetValue, action: "BLOCK",
+      target: c.block.target, value: c.block.value, action: "BLOCK",
       scope: { type: "CHILD", familyId: fam.id, childId: child.id },
     });
     const ctx = (nowMs = Date.now()) => ({ url: c.url, childId: child.id, deviceId: device.id, nowMs });
@@ -56,11 +88,11 @@ for (const c of CASES) {
     // Child asks; parent taps the single primary button (default scope).
     const req = await app.approvals.createRequest({
       familyId: fam.id, childId: child.id, deviceId: device.id,
-      targetType: c.targetType, targetValue: c.targetValue, url: c.url,
+      targetType: c.ask.targetType, targetValue: c.ask.targetValue, url: c.url,
     });
     await app.approvals.decide({
       familyId: fam.id, requestId: req.id, decidedBy: owner.id, decision: "ALLOW",
-      scope: defaultScopeFor(c.targetType), duration: { kind: "MINUTES", minutes: 30 },
+      scope: defaultScopeFor(c.ask.targetType), duration: { kind: "MINUTES", minutes: 30 },
       policy: app.policy,
     });
 
@@ -71,19 +103,42 @@ for (const c of CASES) {
   });
 }
 
+test("a device cannot name its own policy target — that was an allow-the-web hole", async () => {
+  const { app, fam, child, device } = await familyFixture();
+  const ask = (targetType: PolicyTargetType, targetValue: string) =>
+    app.approvals.createRequest({ familyId: fam.id, childId: child.id, deviceId: device.id, targetType, targetValue });
+
+  // The exploit: a wildcard pattern under an innocuous title. The parent sees
+  // the title; the rule that appears is evaluated above every standing rule.
+  await assert.rejects(() => ask("URL_PATTERN", "*"), DomainError);
+  // Same move, other doors.
+  await assert.rejects(() => ask("CATEGORY", "adult"), DomainError);
+  await assert.rejects(() => ask("DOMAIN", "com"), DomainError);
+  await assert.rejects(() => ask("URL", "not a url"), DomainError);
+  await assert.rejects(() => ask("YOUTUBE_VIDEO", "../../etc/passwd"), DomainError);
+
+  // What a device legitimately hits still goes through untouched.
+  await ask("DOMAIN", "tiktok.com");
+  await ask("URL", "https://example.com/a?x=1");
+  await ask("YOUTUBE_VIDEO", "9bZkp7q19f0");
+  await ask("YOUTUBE_CHANNEL", "@SomeCreator");
+});
+
 test("approving a CATEGORY block grants only that site, not the whole category", async () => {
   const { app, owner, fam, child, device } = await familyFixture();
   await app.policy.addRule(fam.id, owner.id, {
     target: "CATEGORY", value: "social", action: "BLOCK",
     scope: { type: "CHILD", familyId: fam.id, childId: child.id },
   });
+  // The device asks about the SITE it hit, not the category that closed it — a
+  // device may not name a category (target-validate.ts).
   const req = await app.approvals.createRequest({
     familyId: fam.id, childId: child.id, deviceId: device.id,
-    targetType: "CATEGORY", targetValue: "social", url: "https://tiktok.com/@nasa",
+    targetType: "DOMAIN", targetValue: "tiktok.com", url: "https://tiktok.com/@nasa",
   });
   await app.approvals.decide({
     familyId: fam.id, requestId: req.id, decidedBy: owner.id, decision: "ALLOW",
-    scope: defaultScopeFor("CATEGORY"), duration: { kind: "MINUTES", minutes: 30 }, policy: app.policy,
+    scope: defaultScopeFor("DOMAIN"), duration: { kind: "MINUTES", minutes: 30 }, policy: app.policy,
   });
   const snap = await app.policy.buildSnapshot(fam.id, child.id, device.id);
   const at = (url: string) => evaluate(snap, { url, childId: child.id, deviceId: device.id, nowMs: Date.now() }).action;

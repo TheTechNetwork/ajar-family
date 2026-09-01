@@ -444,7 +444,11 @@ export function evaluate(snap, ctx) {
   }
 
   // Tier 0 — safety floor, above every other tier (never blocked, never reported).
-  for (const h of hosts) if (isSafetyFloorHost(h)) return { action: "ALLOW", reason: "safety-floor", matchedKey: `SAFETY:${h}` };
+  // `host` only, never the resolved chain: ctx.resolvedHosts comes from DNS on
+  // the child's own device, and the floor is the one tier where that untrusted
+  // list would produce an ALLOW — above every rule, and never reported. See
+  // shared/policy/policy-model.ts.
+  if (isSafetyFloorHost(host)) return { action: "ALLOW", reason: "safety-floor", matchedKey: `SAFETY:${host}` };
 
   const applicable = (snap.rules || []).filter((r) => ruleAppliesToScope(r, ctx));
 

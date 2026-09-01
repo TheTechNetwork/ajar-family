@@ -37,6 +37,10 @@ async function main(): Promise<void> {
       signingPublicKeyB64: process.env.SIGNING_PUBLIC_KEY_B64,
       signingPrivateKeyB64: process.env.SIGNING_PRIVATE_KEY_B64,
       categoryAdminToken: process.env.CATEGORY_ADMIN_TOKEN,
+      // Opt-in, and only when a proxy YOU control rewrites these headers. Left
+      // unset, rate limiting keys on a shared bucket rather than on a value the
+      // client can rotate — see http/rate-limit.ts clientKey().
+      trustProxyHeaders: process.env.TRUST_PROXY_HEADERS === "1",
       // Real notification delivery. Both must be set; otherwise outbound email
       // is dropped with a warning (see push/mail.ts) rather than silently faked.
       mailEndpoint: process.env.MAIL_ENDPOINT,

@@ -960,12 +960,23 @@ function renderRequest(r) {
   return `<li class="req" id="req-${id}" aria-labelledby="reqt-${id}">
     <p class="who-asked">${escapeHtml(who)} · ${escapeHtml(ago(r.createdAt))}</p>
     <h3 class="t" id="reqt-${id}">${ctx}</h3>
+    <!-- THE TARGET, ALWAYS VISIBLE, never only inside Details.
+
+         `title` is free text FROM THE CHILD'S DEVICE, and it was the headline
+         while what a tap would actually open sat folded away. That is the wrong
+         way round: a parent is deciding about the target, and the title is how
+         the ask was described to them. The device can no longer name a wildcard
+         (shared/policy/target-validate.ts), but "Khan Academy — Algebra 1" over
+         a link to somewhere else needs no wildcard to mislead.
+
+         Shown as a second line rather than replacing the title, because the
+         title is genuinely the useful part when it is honest. -->
+    <p class="target">${escapeHtml(TYPE_LABEL[r.targetType] ?? r.targetType)} — <span class="target-value">${escapeHtml(r.targetValue)}</span></p>
     ${r.reason ? `<p class="quote">“${escapeHtml(r.reason)}”</p>` : ""}
-    <details>
+    ${r.url && r.url !== r.targetValue ? `<details>
       <summary>Details</summary>
-      <p class="meta">${escapeHtml(TYPE_LABEL[r.targetType] ?? r.targetType)} — ${escapeHtml(r.targetValue)}</p>
-      ${r.url ? `<p class="meta">${escapeHtml(r.url)}</p>` : ""}
-    </details>
+      <p class="meta">${escapeHtml(r.url)}</p>
+    </details>` : ""}
     <div class="actions">
       <button type="button" class="btn-yes" data-yes="${id}">Open ${escapeHtml(noun)} · ${defLabel}<span class="sr-only"> — ${ctx}</span></button>
       <button type="button" data-notnow="${id}">Not now<span class="sr-only"> — ${ctx}</span></button>

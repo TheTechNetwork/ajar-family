@@ -18,10 +18,34 @@ test("RateLimiter allows up to the limit, then blocks", () => {
   assert.equal(rl.allow("other"), true, "a different key has its own budget");
 });
 
-test("clientKey prefers forwarded IP headers, falls back to shared", () => {
-  assert.equal(clientKey({ "cf-connecting-ip": "1.2.3.4" }), "1.2.3.4");
-  assert.equal(clientKey({ "x-forwarded-for": "9.9.9.9, 10.0.0.1" }), "9.9.9.9");
+test("clientKey does not trust x-forwarded-for unless an operator says to", () => {
+  // This test used to assert the opposite and the opposite was the hole: a
+  // client that rotates X-Forwarded-For gets a fresh bucket per request, so on
+  // the self-hosted binary there was no limit on login, register, forgot, reset
+  // or enrollment redeem — and each login attempt costs 600,000 PBKDF2
+  // iterations, so it was a CPU amplifier too.
+  assert.equal(clientKey({ "x-forwarded-for": "9.9.9.9, 10.0.0.1" }), "shared");
+  assert.equal(clientKey({ "x-real-ip": "9.9.9.9" }), "shared");
   assert.equal(clientKey({}), "shared");
+
+  // Cloudflare sets this at the edge and strips a client copy, so it is
+  // trustworthy without opting in.
+  assert.equal(clientKey({ "cf-connecting-ip": "1.2.3.4" }), "1.2.3.4");
+  // ...and it wins over headers a client could have sent.
+  assert.equal(clientKey({ "cf-connecting-ip": "1.2.3.4", "x-forwarded-for": "9.9.9.9" }), "1.2.3.4");
+
+  // Behind a proxy the operator controls, opted in explicitly.
+  assert.equal(clientKey({ "x-forwarded-for": "9.9.9.9, 10.0.0.1" }, true), "9.9.9.9");
+  assert.equal(clientKey({ "x-real-ip": "9.9.9.9" }, true), "9.9.9.9");
+  assert.equal(clientKey({}, true), "shared");
+});
+
+test("rotating a forwarded header does not buy extra attempts", () => {
+  const lim = new RateLimiter(3, 60_000);
+  const attempt = (i: number) => lim.allow(clientKey({ "x-forwarded-for": `10.0.0.${i}` }));
+  assert.ok(attempt(1) && attempt(2) && attempt(3), "the first three are allowed");
+  assert.equal(attempt(4), false, "a fresh header value is still the same bucket");
+  assert.equal(attempt(5), false);
 });
 
 test("a before() guard applies to every route (baseline limit)", async () => {

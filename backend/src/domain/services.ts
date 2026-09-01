@@ -17,6 +17,7 @@ import type {
   NotificationEndpoint, PasswordResetToken, EmailVerificationToken, PendingRegistration,
 } from "./model.js";
 import type { DevicePolicySnapshot } from "@ajar/shared/policy";
+import { childRequestTargetError } from "@ajar/shared/policy/targets";
 import type { CategoryProvider } from "../categories/provider.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { endOfLocalDayIso, isValidTimeZone, safeTimeZone } from "./time.js";
@@ -638,6 +639,27 @@ export class FamilyService {
     return m;
   }
 
+  /**
+   * The children this membership may see. `null` means "every child".
+   *
+   * LIMITED_GUARDIAN is the deliberately narrow role — a babysitter, a
+   * step-parent, an ex-partner — and `model.ts` describes `assignedChildIds` as
+   * "the children they may see/act on". `DeviceService.listWithStatus` and
+   * `ApprovalService.decide` honoured that; the request feed, the child list,
+   * the rule list and the audit log did not, and each of them returned the whole
+   * family.
+   *
+   * That leak was not abstract: an access request carries the URL, the title and
+   * the child's own free-text reason for wanting it. A guardian assigned to one
+   * child could read every other child's asks, verbatim. Given what the safety
+   * floor says about the cost of a child being seen, that is the most sensitive
+   * data this product holds.
+   */
+  async visibleChildIds(familyId: string, userId: string): Promise<Set<string> | null> {
+    const m = await this.membership(familyId, userId);
+    return m.role === "LIMITED_GUARDIAN" ? new Set(m.assignedChildIds) : null;
+  }
+
   private async requireRole(familyId: string, userId: string,
                             pred: (r: Role) => boolean, action: string) {
     const m = await this.membership(familyId, userId);
@@ -852,8 +874,33 @@ export class PolicyService {
   async syncSince(familyId: string, childId: string, deviceId: string, sinceVersion: number):
     Promise<DevicePolicySnapshot | null> {
     const version = await this.repo.getPolicyVersion(familyId, childId);
-    if (version <= sinceVersion) return null;
+    // CLAMP THE DEVICE'S CLAIM. `since` is an unbounded number from the child's
+    // device. Unclamped, `?since=999999999` made `version <= sinceVersion` true
+    // forever: the device was told "up to date" and never received another
+    // policy, while `DeviceService.heartbeat` stored 999999999 as the version it
+    // held — behind a `Math.max` that never moves backwards, so it was
+    // permanent. The console then showed that device green, "up to date",
+    // "protection running", for the rest of its life, and every new block the
+    // parent added went nowhere. Both halves of the lie came from one
+    // unvalidated query parameter.
+    const claimed = await this.clampSyncedVersion(deviceId, sinceVersion);
+    if (version <= claimed) return null;
     return this.buildSnapshot(familyId, childId, deviceId);
+  }
+
+  /**
+   * What a device may legitimately claim to hold.
+   *
+   * Never MORE than the server has actually sent it — that is the whole point.
+   * A device reporting LESS is honest and useful (it lost its cache and wants a
+   * full snapshot), so downward claims pass through; upward ones are the attack
+   * and are clamped to the server's own record.
+   */
+  async clampSyncedVersion(deviceId: string, claimed: number): Promise<number> {
+    const device = await this.repo.getDevice(deviceId);
+    const ceiling = device?.lastSyncedVersion ?? 0;
+    const asked = Number.isFinite(claimed) ? claimed : 0;
+    return Math.min(Math.max(asked, 0), ceiling);
   }
 
   /**
@@ -1049,6 +1096,26 @@ export class ApprovalService {
     const device = await this.repo.getDevice(input.deviceId);
     if (!device || device.familyId !== input.familyId || device.childId !== input.childId)
       throw new DomainError("device/child mismatch", "FORBIDDEN");
+
+    // THE TARGET IS THE CHILD'S INPUT, and it becomes the rule a parent's tap
+    // mints. This route is authenticated by a DEVICE token, so both fields cross
+    // the trust boundary from the person the product exists to constrain, and
+    // nothing used to check either one.
+    //
+    // A device could post { targetType: "URL_PATTERN", targetValue: "*" } under
+    // a title like "Khan Academy — Algebra 1 practice". The console shows the
+    // title as the headline with the real target inside a collapsed panel; the
+    // parent taps the green button; the temporary rule that appears is evaluated
+    // ABOVE every standing rule, so for the grant's lifetime the entire web was
+    // open — over their explicit domain blocks, their category blocks and a
+    // default-deny posture — and it could be renewed on every ask.
+    // { "CATEGORY", "adult" } and { "DOMAIN", "com" } were the same move.
+    //
+    // Enforced here rather than at the route so it holds for every caller, and
+    // it constrains only what a DEVICE may put in front of a parent: a parent
+    // authoring a rule directly keeps the full vocabulary.
+    const targetError = childRequestTargetError(input.targetType, input.targetValue);
+    if (targetError) throw new DomainError(targetError);
 
     // DEDUPE. A blocked page in a browser is not one request: the child reloads,
     // the page retries its sub-resources, a tab restores on wake. Each of those

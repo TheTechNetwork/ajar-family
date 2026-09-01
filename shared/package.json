@@ -8,6 +8,10 @@
       "types": "./dist/policy/policy-model.d.ts",
       "default": "./dist/policy/policy-model.js"
     },
+    "./policy/targets": {
+      "types": "./dist/policy/target-validate.d.ts",
+      "default": "./dist/policy/target-validate.js"
+    },
     "./youtube": {
       "types": "./dist/youtube/youtube-normalize.d.ts",
       "default": "./dist/youtube/youtube-normalize.js"

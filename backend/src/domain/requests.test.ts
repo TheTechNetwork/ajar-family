@@ -51,7 +51,9 @@ test("a different target, child or device is still a separate request", async ()
   const base = { familyId: fam.id, childId: child.id, deviceId: device.id } as const;
   await app.approvals.createRequest({ ...base, targetType: "DOMAIN", targetValue: "reddit.com" });
   await app.approvals.createRequest({ ...base, targetType: "DOMAIN", targetValue: "tiktok.com" });
-  await app.approvals.createRequest({ ...base, targetType: "CATEGORY", targetValue: "reddit.com" });
+  // Same VALUE, different TYPE — the dedupe key must include the type. (A device
+  // may not name a CATEGORY, so this uses two target types it can name.)
+  await app.approvals.createRequest({ ...base, targetType: "URL", targetValue: "https://reddit.com/" });
 
   const tok = await app.enrollment.createToken(fam.id, owner.id, child.id, "MACOS");
   const second = await app.enrollment.redeem(tok.code, "pk2", "Mac");

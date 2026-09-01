@@ -126,7 +126,7 @@ test("deleting a child erases their devices, policy, grants and requests", async
     target: "CATEGORY", value: "social", action: "BLOCK", scope: { type: "CHILD", childId: c.childId },
   }, c.parent);
   const req = await c.app.approvals.createRequest({
-    familyId: c.famId, childId: c.childId, deviceId: c.deviceId, targetType: "CATEGORY", targetValue: "social",
+    familyId: c.famId, childId: c.childId, deviceId: c.deviceId, targetType: "DOMAIN", targetValue: "tiktok.com",
     url: "https://tiktok.com/@nasa",
   });
   await c.app.approvals.decide({
@@ -155,4 +155,44 @@ test("a non-member can neither see nor delete another family's devices", async (
   assert.equal((await call(c.r, "GET", `/v1/families/${c.famId}/devices`, undefined, outsider.accessToken)).status, 403);
   assert.equal((await call(c.r, "DELETE", `/v1/families/${c.famId}/devices/${c.deviceId}`, undefined, outsider.accessToken)).status, 403);
   assert.equal((await call(c.r, "DELETE", `/v1/families/${c.famId}/children/${c.childId}`, undefined, outsider.accessToken)).status, 403);
+});
+
+test("a device cannot claim a policy version it does not have", async () => {
+  // `?since=` is an unbounded number from the child's device. Unclamped, a huge
+  // value made syncSince answer "up to date" forever AND stored that number as
+  // the version the device held — behind a Math.max that never moves backwards.
+  // The console then showed the device green and up to date for the rest of its
+  // life while every new block the parent added went nowhere.
+  const c = await fixture();
+  const claimed = 999_999_999;
+
+  await call(c.r, "GET", `/v1/devices/${c.deviceId}/policy?since=${claimed}`,
+    undefined, c.deviceToken);
+
+  const list = async () => ((await call(c.r, "GET", `/v1/families/${c.famId}/devices`, undefined, c.parent))
+    .body as { id: string; lastSyncedVersion: number; currentVersion: number; upToDate: boolean }[])
+    .find((d) => d.id === c.deviceId)!;
+
+  const before = await list();
+  assert.ok(before.lastSyncedVersion <= before.currentVersion,
+    `stored ${before.lastSyncedVersion} for a policy at version ${before.currentVersion}`);
+
+  // The parent adds a block; the device must be told it is out of date.
+  await call(c.r, "POST", `/v1/families/${c.famId}/rules`, {
+    target: "DOMAIN", value: "blocked.example", action: "BLOCK", scope: { type: "CHILD", childId: c.childId },
+  }, c.parent);
+
+  const res = await call(c.r, "GET", `/v1/devices/${c.deviceId}/policy?since=${claimed}`,
+    undefined, c.deviceToken);
+  assert.notEqual((res.body as { upToDate?: boolean }).upToDate, true,
+    "a claimed future version must not suppress real policy");
+  assert.ok((res.body as { rules?: unknown[] }).rules?.some?.(
+    (x) => (x as { value?: string }).value === "blocked.example"),
+    "the new block is actually delivered");
+
+  // It is current NOW because it just received the policy — which is the point.
+  // What must never happen is the recorded version running ahead of the real one.
+  const after = await list();
+  assert.ok(after.lastSyncedVersion <= after.currentVersion,
+    `recorded ${after.lastSyncedVersion} against a policy at ${after.currentVersion}`);
 });
