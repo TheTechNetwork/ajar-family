@@ -353,9 +353,21 @@ are **three distinct Apple postures**, and only one gives real anti-tamper:
 
 | Posture | How it arises | Anti-tamper | Per-video filtering |
 |---|---|---|---|
-| **Unsupervised device + FamilyControls `.child`** | Child signed in with a **real child Apple ID** that is a member of the parent's **Family Sharing** group; parent approves `requestAuthorization(for: .child)` | **Yes** — app can't be deleted, iCloud can't be signed out (FamilyControls). Content filter is unlocked on unsupervised iOS (TN3134). | **Yes** on iOS Safari via `NEFilterDataProvider` (PoC A) |
+| **Unsupervised device + FamilyControls `.child`** | Child signed in with a **real child Apple ID** that is a member of the parent's **Family Sharing** group; parent approves `requestAuthorization(for: .child)` | **Yes** — app can't be deleted, iCloud can't be signed out (FamilyControls). Content filter is unlocked on unsupervised iOS (TN3134). | **Per top-level NAVIGATION**, via `NEFilterDataProvider` + the Safari Web Extension. See the note under this table. |
 | **Self-controlled / adult account (`.individual`)** | Any adult approves on their own device via Face/Touch ID | **No** — self-restriction only; the same person can revoke it | Filter works while enabled, but the user can disable it |
 | **Supervised / MDM device** | Device enrolled in MDM (Apple Configurator / Apple Business/School Manager) | Strongest, but this is **not** the consumer product | Full content-filter + MDM URL-filter config; out of scope for MVP |
+
+> **What "per-video filtering" means here, precisely.** This column read "Yes on
+> iOS Safari via `NEFilterDataProvider` (PoC A)", and that is not what the
+> mechanism does. `NEFilterDataProvider` is asked once per FLOW: a top-level
+> navigation arrives as a browser flow carrying the full URL and is enforced
+> per-URL, while everything a page fetches for itself arrives as a socket flow
+> carrying a hostname and nothing else. So the filter ALONE enforces at HOST
+> level inside any single-page app — Reddit, X, Instagram, TikTok, Google
+> Search, YouTube — which its own source calls "the product's largest
+> enforcement gap, measured on device 2026-08-31" (`FilterDataProvider.swift`).
+> Per-URL inside a page is the Safari Web Extension's job (ADR-018), and it is
+> the one thing here that CI cannot verify.
 
 **Product rules that follow:**
 
@@ -652,9 +664,18 @@ and in `docs/DECISIONS.md`.
 _Status 2026-08-27: the scaffold **builds clean for arm64 device** (Xcode 27.0 /
 iPhoneOS 27 SDK, deployment target iOS 26.0) as app + filter-data `.appex` +
 filter-control `.appex` — see `apple/AjarFilter/project.yml` and ADR-011.
-**Every numbered item below is still unproven**: no test was executed, because no
-iOS device and no signing identity were available (ADR-012). Compiling is not
-evidence of behaviour._
+**STALE — SUPERSEDED BY ADR-001's EVIDENCE BLOCK (2026-08-31).** This section is
+stamped 2026-08-27 and says nothing below it was ever run. Five days later
+tests A1-A3 WERE run, on an iPhone 16 Pro Max (iOS 27.0) with a
+development-signed build, and `docs/DECISIONS.md` ADR-001 records what they
+found — including the per-flow qualification that ADR-018 then acted on.
+Anyone reading only this section concluded the product's central premise was
+unverified, five days after it had been verified.
+
+Items 1-3 and 5 are settled by that evidence; item 4 is still unmeasured and item
+6 is still open. `docs/DECISIONS.md` is where the current status lives — this
+section is kept as the record of what was unknown before the device run, not as
+a statement about today._
 1. Default-deny YouTube while allowing exactly one video (another stays blocked) in Safari. — **UNPROVEN**
 2. Full URL/query visibility on WebKit flows in practice (incl. real YouTube URLs with extra params). — **UNPROVEN at runtime.** SDK-level support only: `NEFilterFlow.URL` is declared on the *base* `NEFilterFlow` class (`NEFilterFlow.h`, iOS 9.0+) documented as "The flow's HTTP request URL. Will be nil if the flow did not originate from WebKit." That matches the design assumption but says nothing about what YouTube's real navigations actually surface.
 3. Remediation "Request Access" block page actually renders in Safari and round-trips to the app. — **UNPROVEN**, and note a constraint found in the SDK headers: the remediation URL "should follow the scheme http or https" (`NEFilterProvider.h`). The block page is therefore a **remotely hosted** page, not an app-local one; the `NE_FLOW_URL` substitution carries the blocked URL to it, and the hop back into the containing app must be a universal link or custom scheme from that page. This adds a hosting dependency to the Request-Access flow that the §0 workflow should account for.

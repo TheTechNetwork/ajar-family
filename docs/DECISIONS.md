@@ -11,7 +11,10 @@ PoC produces a result.
 ---
 
 ### ADR-001 — The per-video-approval engine on iOS is `NEFilterDataProvider`, not `NEURLFilter`
-**Status:** Proposed (confirm in PoC A)
+**Status:** ACCEPTED — confirmed on hardware 2026-08-31, with the qualification
+below. (This said "Proposed (confirm in PoC A)" directly above its own Evidence
+block recording that PoC A had been run, which is the one line a reader checks
+to know whether the product's central premise is settled.)
 **Context:** The headline requirement is default-deny YouTube with per-video
 approval in seconds. Research shows `NEURLFilter` is **blocklist-only** (dataset
 values are always `1`; sub-URL enumeration blocks a whole domain with no

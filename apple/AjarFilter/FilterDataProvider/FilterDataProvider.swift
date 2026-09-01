@@ -273,6 +273,23 @@ final class FilterDataProvider: NEFilterDataProvider {
 
         switch decision.action {
         case .allow:
+            // SPEND A "JUST ONCE" GRANT, on a top-level page load only.
+            //
+            // `remediable` is true exactly for a browser flow — a page the child
+            // navigated to. A sub-resource must never burn the grant: it would
+            // be spent before the approved page had finished rendering, and the
+            // child would watch it fail in front of them. Same rule as the
+            // Safari extension.
+            //
+            // Until this existed, "Just once" was a TIMED grant with a five
+            // minute backstop: the child could close the tab and reopen it as
+            // often as they liked. The console offered an option the device did
+            // not implement.
+            if remediable,
+               decision.reason == "temporary:ONCE",
+               let ruleId = decision.matchedRuleId {
+                store.spendGrant(ruleId)
+            }
             return .allow()
         case .block:
             guard remediable else { return .drop() }

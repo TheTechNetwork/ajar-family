@@ -24,11 +24,17 @@ import os.log
 /// before trusting a field of it (`policy-verify.js`). One enrolment, one device
 /// identity, one snapshot, two enforcement surfaces.
 ///
-/// It stays a READ. It never writes policy, never decides anything, and never
-/// carries a URL: the decision happens in `background.js` against the cached
-/// snapshot, locally, on the device (docs/DECISIONS.md ADR-018). Moving the
-/// decision here would put a message round trip on the hot path of every
-/// navigation to arrive at the same answer.
+/// IT NEVER DECIDES, and it carries no URL: the decision happens in
+/// `background.js` against the cached snapshot, locally, on the device
+/// (docs/DECISIONS.md ADR-018). Moving the decision here would put a message
+/// round trip on the hot path of every navigation to arrive at the same answer.
+///
+/// It writes exactly one thing: that a "just once" grant has been SPENT. That
+/// state has to be shared with the content filter or "just once" means once per
+/// surface — watch it in Safari, then watch it again through a top-level
+/// navigation the filter sees, because neither knows what the other spent. It is
+/// a set of opaque grant ids, it only ever grows within a policy version, and
+/// spending something twice is a no-op, so the write cannot loosen anything.
 ///
 /// TRUST BOUNDARY. Anything with App-Group access can write those bytes — the
 /// boundary `PolicyStore` already documents. That is why the signature is
@@ -52,6 +58,8 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         switch type {
         case "GET_POLICY":
             payload = Self.policyPayload()
+        case "SPEND_GRANT":
+            payload = Self.spendGrant(message?["grantId"] as? String)
         default:
             payload = [
                 "ok": false,
@@ -64,6 +72,20 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         let response = NSExtensionItem()
         response.userInfo = [SFExtensionMessageKey: payload]
         context.completeRequest(returningItems: [response], completionHandler: nil)
+    }
+
+    /// Record that a one-time grant has been used, in the store the content
+    /// filter reads.
+    ///
+    /// Only ever adds; `PolicyStore.spendGrant` prunes ids the policy no longer
+    /// carries and returns whether this call is what spent it, so the containing
+    /// app can report each one to the backend exactly once.
+    static func spendGrant(_ grantId: String?) -> [String: Any] {
+        guard let grantId, !grantId.isEmpty else {
+            return ["ok": false, "error": "missing-grant-id"]
+        }
+        let firstTime = PolicyStore.shared.spendGrant(grantId)
+        return ["ok": true, "spent": firstTime]
     }
 
     /// This device's policy as the JavaScript needs it.

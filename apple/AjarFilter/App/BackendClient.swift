@@ -229,7 +229,41 @@ final class BackendClient {
         if let held { comps.queryItems = [URLQueryItem(name: "since", value: String(held))] }
 
         let data = try await send(URLRequest(url: comps.url!), authenticated: true)
-        return try install(policyResponse: data, deviceId: deviceId)
+        let installed = try install(policyResponse: data, deviceId: deviceId)
+        // Tell the server about any "just once" grant this device has spent.
+        // Piggy-backed on the sync the app already performs rather than given a
+        // timer of its own: the report is not urgent (the grant is already dead
+        // locally, and its TTL bounds the server-side window), and a filter
+        // extension that wakes the network on its own is a battery complaint.
+        await reportSpentGrants(deviceId: deviceId)
+        return installed
+    }
+
+    /// Report spent one-time grants, best-effort.
+    ///
+    /// The server cannot know when the one allowed load happened — only the
+    /// device can tell it, which `ApprovalService.consumeGrant` documents as
+    /// client-attested. A failure leaves the id unreported and the next sync
+    /// tries again; the grant is already unusable on THIS device either way,
+    /// so nothing the child sees depends on this call.
+    func reportSpentGrants(deviceId: String) async {
+        let store = PolicyStore.shared
+        let pending = store.unreportedSpentGrantIds()
+        guard !pending.isEmpty, let base = Self.baseURL else { return }
+        for ruleId in pending {
+            var req = URLRequest(url: base.appendingPathComponent(
+                "v1/devices/\(deviceId)/grants/\(ruleId)/consume"))
+            req.httpMethod = "POST"
+            do {
+                _ = try await send(req, authenticated: true)
+                store.markGrantReported(ruleId)
+            } catch {
+                // Deliberately not retried in a loop here: the next sync will.
+                // Retrying now could spend a grant the child never got to use if
+                // the failure was on our side of the request.
+                return
+            }
+        }
     }
 
     /// Long-poll for the next policy change (test A4's fast path). Returns true

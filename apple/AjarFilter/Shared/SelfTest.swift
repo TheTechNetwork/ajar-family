@@ -39,6 +39,7 @@ public enum PolicySelfTest {
         f += bloomFilterVector()
         f += hostVectors()
         f += urlNormalizeVectors()
+        f += spentGrantVectors()
         f += safetyFloorVectors()
         f += canonicalJSONVectors()
         f += signatureVector()
@@ -230,6 +231,45 @@ public enum PolicySelfTest {
         out += check("matchesPattern outside the prefix",
                      !URLNormalize.matchesPattern(url: "https://example.com/unsafe/x", pattern: pat),
                      "a pattern matched outside its prefix")
+        return out
+    }
+
+    /// "Just once" actually meaning once.
+    ///
+    /// `grantKind` was decoded and used for exactly one thing — the reason
+    /// string — so a ONCE grant was a TIMED grant with a five-minute backstop:
+    /// close the tab, reopen it, and it plays again. The console offered an
+    /// option the device did not implement.
+    ///
+    /// Pure store behaviour, so it runs without the fixed signed snapshot the
+    /// other evaluator vectors depend on.
+    private static func spentGrantVectors() -> [Failure] {
+        var out: [Failure] = []
+        let suite = "com.ajar.spend-selftest"
+        UserDefaults.standard.removePersistentDomain(forName: suite)
+        let store = PolicyStore(appGroup: suite)
+
+        out += check("a fresh grant is not spent", !store.spentGrantIds.contains("g1"), "g1 was already spent")
+        out += check("spending returns true the first time", store.spendGrant("g1"), "first spend reported false")
+        out += check("the spend is recorded", store.spentGrantIds.contains("g1"), "g1 is not in the spent set")
+        out += check("spending twice is a no-op", !store.spendGrant("g1"), "g1 was spent twice")
+
+        // DURABILITY IS THE POINT. The filter extension is killed and restarted
+        // constantly; an in-memory set would forget on the first eviction, which
+        // is exactly the window a one-time grant lives in.
+        let reopened = PolicyStore(appGroup: suite)
+        out += check("a spend survives the process", reopened.spentGrantIds.contains("g1"),
+                     "the spent set did not persist across a new store")
+
+        // Reporting is tracked separately, so a failed report is retried and a
+        // successful one is not repeated.
+        out += check("a spend starts unreported", reopened.unreportedSpentGrantIds() == ["g1"],
+                     "expected [g1], got \(reopened.unreportedSpentGrantIds())")
+        reopened.markGrantReported("g1")
+        out += check("a reported spend is not offered again", reopened.unreportedSpentGrantIds().isEmpty,
+                     "g1 was still unreported after being marked")
+
+        UserDefaults.standard.removePersistentDomain(forName: suite)
         return out
     }
 

@@ -681,20 +681,62 @@ function decide(url) {
 // bounded by that same TTL.
 // ---------------------------------------------------------------------------
 
-/** Grant ids this device has spent, pending the next snapshot. */
+/**
+ * Grant ids this device has spent.
+ *
+ * PERSISTED, not just in memory. This was a bare module-level Set in an MV3
+ * service worker that Safari unloads aggressively — this file's own header says
+ * so — so a child closed the tab, the worker was evicted, and the "just once"
+ * grant was live again. The one mechanism that makes ONCE mean once reset every
+ * thirty seconds of idle.
+ */
+const SPENT_KEY = "spentGrantIds";
 const SPENT = new Set();
+
+async function restoreSpent() {
+  try {
+    const got = await browser.storage.local.get(SPENT_KEY);
+    for (const id of got?.[SPENT_KEY] ?? []) SPENT.add(id);
+  } catch { /* first run */ }
+}
+
+async function persistSpent() {
+  try {
+    // Forget ids the policy no longer carries, so the set cannot grow for the
+    // life of the install.
+    const live = new Set((snapshot?.temporaryRules ?? []).map((t) => t.id));
+    for (const id of [...SPENT]) if (live.size && !live.has(id)) SPENT.delete(id);
+    await browser.storage.local.set({ [SPENT_KEY]: [...SPENT] });
+  } catch (e) {
+    console.warn("[ajar] could not persist a spent grant:", e);
+  }
+}
 
 function spendOnce(res) {
   if (!res || res.blocked || res.reason !== "temporary:ONCE" || !res.ruleId) return;
   if (SPENT.has(res.ruleId)) return;
   SPENT.add(res.ruleId);
-  if (!BACKEND_MODE) return; // native-host mode has no channel for this yet
-  consumeGrant(res.ruleId).then((done) => {
-    // A failure leaves it in SPENT: this device stops re-using it either way and
-    // the server's TTL closes the window. Retrying could spend a grant the child
-    // never got to use.
-    if (!done) console.warn("[guard] could not report a spent one-time grant");
-  });
+  persistSpent();
+
+  if (BACKEND_MODE) {
+    consumeGrant(res.ruleId).then((done) => {
+      // A failure leaves it in SPENT: this device stops re-using it either way
+      // and the server's TTL closes the window. Retrying could spend a grant the
+      // child never got to use.
+      if (!done) console.warn("[guard] could not report a spent one-time grant");
+    });
+    return;
+  }
+
+  // NATIVE MODE. Hand the spend to the containing app, which shares one spent
+  // set with the content filter through the App Group and reports it to the
+  // server on its next sync.
+  //
+  // Without this, "just once" meant once PER SURFACE: watch it in Safari, then
+  // watch it again through a top-level navigation the filter sees, because
+  // neither knew what the other had spent.
+  browser.runtime.sendNativeMessage?.(NATIVE_APP_ID, { type: "SPEND_GRANT", grantId: res.ruleId })
+    .catch((e) => console.warn("[ajar] could not report a spent grant to the app:", e));
 }
 
 function blockedPageUrl(originalUrl, key, reason) {
@@ -843,6 +885,7 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
 });
 
 // Prime the cache and select the policy source on worker start.
+restoreSpent();
 restoreCachedPolicy();
 getConfig().then((cfg) => {
   if (cfg.backendUrl && cfg.deviceToken) {

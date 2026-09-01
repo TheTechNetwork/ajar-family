@@ -92,6 +92,7 @@ public final class PolicyStore {
     private let tamperKey = "policy_tamper_detected"
     #if DEBUG
     private let devUnsignedKey = "policy_dev_unsigned"
+    private let spentGrantsKey = "policy_spent_grant_ids"
     #endif
 
     /// Where the category Bloom filters come from. Injectable so the self-test
@@ -235,6 +236,59 @@ public final class PolicyStore {
             return .untrusted(reason: "version \(snap.version) rolled back below \(highWater)")
         }
         return .verified(snap)
+    }
+
+    // MARK: - "Just once"
+
+    /// Grant ids this device has spent. Durable: the filter extension is killed
+    /// and restarted constantly, so an in-memory set would forget on the first
+    /// eviction — which is exactly the window a one-time grant lives in.
+    public var spentGrantIds: Set<String> {
+        Set(defaults?.stringArray(forKey: spentGrantsKey) ?? [])
+    }
+
+    /// Record that a ONCE grant has been used.
+    ///
+    /// Called by the data provider for a TOP-LEVEL page load only. A
+    /// sub-resource would burn the grant before the approved page had rendered,
+    /// which is the same rule the Safari extension follows.
+    ///
+    /// Returns true if this call is what spent it, so a caller can report the
+    /// consumption to the backend exactly once.
+    @discardableResult
+    public func spendGrant(_ grantId: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        var ids = Set(defaults?.stringArray(forKey: spentGrantsKey) ?? [])
+        guard !ids.contains(grantId) else { return false }
+        ids.insert(grantId)
+        // Forget ids the policy no longer carries, so the set cannot grow for
+        // the life of the install. Done on write rather than on read: reads are
+        // on the hot path of every flow.
+        if case let .verified(snap) = state() {
+            let live = Set(snap.temporaryRules.map(\.id))
+            ids = ids.intersection(live.union([grantId]))
+        }
+        defaults?.set(Array(ids), forKey: spentGrantsKey)
+        return true
+    }
+
+    /// Spent ids the containing app has not yet reported to the backend.
+    ///
+    /// The server cannot know when the one allowed load happened — only the
+    /// device can tell it. `ApprovalService.consumeGrant` is client-attested and
+    /// says so; the residual risk is bounded by the grant's own TTL.
+    public func unreportedSpentGrantIds() -> [String] {
+        let reported = Set(defaults?.stringArray(forKey: spentGrantsKey + "_reported") ?? [])
+        return spentGrantIds.subtracting(reported).sorted()
+    }
+
+    public func markGrantReported(_ grantId: String) {
+        lock.lock(); defer { lock.unlock() }
+        let key = spentGrantsKey + "_reported"
+        var ids = Set(defaults?.stringArray(forKey: key) ?? [])
+        ids.insert(grantId)
+        ids = ids.intersection(spentGrantIds)   // never outlive the spend record
+        defaults?.set(Array(ids), forKey: key)
     }
 
     /// Convenience for callers that only want the policy when it is trustworthy.
@@ -413,8 +467,21 @@ public final class PolicyStore {
         }
 
         // ── Tier 3: active temporary approvals, before standing rules.
+        //
+        // "JUST ONCE" MEANT "AS MANY TIMES AS YOU LIKE FOR FIVE MINUTES".
+        // `grantKind` was decoded and used for exactly one thing — the reason
+        // string — so a ONCE grant was a TIMED grant with a shorter backstop.
+        // A parent taps a button labelled "Just once", the child watches the
+        // thing, closes the tab, reopens it, and it plays again. The console
+        // offered an option the device did not implement.
+        //
+        // Spending is durable (App Group) rather than in memory, because this
+        // extension is started and killed constantly — an in-process set would
+        // reset on the first eviction, which is the whole window that matters.
+        let spent = spentGrantIds
         let activeTemps = snap.temporaryRules.filter {
             scopeOK($0.scope) && now >= $0.startsAt && now < $0.expiresAt
+                && !($0.grantKind == .once && spent.contains($0.id))
         }
         for t in ordered(activeTemps, { $0.scope }, { $0.priority }, { $0.action }) {
             if let k = matches(target: t.target, value: t.value, action: t.action) {

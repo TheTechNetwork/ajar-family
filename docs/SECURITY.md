@@ -41,7 +41,15 @@ living document for an alpha, not a completed audit.
   | Windows extension, backend-fetch (`backend-client.js`) | **Yes**, fail-closed |
   | macOS Safari extension, backend-fetch + native message | **Yes**, fail-closed |
   | Windows native-messaging host | **N/A — the host does not exist.** `windows/agent/` only writes registry policy; there is no snapshot/signature code. The extension's native branch is dead in v1 and the shipping path is the dev HTTP mode. |
-  | Apple `PolicyStore.swift` | **No — verify-later TODO.** Any process with App-Group access could plant an allow-all snapshot. Must be closed before any device trial. |
+  | Apple `PolicyStore.swift` | **Yes, fail-closed, on write AND on read.** `install(rawSnapshot:)` verifies the Ed25519 signature before storing anything, and `evaluateState()` re-verifies it plus the rollback high-water mark on every read; an unverifiable snapshot blocks rather than falling back to "no policy". |
+
+  > This row read "**No — verify-later TODO.** Any process with App-Group access
+  > could plant an allow-all snapshot. Must be closed before any device trial."
+  > for long after the verification landed. It was the most alarming line in this
+  > document and it described code that no longer exists, so a reader gated a
+  > device trial on a defect that was already fixed. A security doc that is stale
+  > in the *blocking* direction costs as much as one that is stale in the
+  > permissive direction — it just costs it somewhere less visible.
 
   Cached snapshots and cached category filters restored from
   `chrome.storage.local` / `browser.storage.local` **are** re-verified on load,
