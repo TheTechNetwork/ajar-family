@@ -370,12 +370,25 @@ for, so clicking video B on the same page still plays. Tying the chain to the
 grant is as far as the URL data allows. Stopping B means gating the InnerTube
 request per-video, which means reading its body.
 
-**That remaining fix is architecturally significant and is not yet made.** Enforcing
-per-request on a reused connection means returning `.filterDataVerdict(...)`
-from `handleNewFlow` and implementing `handleOutboundData` to inspect each
-request — turning a connection-level filter into a data-inspecting one, with
-real performance and correctness cost, and a dependency on YouTube's private
-InnerTube shape. That is a decision for the product owner, not a patch.
+**The remaining fix — and the one proposed for it here was WRONG.** See
+`docs/DECISIONS.md` ADR-018. Returning `.filterDataVerdict(...)` and inspecting
+each request with `handleOutboundData` **cannot recover a URL from a socket
+flow**: those bytes are TLS ciphertext, and reading them needs TLS interception,
+which ARCHITECTURE.md rules out unconditionally on Apple. It is not a smaller
+version of the right answer; it is the wrong answer, proposed twice before
+anyone checked what those bytes contain.
+
+The mechanism that meets "handle each request, on device" in Safari is a
+**Safari Web Extension on iOS** — supported since iOS 15, already shipped for
+macOS in this repository, evaluating the cached signed snapshot locally with no
+per-request network call. ARCHITECTURE.md considers Safari extensions for macOS
+only; iOS was never considered, and that omission is why the iOS design has no
+mechanism that meets the standard.
+
+It still leaves a native app host-level, which ADR-018 answers with
+ManagedSettings application policy — named in the code and in ADR-014, never
+built. The content filter is the backstop, not the product; today it is being
+asked to be the product, which is why it keeps coming up short.
 
 **IT IS NOT A YOUTUBE PROBLEM, and framing it as one is how it survived.**
 ADR-001 recorded this on hardware on 2026-08-31 — before it was reported again —
