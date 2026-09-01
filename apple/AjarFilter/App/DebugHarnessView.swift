@@ -1,11 +1,20 @@
 import SwiftUI
 
-// The whole file is DEBUG-only, because it drives DEBUG-only members of
-// FilterController (seedDefaultDenyYouTube, grantTemporary, the flow log).
-// Before it was split out of ContentView it was the app's ONLY view, so a
-// Release build of AjarFilter could not compile at all — a break nothing
-// surfaced, since CI builds only the TypeScript and the Go agent and every
-// device run so far has been a Debug build. An archive would have found it.
+// The whole file is DEBUG-only, so a release binary carries no harness at all.
+//
+// CORRECTION. The commit that added this guard claimed Release builds of
+// AjarFilter could not compile without it, because the harness drives DEBUG-only
+// members of FilterController (seedDefaultDenyYouTube, grantTemporary, the flow
+// log). That was wrong. Every one of those call sites was ALREADY individually
+// wrapped in #if DEBUG below, and TestFlight run 8 archived -configuration
+// Release from commit 7360050 and uploaded successfully with this exact code in
+// it. There was no latent break, and the archive that would supposedly have
+// found it had already passed.
+//
+// The guard stays because it is still worth having — one gate at the top beats
+// three inside, and it keeps a screen of engineering switches out of the shipped
+// binary rather than merely unreachable in it. That is a smaller claim than the
+// one it was committed under.
 #if DEBUG
 
 /// The PoC A harness — the raw levers that drove the on-device experiments in
