@@ -33,7 +33,7 @@ above it, and the two marked ⏳ have waiting attached — start them early.
 |---|---|---|---|
 | 1 | Enroll as an **Organization** ⏳ | §1 | everything (D-U-N-S + verification can take days-to-weeks) |
 | 2 | Note the **Team ID**, set roles | §2 | every later step |
-| 3 | **Request the Family Controls distribution entitlement** ⏳ | §6 | ALL distribution signing — file it the day you decide TestFlight is the goal |
+| 3 | ~~Request the Family Controls distribution entitlement~~ ✅ **granted** | §6 | was the long pole; no longer blocks anything |
 | 3b | **Create a child Apple Account in a Family Sharing group** | §2.1 | **A6 tamper tests only** — A1–A5 do not need it (measured; an earlier version of this table said otherwise) |
 | 4 | Register 3 App IDs + 1 App Group | §4 | signing anything |
 | 5 | Create the **App Store Connect API key** (App Manager) | §8.1 | CI signing + upload |
@@ -69,7 +69,7 @@ between steps 4 and 5. Provisioning profiles are still minted by CI (§5).
   reviewed as **"approved providers"** under App Review Guidelines **5.4
   (VPN/NEVPNManager)** and the parental-controls provisions of **5.5**; Apple
   grants the sensitive entitlements to **organizations**, and the
-  **Family Controls distribution entitlement** ([§6](#6-family-controls-distribution-entitlement-later))
+  **Family Controls distribution entitlement** ([§6](#6-family-controls-distribution-entitlement-granted))
   is issued per-app to an enrolled org, not to an individual. See ARCHITECTURE
   §3.3 and §12.
 - An Individual account cannot host the org-level agreements (child-safety data
@@ -351,10 +351,11 @@ entitlement to a `.entitlements` file without regenerating the profile produces 
 signing failure that names the entitlement, which is the good case; the bad case
 is a profile that silently carries more than the binary uses.
 
-**And the gate that outranks all of it:** an App Store profile cannot carry
-`FC` until the **Family Controls distribution entitlement** is granted (§6). Every
-row above marked `FC` is blocked on that human review, no matter how correct the
-capability checkboxes are.
+**The gate that used to outrank all of it is gone.** An App Store profile cannot
+carry `FC` until the **Family Controls distribution entitlement** is granted —
+and it now is (§6), which is why the `FC` rows above are signable. Every row
+marked `FC` on a NEW bundle id is still blocked on that same human review, no
+matter how correct the capability checkboxes are.
 
 **App Group (register once, share across app + all extensions):**
 
@@ -404,18 +405,29 @@ dispatch the parent app and it stops at the preflight. Create all four together.
       filter-provider extensions (§4).
 - [ ] **App Store** profiles — created **by hand in the developer portal**, not
       by CI: the workflows use manual signing and read whatever base64 you paste
-      into the secrets above (§8.1). The one precondition nothing in CI can
-      satisfy for itself: the **Family Controls distribution entitlement** must
-      already be granted ([§6](#6-family-controls-distribution-entitlement-later))
-      before the three filter profiles are generated, because a profile cannot
-      carry an entitlement the account has not been approved for. Until then,
-      distribution signing of the filter app fails no matter how correct the
-      workflow is. The parent app carries no restricted entitlement, so its
-      profile is not blocked on §6.
+      into the secrets above (§8.1). The precondition nothing in CI can satisfy
+      for itself — the **Family Controls distribution entitlement**
+      ([§6](#6-family-controls-distribution-entitlement-granted)) — is now
+      **granted**, and the three filter profiles carry it. A profile cannot carry
+      an entitlement the account has not been approved for, so if you ever
+      regenerate them AFTER a new capability is added, regenerate rather than
+      reuse: a profile freezes the entitlements present when it was minted. The
+      parent app carries no restricted entitlement and never depended on §6.
 
 ---
 
-## 6. Family Controls **distribution** entitlement (LATER)
+## 6. Family Controls **distribution** entitlement (GRANTED)
+
+> **Status 2026-09-01: granted, and the distribution path is proven.**
+> `testflight.yml` run 8 archived `-configuration Release` and uploaded with
+> `com.apple.developer.family-controls` declared in `AjarFilter.entitlements`.
+> codesign refuses any entitlement the provisioning profile does not carry, so a
+> successful signed upload is evidence the grant had landed AND that the three
+> filter profiles already carry it. Nothing below needs regenerating.
+>
+> This section stays because the entitlement is **per bundle id**: a new app that
+> uses Family Controls or the Screen Time APIs needs its own request, and this is
+> what that costs. `family.ajar.parent` does NOT use them and needs nothing here.
 
 Distinct from the *development* Family Controls capability enabled in §4.
 
@@ -609,11 +621,11 @@ a few minutes before the build appears to internal testers.
 
 ### 8.2 What will actually stop you (in the order you will hit it)
 
-1. **The Family Controls distribution entitlement (§6).** This is the real gate,
-   and it is a human review with calendar time attached — not something CI can
-   route around. Development signing works without it; **App Store / TestFlight
-   signing does not.** Request it the day you decide TestFlight is the goal, not
-   the day you want to upload. Everything else here is minutes of work.
+1. ~~**The Family Controls distribution entitlement (§6).**~~ **Granted** — this
+   was the real gate and it is gone. Kept in place so the ordering still reads
+   correctly for a NEW Family-Controls bundle id, which needs its own request and
+   its own wait. For `family.ajar.filter` it is done, and run 8 proved it by
+   uploading a Release-signed build.
 2. **App Manager role.** A key created with the Developer role archives fine and
    then fails to create a provisioning profile.
 3. **Unregistered bundle ids.** The ids in §8.4 must exist in the developer
