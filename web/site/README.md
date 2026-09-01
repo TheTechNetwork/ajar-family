@@ -21,10 +21,17 @@ console moved from `/` to `/parent/` rather than the site moving. The console's
 markup references `app.js` and `tokens.css` **relatively**, so it survives being
 put under a prefix; a page at `/` cannot.
 
-**The Cloudflare Worker serves no static files at all** (`backend/src/worker.ts`),
-so on `api.ajar.family` today there is only the API. Putting these pages in
-production is a hosting decision that has not been made — see the options at the
-bottom.
+In production the **same Worker** serves them, through the `[assets]` block in
+`backend/wrangler.toml`: `web/` is uploaded whole and `backend/src/worker.ts`
+maps the public paths onto it with the same rules the Node adapter uses. So the
+site, the signup flow, the console and the API are all on `api.ajar.family` —
+one origin, and no DNS record to add.
+
+`run_worker_first = true` is not decoration. Workers Assets serves a matching
+file BEFORE Worker code by default, and asset routing does not look at the
+hostname — so without it `blocked.ajar.family/` would hand out this home page,
+straight past the single-purpose guard in `worker.ts`. Running the Worker first
+keeps that guard the only router.
 
 ## Tokens are linked, not copied
 
@@ -68,14 +75,24 @@ cd backend && AUTH_SECRET=$(head -c 32 /dev/urandom | base64) node dist/index.js
 # http://localhost:8787/parent/   console
 ```
 
+That is the Node adapter. To exercise the paths the way production serves them —
+through Workers Assets, in workerd — run the Worker instead:
+
+```sh
+npm run build
+cd backend && npx wrangler dev --var AUTH_SECRET:local-dev-secret
+```
+
+`npm run test:workerd` asserts all six paths in that runtime, so a broken mapping
+fails CI rather than waiting for someone to open a browser.
+
 ## Before this is a public signup page
 
 - **Email is never verified** (`docs/SECURITY.md`). A typo means no notifications
   and no password reset, and registration stays an account-enumeration oracle.
   The home page says so in plain words rather than pretending otherwise; that is
   a stopgap for a private alpha, not a substitute for the verify flow.
-- **Hosting is undecided.** Either add Workers Assets to `wrangler.toml` and serve
-  `web/` from the same Worker as the API — which keeps one origin and needs no DNS
-  change — or put the site on its own host, which breaks the localStorage handoff
-  and needs a real cross-origin session design first. Neither has been done; the
-  first is a production change and nobody has approved it.
+- **Hosting is done, and it is the one-origin option.** `web/` is served by the
+  API's own Worker (above). The alternative — the site on its own host — stays
+  rejected rather than merely unbuilt: it breaks the localStorage handoff and
+  needs a real cross-origin session design first.

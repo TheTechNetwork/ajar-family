@@ -74,3 +74,42 @@ custom_domain = true
 
 [observability]
 enabled = true
+
+# ---------------------------------------------------------------------------
+# STATIC ASSETS — the marketing site, the signup flow and the parent console.
+#
+# WHY THEY LIVE IN THIS WORKER AND NOT ON THEIR OWN HOST. `web/site/signup.js`
+# writes the localStorage keys `web/parent/app.js` reads (cf_access, cf_refresh,
+# cf_family), which is how "Go to your console" lands a parent already signed in.
+# localStorage is per-ORIGIN. Put the site on a second hostname and that handoff
+# breaks silently: a parent finishes signing up and is shown a login screen. One
+# Worker, one origin, and the API is already on it — so nothing about the browser
+# session has to be redesigned and no DNS record has to be added.
+#
+# `directory` is relative to THIS FILE, so `../web` is the repo's web/ folder
+# uploaded whole: web/site/* lands at /site/* and web/parent/* at /parent/*.
+# worker.ts maps the public paths onto that layout (/ -> /site/index.html), which
+# is why /site/... is not itself reachable — it maps to /site/site/..., a miss.
+#
+# run_worker_first = true IS THE SECURITY-RELEVANT LINE, not a preference.
+# Assets are served BEFORE Worker code by default, and asset routing knows
+# nothing about hostnames — so with the default, `blocked.ajar.family/` would
+# hand out the home page and `blocked.ajar.family/parent/app.js` the console,
+# straight past the single-purpose guard in worker.ts. That guard is the reason
+# the API's surface is not pinned to the one hostname shipped iOS builds bake in.
+# Running the Worker first keeps it the only router: it checks the host, then
+# asks for an asset through the ASSETS binding. Delete this line and the guard
+# stops applying to everything except /v1.
+#
+# html_handling = "none" because the public path and the stored path differ. Any
+# other value lets the asset router issue its own redirects, which would send a
+# browser to the INTERNAL path — /site/... — and that path 404s by design.
+# not_found_handling = "none" so a miss comes back 404 and worker.ts can fall
+# through to the API router (that is how /blocked and the JSON 404 still work);
+# "single-page-application" would swallow both by answering 200 index.html.
+[assets]
+directory = "../web"
+binding = "ASSETS"
+run_worker_first = true
+html_handling = "none"
+not_found_handling = "none"

@@ -75,6 +75,60 @@ test("it answers at all, and serves a signing key", async () => {
   assert.ok(typeof key.body?.publicKeyB64 === "string" && key.body.publicKeyB64.length > 40);
 });
 
+test("the site, the signup flow and the console are all served, on one origin", async () => {
+  // Reachability in production is the whole point of the [assets] block, and the
+  // routing that produces it lives in worker.ts, not in the asset store: the
+  // public paths and the stored paths differ (/ is /site/index.html). Node tests
+  // stub the binding; this is the real one, under workerd.
+  //
+  // ONE ORIGIN is the load-bearing part. signup.js writes the localStorage keys
+  // app.js reads, so these have to answer on the same host as /v1 — which is
+  // exactly what a single Worker with a single `origin` here demonstrates.
+  const cases = [
+    ["/", "text/html"],
+    ["/signup.html", "text/html"],
+    ["/signup.js", "text/javascript"],
+    ["/parent/", "text/html"],
+    ["/parent/app.js", "text/javascript"],
+    ["/parent/tokens.css", "text/css"],
+  ];
+  for (const [path, type] of cases) {
+    const res = await fetch(`${origin}${path}`);
+    assert.equal(res.status, 200, `${path} said ${res.status}`);
+    assert.ok(res.headers.get("content-type")?.startsWith(type),
+      `${path} served as ${res.headers.get("content-type")}, expected ${type}`);
+  }
+
+  // The console's markup references app.js and tokens.css RELATIVELY, so a
+  // console page that does not sit under /parent/ loads neither.
+  const console_ = await fetch(`${origin}/parent/`).then((r) => r.text());
+  assert.match(console_, /src="app\.js"/);
+  assert.match(console_, /href="tokens\.css"/);
+
+  // The site links the console's tokens with `..`, which clamps at the root.
+  const home = await fetch(`${origin}/`).then((r) => r.text());
+  assert.match(home, /href="\.\.\/parent\/tokens\.css"/);
+});
+
+test("static serving did not swallow the API's 404, and adds no second URL", async () => {
+  // A miss still falls through to the API router. If not_found_handling ever
+  // becomes single-page-application this returns 200 index.html instead.
+  const miss = await api("/nope");
+  assert.equal(miss.status, 404);
+  assert.equal(miss.body?.code, "NOT_FOUND");
+
+  // The STORED path is not a public one: /site/x maps to /site/site/x, a miss.
+  // Otherwise every page would answer at two URLs.
+  const stored = await fetch(`${origin}/site/index.html`);
+  assert.equal(stored.status, 404);
+
+  // web/.assetsignore keeps the dev tooling out of the upload. Everything
+  // uploaded is public, and these are notes and scripts, not pages.
+  for (const path of ["/parent/README.md", "/parent/check-contrast.mjs", "/parent/sync-tokens.mjs"]) {
+    assert.equal((await fetch(`${origin}${path}`)).status, 404, `${path} was uploaded and served`);
+  }
+});
+
 test("D1 works: the schema replays and a parent can actually register", async () => {
   // This is the assertion that exercises createD1().exec()'s statement split. If
   // the schema does not replay, this is where it fails — on the first write.
