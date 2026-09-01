@@ -276,3 +276,27 @@ test("the closed page has no note field to fill in", async () => {
   assert.match(page, /This page is closed/);
   assert.doesNotMatch(page, /id="note"/);
 });
+
+test("the two accessibility claims the docs record as Done are actually shipped", async () => {
+  // UX_PRINCIPLES §8 records both of these as Done and cites "the block screens"
+  // for the second. Both extension copies honour them; this page — the only one
+  // on the flagship platform — honoured neither, so the doc was describing two
+  // thirds of the product. Asserted here so the claim and the code cannot drift
+  // apart again silently.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, "/blocked?u=www.youtube.com/")).body);
+
+  // 44px targets, not the WCAG 2.5.8 floor of 24, on a control a child taps.
+  assert.match(page, /summary\s*\{[^}]*min-height:\s*44px/,
+    "the Details disclosure is a 44px target");
+  assert.doesNotMatch(page, /min-height:\s*24px/);
+
+  // `safe center`: at 200% zoom a plain `center` puts the heading and the ask
+  // button off the top of the flex container with no way to scroll back.
+  assert.match(page, /align-items:\s*safe center/);
+
+  // A focus ring at all. The page defined none, so every control fell back to
+  // the UA default in a palette designed around a two-tone ring.
+  assert.match(page, /:focus-visible\s*\{/);
+});

@@ -122,6 +122,52 @@ for (const [theme, tokens] of [["light", light], ["dark", darkMedia]]) {
   }
 }
 
+// ---- Every surface that PAINTS the coral fill must also draw its edge ------
+//
+// The pairs above check token against token. They cannot see whether a given
+// surface actually drew the border a token pair assumes — and that gap is not
+// theoretical: coral measures 2.32:1 on a white card, tokens.css says so and
+// requires `.btn-yes` to carry `border-color: var(--yes-ink)`, and FOUR
+// surfaces re-implemented the button and dropped it. The most important control
+// in the product had no perceivable boundary (SC 1.4.11) on the marketing site,
+// all five signup steps, the iOS block page and both Swift apps — while this
+// script printed "contrast ok" on every run.
+//
+// So the inventory is explicit, in the same spirit as sync-tokens.mjs: naming
+// the surfaces is what makes a NEW one fail loudly instead of silently.
+// Adding a surface that paints coral means adding it here.
+const CORAL_SURFACES = [
+  // [file, how the fill is written, how the edge must be written]
+  ["web/parent/tokens.css", /\.btn-yes\b[^}]*\{[^}]*background:\s*var\(--yes\)/,
+                            /\.btn-yes\b[^}]*\{[^}]*border-color:\s*var\(--yes-ink\)/],
+  ["web/site/index.html", /background:\s*var\(--yes\)/, /border-color:\s*var\(--yes-ink\)/],
+  ["web/site/signup.html", /background:\s*var\(--yes\)/, /border:\s*1px solid var\(--yes-ink\)/],
+  ["backend/src/http/api.ts", /background:var\(--yes\)/, /border:1px solid var\(--yes-ink\)/],
+  // SwiftUI writes the same two facts as a fill and an overlay stroke.
+  ["apple/AjarParent/App/Theme.swift", /\.background\(Ajar\.yes/, /\.stroke\(Ajar\.yesInk/],
+  ["apple/AjarFilter/App/Theme.swift", /\.background\(Ajar\.yes/, /\.stroke\(Ajar\.yesInk/],
+];
+
+const repoRoot = join(here, "..", "..");
+for (const [rel, fill, edge] of CORAL_SURFACES) {
+  let text;
+  try { text = readFileSync(join(repoRoot, rel), "utf8"); }
+  catch { console.error(`✗ ${rel}: listed as a coral surface but the file is gone — remove it here or restore it`); failures++; continue; }
+  if (!fill.test(text)) {
+    // Not a pass. Either the button moved, in which case this entry is stale and
+    // is no longer checking anything, or the fill is written a new way that the
+    // edge check would also miss.
+    console.error(`✗ ${rel}: no coral fill found (${fill}) — this entry has gone stale and is checking nothing`);
+    failures++;
+    continue;
+  }
+  if (!edge.test(text)) {
+    console.error(`✗ ${rel}: paints --yes but never draws its border (${edge}). ` +
+      "Coral is 2.32:1 on a light surface; without an edge the control fails SC 1.4.11.");
+    failures++;
+  }
+}
+
 // ---- Dark defined twice must BE twice the same ----------------------------
 for (const name of new Set([...Object.keys(darkMedia), ...Object.keys(darkToggle)])) {
   if (darkMedia[name] !== darkToggle[name]) {

@@ -465,28 +465,59 @@ export function buildRouter(app: App): Router {
     --accent-ink:#5FD3BE; --accent-wash:#1F322D; --yes:#FF8A5B; --yes-ink:#2A1208;
   } }
   * { box-sizing: border-box; }
-  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+  /* "safe center" and not plain "center" (no backticks anywhere in this file's
+     CSS comments: it is a template literal). At 200% zoom a centred flex child
+     taller than its container overflows in BOTH directions and the top — the
+     heading and the ask button — cannot be scrolled back to. "safe" degrades to
+     flex-start exactly then. UX_PRINCIPLES §8 records reflow as Done and cites
+     the block screens; both extension copies do this and carry the comment, and
+     this one, the only block page on the flagship platform, did not. */
+  body { margin:0; min-height:100vh; display:flex; align-items:safe center; justify-content:center;
          background:var(--bg); color:var(--ink); padding:24px;
          font:16px/1.5 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
   .card { max-width:32rem; width:100%; }
+  /* BRAND.md:247-254 settles the interim mark: the lowercase wordmark in
+     accent-ink at 16px/700. It names the exact bug it was fixing — the one
+     branded element on the child's screen rendering as small muted grey — and
+     this page, which IS the child's screen, had drifted straight back to it.
+     The console and both extension block pages have always complied. */
   .mark { display:flex; align-items:center; gap:8px; margin-bottom:32px;
-          font-size:14px; font-weight:600; color:var(--ink-2); }
+          font-size:16px; font-weight:700; color:var(--accent-ink); }
   h1 { font-size:22px; line-height:1.25; font-weight:600; margin:0 0 12px; }
   .sub { color:var(--ink-2); margin:0 0 24px; }
   .target { background:var(--surface); border:1px solid var(--line); border-radius:14px;
             padding:16px; margin-bottom:24px; }
   .target .name { font-size:18px; font-weight:600; line-height:1.25; word-break:break-word; }
   details { margin-top:12px; }
-  summary { font-size:14px; color:var(--muted); cursor:pointer; min-height:24px; }
+  /* 44, not 24. UX_PRINCIPLES §8 records 44px targets as Done — one --tap token
+     driving every button, input, select and summary; this page shipped the
+     WCAG 2.5.8 floor instead, on a control a child taps with a thumb. The flex
+     centring keeps the label vertically centred in the taller box. */
+  summary { font-size:14px; color:var(--muted); cursor:pointer;
+            min-height:44px; display:flex; align-items:center; }
   .url { font:12px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
          color:var(--muted); word-break:break-all; margin-top:8px; }
   /* Coral is FILL ONLY and carries dark ink — white on it measures 2.32:1. */
+  /* border is required, not decorative: coral measures 2.32:1 on this card, so
+     the ask button had no perceivable boundary (SC 1.4.11). tokens.css states
+     the rule; this inline copy re-implemented the button and dropped it. */
   .btn { display:flex; align-items:center; justify-content:center; width:100%;
          min-height:52px; background:var(--yes); color:var(--yes-ink); text-decoration:none;
+         border:1px solid var(--yes-ink);
          border-radius:999px; font-size:16px; font-weight:600; }
-  .btn.again { background:transparent; color:var(--accent-ink); border:1px solid var(--line);
+  /* --line is documented decorative-only (1.31:1) and this is a real control —
+     the child's way back to the page. --field-line is the border token that
+     clears 3:1. */
+  .btn.again { background:transparent; color:var(--accent-ink); border:1px solid var(--field-line);
                margin-top:12px; }
   .foot { font-size:14px; color:var(--muted); text-align:center; margin:16px 0 0; }
+  /* The page defined NO focus rule at all, so every control on it fell back to
+     the UA default — on the one screen in the product that is reached by being
+     stopped, and in a palette built around a two-tone ring. The two bands are
+     the same shape as tokens.css: an inner halo sitting on the control and an
+     outer band carrying the perceptibility against the page. */
+  :focus-visible { outline:none;
+                   box-shadow:0 0 0 2px var(--surface), 0 0 0 5px var(--accent-ink); }
   .note { margin-bottom:16px; }
   .note label { display:block; font-size:14px; color:var(--ink-2); margin-bottom:6px; }
   .note textarea { width:100%; min-height:52px; padding:12px 14px; resize:vertical;
@@ -498,7 +529,7 @@ export function buildRouter(app: App): Router {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M4 21V5a2 2 0 0 1 2-2h7l5 4v14"></path><path d="M13 3v18"></path>
     </svg>
-    Ajar
+    ajar
   </div>
   ${safe ? `<h1>You can ask to unlock this page</h1>
   <p class="sub">${subhead}</p>

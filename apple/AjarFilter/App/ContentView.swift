@@ -5,6 +5,10 @@ import SwiftUI
 /// only from a debug build.
 struct ContentView: View {
     @StateObject private var controller = FilterController()
+    // See the note in AjarParent/RootView. Same setting, same reason: these two
+    // transitions swap the whole screen, and the web has honoured
+    // `prefers-reduced-motion` globally since the design system landed.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -17,8 +21,8 @@ struct ContentView: View {
                 ProtectedView(controller: controller)
             }
         }
-        .animation(.default, value: controller.isEnrolled)
-        .animation(.default, value: controller.filterEnabled)
+        .animation(reduceMotion ? nil : .default, value: controller.isEnrolled)
+        .animation(reduceMotion ? nil : .default, value: controller.filterEnabled)
         // The block page's "Ask to unlock" opens ajar://request?u=…
         .onOpenURL { url in Task { await controller.handleIncoming(url: url) } }
         .sheet(isPresented: Binding(
@@ -35,9 +39,20 @@ struct AjarMark: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "door.left.hand.open")
-                .font(.system(size: 18, weight: .regular))
+                .ajarFont(18, .regular, relativeTo: .title3)
                 .foregroundStyle(Ajar.accentInk)
-            Text("Ajar").font(.system(size: 14, weight: .semibold)).foregroundStyle(Ajar.ink2)
+                // VoiceOver announced "door left hand open" beside the word
+                // "Ajar" — the SC 1.1.1 problem that got the 🚪 emoji removed
+                // from this mark in the first place. The word next to it IS the
+                // mark's text alternative.
+                .accessibilityHidden(true)
+            // BRAND.md:247-254 settles this: the interim mark is the lowercase
+            // wordmark in accent-ink at --t-base/700. It names the exact bug it
+            // was fixing — "the one branded element on the child's screen
+            // rendered as 13px muted grey" — and this file had drifted back to
+            // 14px in ink-2, on the child's screen, again. The console and both
+            // extension block pages have always complied.
+            Text("ajar").ajarFont(16, .bold).foregroundStyle(Ajar.accentInk)
         }
     }
 }
@@ -60,15 +75,20 @@ struct SetUpView: View {
             VStack(alignment: .leading, spacing: 0) {
                 AjarMark().padding(.bottom, 28)
 
-                Text("Set up this device").font(.system(size: 22, weight: .semibold))
+                Text("Set up this device").ajarFont(22, .semibold, relativeTo: .title2)
                     .foregroundStyle(Ajar.ink).padding(.bottom, 12)
                 Text("A parent makes a setup code in the Ajar app. Enter it here.")
-                    .font(.system(size: 16)).foregroundStyle(Ajar.ink2)
+                    .ajarFont(16).foregroundStyle(Ajar.ink2)
                     .fixedSize(horizontal: false, vertical: true).padding(.bottom, 28)
 
-                TextField("Setup code", text: $code)
-                    .font(.system(size: 28, weight: .bold, design: .monospaced))
+                LabeledField("Setup code") {
+                    // "8 characters", not a specimen code: a plausible-looking
+                    // example in a field a child is transcribing into is
+                    // something to type by mistake.
+                    TextField("8 characters", text: $code)
+                    .ajarFont(28, .bold, relativeTo: .title, design: .monospaced)
                     .multilineTextAlignment(.center)
+                    .accessibilityLabel("Setup code")
                     // NOT .numberPad. Codes are drawn from
                     // ABCDEFGHJKLMNPQRSTUVWXYZ23456789 (services.ts CODE_ALPHABET),
                     // so an 8-character code almost always contains letters and a
@@ -84,21 +104,26 @@ struct SetUpView: View {
                     .frame(maxWidth: .infinity)
                     .background(RoundedRectangle(cornerRadius: 14).fill(Ajar.surface))
                     .overlay(RoundedRectangle(cornerRadius: 14).stroke(Ajar.fieldLine, lineWidth: 1))
-                    .padding(.bottom, 12)
+                }
+                .padding(.bottom, 12)
 
-                TextField("Name for this device", text: $deviceName)
-                    .font(.system(size: 16)).padding(.horizontal, 14)
-                    .frame(minHeight: Ajar.tap)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Ajar.surface))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Ajar.fieldLine, lineWidth: 1))
-                    .padding(.bottom, 24)
+                LabeledField("Name for this device") {
+                    TextField("Jane's iPhone", text: $deviceName)
+                        .accessibilityLabel("Name for this device")
+                        .ajarFont(16).padding(.horizontal, 14)
+                        .frame(minHeight: Ajar.tap)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Ajar.surface))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Ajar.fieldLine, lineWidth: 1))
+                }
+                .padding(.bottom, 24)
 
                 // Privacy IS UX (UX_PRINCIPLES §5) — said on the screen where the
                 // child is deciding whether to trust this, not buried in a policy.
                 HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "shield").font(.system(size: 16)).foregroundStyle(Ajar.accentInk)
+                    Image(systemName: "shield").ajarFont(16).foregroundStyle(Ajar.accentInk)
                     Text("Ajar records what you ask to unlock. It does not record everything you visit.")
-                        .font(.system(size: 14)).foregroundStyle(Ajar.accentInk)
+                        .ajarFont(14, relativeTo: .footnote).foregroundStyle(Ajar.accentInk)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(14)
@@ -116,17 +141,14 @@ struct SetUpView: View {
                 .disabled(code.isEmpty || controller.enrolling)
 
                 if let status = controller.backendStatus {
-                    Text(status).font(.system(size: 14)).foregroundStyle(Ajar.muted)
+                    Text(status).ajarFont(14, relativeTo: .footnote).foregroundStyle(Ajar.muted)
                         .padding(.top, 12).frame(maxWidth: .infinity, alignment: .center)
                 }
-                if let error = controller.lastError {
-                    Text(error).font(.system(size: 14)).foregroundStyle(Ajar.muted)
-                        .padding(.top, 8).frame(maxWidth: .infinity, alignment: .center)
-                }
+                ErrorNote(controller.lastError).padding(.top, 8)
 
                 #if DEBUG
                 Button("Developer tools") { showingHarness = true }
-                    .font(.system(size: 14)).foregroundStyle(Ajar.muted)
+                    .ajarFont(14, relativeTo: .footnote).foregroundStyle(Ajar.muted)
                     .frame(maxWidth: .infinity, minHeight: Ajar.tap).padding(.top, 20)
                     .sheet(isPresented: $showingHarness) { DebugHarnessView(controller: controller) }
                 #endif
@@ -145,10 +167,10 @@ struct TurnOnView: View {
         VStack(spacing: 0) {
             Spacer()
             AjarMark().padding(.bottom, 28)
-            Text("Turn on protection").font(.system(size: 22, weight: .semibold))
+            Text("Turn on protection").ajarFont(22, .semibold, relativeTo: .title2)
                 .foregroundStyle(Ajar.ink).padding(.bottom, 12)
             Text("iOS will ask you to allow Ajar to filter this device.")
-                .font(.system(size: 16)).foregroundStyle(Ajar.ink2)
+                .ajarFont(16).foregroundStyle(Ajar.ink2)
                 .multilineTextAlignment(.center).padding(.bottom, 28)
 
             Button("Turn on") {
@@ -164,10 +186,7 @@ struct TurnOnView: View {
             }
             .buttonStyle(PrimaryButton()).frame(maxWidth: 360)
 
-            if let error = controller.lastError {
-                Text(error).font(.system(size: 14)).foregroundStyle(Ajar.muted)
-                    .multilineTextAlignment(.center).padding(.top, 16)
-            }
+            ErrorNote(controller.lastError).padding(.top, 16).frame(maxWidth: 360)
             Spacer()
         }
         .padding(24)
@@ -189,22 +208,22 @@ struct ProtectedView: View {
             Spacer()
             ZStack {
                 Circle().fill(Ajar.okWash).frame(width: 72, height: 72)
-                Image(systemName: "checkmark").font(.system(size: 30, weight: .semibold))
+                Image(systemName: "checkmark").ajarFont(30, .semibold, relativeTo: .title)
                     .foregroundStyle(Ajar.ok)
             }
             .padding(.bottom, 24)
 
-            Text("Ajar is on").font(.system(size: 22, weight: .semibold))
+            Text("Ajar is on").ajarFont(22, .semibold, relativeTo: .title2)
                 .foregroundStyle(Ajar.ink).padding(.bottom, 12)
             Text("If something is closed, you’ll see a page with a way to ask.")
-                .font(.system(size: 16)).foregroundStyle(Ajar.ink2)
+                .ajarFont(16).foregroundStyle(Ajar.ink2)
                 .multilineTextAlignment(.center)
 
             Spacer()
 
             #if DEBUG
             Button("Developer tools") { showingHarness = true }
-                .font(.system(size: 14)).foregroundStyle(Ajar.muted)
+                .ajarFont(14, relativeTo: .footnote).foregroundStyle(Ajar.muted)
                 .frame(minHeight: Ajar.tap)
                 .sheet(isPresented: $showingHarness) { DebugHarnessView(controller: controller) }
             #endif
@@ -223,9 +242,9 @@ struct RequestStatusView: View {
         VStack(spacing: 0) {
             Spacer()
             icon.padding(.bottom, 24)
-            Text(title).font(.system(size: 22, weight: .semibold))
+            Text(title).ajarFont(22, .semibold, relativeTo: .title2)
                 .foregroundStyle(Ajar.ink).multilineTextAlignment(.center).padding(.bottom, 12)
-            Text(message).font(.system(size: 16)).foregroundStyle(Ajar.ink2)
+            Text(message).ajarFont(16).foregroundStyle(Ajar.ink2)
                 .multilineTextAlignment(.center)
             Spacer()
             // The way BACK to the page. "Try example.com again" used to be the
@@ -254,7 +273,7 @@ struct RequestStatusView: View {
     private var icon: some View {
         ZStack {
             Circle().fill(circleFill).frame(width: 72, height: 72)
-            Image(systemName: symbol).font(.system(size: 28, weight: .semibold))
+            Image(systemName: symbol).ajarFont(28, .semibold, relativeTo: .title)
                 .foregroundStyle(symbolColor)
         }
     }
@@ -309,6 +328,68 @@ struct RequestStatusView: View {
         case .answered: return "Open \(controller.requestTarget) to see what it is."
         case .failed(let why): return why
         case .idle:     return ""
+        }
+    }
+}
+
+// MARK: - A field with a label that stays
+
+/// A visible label above the control, and an example inside it.
+///
+/// Both apps used the placeholder AS the label — `TextField("Setup code", …)` —
+/// which UX_PRINCIPLES §8 requirement 4 forbids and which the web console has
+/// always got right. The failure is not the screen reader (SwiftUI does expose
+/// the title): the label vanishes the moment anyone types, so the setup code
+/// field becomes an unlabelled box of characters on the very first screen of the
+/// product, at the moment a child is transcribing from another device and
+/// looking away and back.
+///
+/// The control keeps whatever background it already carried, because the setup
+/// code field is deliberately taller and rounder than an ordinary one.
+struct LabeledField<Content: View>: View {
+    private let label: String
+    private let content: Content
+
+    init(_ label: String, @ViewBuilder content: () -> Content) {
+        self.label = label
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label).ajarFont(14).foregroundStyle(Ajar.ink2)
+            content
+        }
+    }
+}
+
+// MARK: - Something went wrong
+
+/// One place that renders an error, in the error colour.
+///
+/// Every error in this app was drawn in `Ajar.muted` at 14pt centred — quieter
+/// than the body copy around it, on the one string that matters at the moment it
+/// appears. `--err` was in tokens.css from the start and in neither Swift
+/// palette, so there was no colour to reach for.
+///
+/// Not alarm-red (BRAND §7): this screen belongs to a child, and a red panel
+/// reads as punishment before the words are read.
+struct ErrorNote: View {
+    private let message: String?
+    init(_ message: String?) { self.message = message }
+
+    var body: some View {
+        if let message, !message.isEmpty {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.circle")
+                    .foregroundStyle(Ajar.err)
+                    .accessibilityHidden(true)   // the sentence says it
+                Text(message).ajarFont(15).foregroundStyle(Ajar.err)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Ajar.errWash))
         }
     }
 }

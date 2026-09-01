@@ -2,12 +2,18 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject var model: ParentModel
+    // Not decoration to skip. Someone with a vestibular disorder set this
+    // because motion makes them ill, and the whole-screen crossfade between
+    // signed-out and signed-in is exactly the kind it applies to. The web
+    // surfaces have honoured `prefers-reduced-motion` globally (tokens.css)
+    // since the design system landed; the two apps honoured nothing.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
             if model.signedIn { RequestsView() } else { SignInView() }
         }
-        .animation(.default, value: model.signedIn)
+        .animation(reduceMotion ? nil : .default, value: model.signedIn)
     }
 }
 
@@ -22,9 +28,9 @@ struct SignInView: View {
         VStack(spacing: 20) {
             Spacer()
             VStack(spacing: 6) {
-                Text("Ajar").font(.system(size: 28, weight: .semibold)).foregroundStyle(Ajar.ink)
+                Text("Ajar").ajarFont(28, .semibold, relativeTo: .title).foregroundStyle(Ajar.ink)
                 Text("Approve one thing at a time.")
-                    .font(.system(size: 16)).foregroundStyle(Ajar.muted)
+                    .ajarFont(16).foregroundStyle(Ajar.muted)
             }
             if model.pendingPasskey != nil { passkeyStep } else { passwordStep }
             Spacer()
@@ -41,9 +47,9 @@ struct SignInView: View {
     private var passkeyStep: some View {
         VStack(spacing: 16) {
             Text("One more step")
-                .font(.system(size: 20, weight: .semibold)).foregroundStyle(Ajar.ink)
+                .ajarFont(20, .semibold, relativeTo: .title3).foregroundStyle(Ajar.ink)
             Text("Use the passkey you saved for Ajar.")
-                .font(.system(size: 16)).foregroundStyle(Ajar.ink2)
+                .ajarFont(16).foregroundStyle(Ajar.ink2)
                 .multilineTextAlignment(.center)
 
             Button {
@@ -64,22 +70,23 @@ struct SignInView: View {
 
     private var passwordStep: some View {
         VStack(spacing: 20) {
-            VStack(spacing: 12) {
-                TextField("Email", text: $email)
-                    .textContentType(.emailAddress)
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.emailAddress)
-                    #endif
-                    .autocorrectionDisabled()
-                SecureField("Password", text: $password)
-                    .textContentType(.password)
+            VStack(alignment: .leading, spacing: 12) {
+                LabeledField("Email") {
+                    TextField("you@example.com", text: $email)
+                        .textContentType(.emailAddress)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
+                        #endif
+                        .autocorrectionDisabled()
+                        .accessibilityLabel("Email")
+                }
+                LabeledField("Password") {
+                    SecureField("At least 8 characters", text: $password)
+                        .textContentType(.password)
+                        .accessibilityLabel("Password")
+                }
             }
-            .font(.system(size: 16))
-            .padding(.horizontal, 14)
-            .frame(minHeight: Ajar.tap)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Ajar.surface))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Ajar.fieldLine, lineWidth: 1))
             .frame(maxWidth: 360)
 
             Button {
@@ -99,7 +106,7 @@ struct SignInView: View {
             // happen is what happened before — no route at all, on the one
             // credential every account has.
             Link("Forgot your password?", destination: URL(string: "https://ajar.family/parent/#forgot")!)
-                .font(.system(size: 15)).foregroundStyle(Ajar.accentInk)
+                .ajarFont(15).foregroundStyle(Ajar.accentInk)
                 .frame(minHeight: Ajar.tap)
         }
     }
@@ -108,7 +115,7 @@ struct SignInView: View {
     /// that matters most when it appears.
     @ViewBuilder private var errorText: some View {
         if let error = model.error {
-            Text(error).font(.system(size: 15)).foregroundStyle(Ajar.err)
+            Text(error).ajarFont(15).foregroundStyle(Ajar.err)
                 .multilineTextAlignment(.center).frame(maxWidth: 360)
                 .accessibilityAddTraits(.isStaticText)
         }
@@ -170,11 +177,11 @@ struct RequestsView: View {
     private func couldNotLoad(_ error: String) -> some View {
         VStack(spacing: 14) {
             Image(systemName: "wifi.exclamationmark")
-                .font(.system(size: 34)).foregroundStyle(Ajar.muted)
+                .ajarFont(34, relativeTo: .title).foregroundStyle(Ajar.muted)
                 .accessibilityHidden(true)
             Text("Can't reach Ajar")
-                .font(.system(size: 20, weight: .semibold)).foregroundStyle(Ajar.ink)
-            Text(error).font(.system(size: 15)).foregroundStyle(Ajar.ink2)
+                .ajarFont(20, .semibold, relativeTo: .title3).foregroundStyle(Ajar.ink)
+            Text(error).ajarFont(15).foregroundStyle(Ajar.ink2)
                 .multilineTextAlignment(.center)
             Button("Try again") { Task { await model.loadFamilies() } }
                 .buttonStyle(PrimaryButton()).frame(maxWidth: 360)
@@ -193,7 +200,7 @@ struct RequestsView: View {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "exclamationmark.circle")
                         .foregroundStyle(Ajar.err).accessibilityHidden(true)
-                    Text(error).font(.system(size: 15)).foregroundStyle(Ajar.err)
+                    Text(error).ajarFont(15).foregroundStyle(Ajar.err)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(12)
@@ -205,7 +212,7 @@ struct RequestsView: View {
             if !model.live {
                 // Word AND colour, never colour alone (UX_PRINCIPLES §8).
                 Text("Reconnecting…")
-                    .font(.system(size: 14)).foregroundStyle(Ajar.warn)
+                    .ajarFont(14, relativeTo: .footnote).foregroundStyle(Ajar.warn)
                     .padding(.horizontal, 16).padding(.top, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -232,9 +239,9 @@ struct RequestsView: View {
     /// when there is a real choice, and it asks by NAME.
     private var familyPicker: some View {
         VStack(spacing: 14) {
-            Text("Which family?").font(.system(size: 18, weight: .semibold)).foregroundStyle(Ajar.ink)
+            Text("Which family?").ajarFont(18, .semibold, relativeTo: .title3).foregroundStyle(Ajar.ink)
             Text("You look after more than one.")
-                .font(.system(size: 16)).foregroundStyle(Ajar.muted)
+                .ajarFont(16).foregroundStyle(Ajar.muted)
                 .padding(.bottom, 4)
             ForEach(model.families) { membership in
                 Button(membership.label) { Task { await model.use(familyId: membership.familyId) } }
@@ -252,13 +259,13 @@ struct RequestsView: View {
         VStack(spacing: 12) {
             ZStack {
                 Circle().fill(Ajar.accentWash).frame(width: 64, height: 64)
-                Image(systemName: "house").font(.system(size: 26, weight: .semibold))
+                Image(systemName: "house").ajarFont(26, .semibold, relativeTo: .title2)
                     .foregroundStyle(Ajar.accentInk)
             }
             .padding(.bottom, 8)
-            Text("No family set up yet").font(.system(size: 18, weight: .semibold)).foregroundStyle(Ajar.ink)
+            Text("No family set up yet").ajarFont(18, .semibold, relativeTo: .title3).foregroundStyle(Ajar.ink)
             Text("Finish setting up at ajar.family, then come back here to answer requests.")
-                .font(.system(size: 16)).foregroundStyle(Ajar.muted)
+                .ajarFont(16).foregroundStyle(Ajar.muted)
                 .multilineTextAlignment(.center)
             Button("Check again") { Task { await model.loadFamilies() } }
                 .buttonStyle(PrimaryButton()).frame(maxWidth: 360).padding(.top, 8)
@@ -271,18 +278,18 @@ struct RequestsView: View {
         VStack(spacing: 12) {
             ZStack {
                 Circle().fill(Ajar.okWash).frame(width: 64, height: 64)
-                Image(systemName: "checkmark").font(.system(size: 26, weight: .semibold))
+                Image(systemName: "checkmark").ajarFont(26, .semibold, relativeTo: .title2)
                     .foregroundStyle(Ajar.ok)
             }
             .padding(.bottom, 8)
-            Text("Nothing waiting").font(.system(size: 18, weight: .semibold)).foregroundStyle(Ajar.ink)
+            Text("Nothing waiting").ajarFont(18, .semibold, relativeTo: .title3).foregroundStyle(Ajar.ink)
             // Two sentences, because only one of them is true at a time. The
             // first was shown unconditionally, including while the long poll
             // was down — promising immediacy the app could not deliver.
             Text(model.live
                  ? "A request lands here the moment one is made."
                  : "Reconnecting. A request may take a moment to show up.")
-                .font(.system(size: 16)).foregroundStyle(model.live ? Ajar.muted : Ajar.warn)
+                .ajarFont(16).foregroundStyle(model.live ? Ajar.muted : Ajar.warn)
                 .multilineTextAlignment(.center)
         }
         .padding(40)
@@ -377,14 +384,14 @@ struct RequestCard: View {
                 ZStack {
                     Circle().fill(Ajar.accentWash).frame(width: 40, height: 40)
                     Text(initial)
-                        .font(.system(size: 16, weight: .semibold)).foregroundStyle(Ajar.accentInk)
+                        .ajarFont(16, .semibold).foregroundStyle(Ajar.accentInk)
                 }
                 .accessibilityHidden(true)   // the name is read out below
                 VStack(alignment: .leading, spacing: 2) {
                     Text(request.title ?? request.targetValue)
-                        .font(.system(size: 18, weight: .semibold)).foregroundStyle(Ajar.ink)
+                        .ajarFont(18, .semibold, relativeTo: .title3).foregroundStyle(Ajar.ink)
                         .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                    Text(byline).font(.system(size: 14)).foregroundStyle(Ajar.muted)
+                    Text(byline).ajarFont(14, relativeTo: .footnote).foregroundStyle(Ajar.muted)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -392,7 +399,7 @@ struct RequestCard: View {
 
             if let reason = request.reason, !reason.isEmpty {
                 Text("“\(reason)”")
-                    .font(.system(size: 14)).foregroundStyle(Ajar.ink2)
+                    .ajarFont(14, relativeTo: .footnote).foregroundStyle(Ajar.ink2)
                     .padding(.horizontal, 12).padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(RoundedRectangle(cornerRadius: 10).fill(Ajar.surface2))
@@ -446,12 +453,12 @@ struct ChangeSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Text("How much to unlock")
-                    .font(.system(size: 22, weight: .semibold)).foregroundStyle(Ajar.ink)
+                    .ajarFont(22, .semibold, relativeTo: .title2).foregroundStyle(Ajar.ink)
                 Text(request.title ?? request.targetValue)
-                    .font(.system(size: 14)).foregroundStyle(Ajar.muted)
+                    .ajarFont(14, relativeTo: .footnote).foregroundStyle(Ajar.muted)
                     .padding(.top, 4).padding(.bottom, 24)
 
-                Text("What").font(.system(size: 14, weight: .semibold))
+                Text("What").ajarFont(14, .semibold, relativeTo: .footnote)
                     .foregroundStyle(Ajar.ink2).padding(.bottom, 8)
                 // Only scopes this target can MATCH — see ApprovalScope.applicable.
                 VStack(spacing: 8) {
@@ -461,7 +468,7 @@ struct ChangeSheet: View {
                 }
                 .padding(.bottom, 24)
 
-                Text("For how long").font(.system(size: 14, weight: .semibold))
+                Text("For how long").ajarFont(14, .semibold, relativeTo: .footnote)
                     .foregroundStyle(Ajar.ink2).padding(.bottom, 8)
                 VStack(spacing: 8) {
                     ForEach(ApprovalDuration.choices, id: \.self) { d in
@@ -488,7 +495,7 @@ struct ChangeSheet: View {
                         .frame(width: 20, height: 20)
                     if selected { Circle().fill(Ajar.accentStrong).frame(width: 10, height: 10) }
                 }
-                Text(label).font(.system(size: 16, weight: selected ? .medium : .regular))
+                Text(label).ajarFont(16, selected ? .medium : .regular)
                     .foregroundStyle(selected ? Ajar.ink : Ajar.ink2)
                 Spacer(minLength: 0)
             }
@@ -498,5 +505,40 @@ struct ChangeSheet: View {
                 .stroke(selected ? Ajar.accentStrong : Ajar.line, lineWidth: selected ? 2 : 1))
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - A field with a label that stays
+
+/// A visible label above the control, and an example inside it.
+///
+/// Both apps used the placeholder AS the label — `TextField("Email", …)` — which
+/// UX_PRINCIPLES §8 requirement 4 forbids and which the web console has always
+/// got right. The failure is not the screen reader (SwiftUI does expose the
+/// title): it is that the label vanishes the moment anyone types, so a field
+/// that was "Password" becomes an unlabelled box of dots, and a form returned to
+/// after an interruption has nothing on it saying what goes where.
+///
+/// The placeholder is now an EXAMPLE, which is what a placeholder is for.
+struct LabeledField<Content: View>: View {
+    private let label: String
+    private let content: Content
+
+    init(_ label: String, @ViewBuilder content: () -> Content) {
+        self.label = label
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label).ajarFont(14).foregroundStyle(Ajar.ink2)
+            content
+                .ajarFont(16)
+                .padding(.horizontal, 14)
+                .frame(minHeight: Ajar.tap)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Ajar.surface))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Ajar.fieldLine, lineWidth: 1))
+        }
     }
 }

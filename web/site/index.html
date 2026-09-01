@@ -24,8 +24,14 @@
   .lede { font-size: clamp(1.05rem, 2.4vw, 1.3rem); color: var(--ink-2); max-width: 46ch; margin: 0 0 2rem; }
 
   .cta { display: inline-flex; align-items: center; justify-content: center; min-height: 52px; padding: 0 1.5rem;
-         border-radius: 12px; border: 0; font: inherit; font-weight: 650; text-decoration: none; cursor: pointer; }
-  .cta-primary { background: var(--yes); color: var(--yes-ink); }
+         border-radius: 12px; border: 1px solid transparent; font: inherit; font-weight: 650;
+         text-decoration: none; cursor: pointer; }
+  /* The border is required, not decorative: coral is 2.32:1 on this ground, so a
+     coral button with no edge has no perceivable boundary (SC 1.4.11).
+     tokens.css states the rule for `.btn-yes`; this page re-implemented the
+     button and dropped it. `border: 0` above became a transparent 1px so the two
+     variants stay the same size. */
+  .cta-primary { background: var(--yes); color: var(--yes-ink); border-color: var(--yes-ink); }
   .cta-primary:hover { background: var(--yes-strong); }
   .cta-quiet { background: transparent; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
   .ctas { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
