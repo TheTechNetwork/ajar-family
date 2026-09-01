@@ -72,12 +72,27 @@ usage: %s <command>
 type service struct{ elog *eventlog.Log }
 
 func runService() {
+	// A MISSING EVENT SOURCE MUST NOT MEAN A MISSING SERVICE.
+	//
+	// This used to `return` when eventlog.Open failed — so svc.Run was never
+	// called, the process exited without reporting to the SCM (error 1053), the
+	// recovery actions restarted it, and it failed identically forever. With no
+	// event source there was also, by construction, nowhere to say why. And
+	// install() treats a failed InstallAsEventCreate as non-fatal, printing a
+	// warning to a console nobody sees, so this was reachable by design.
+	//
+	// Now the log is best-effort and the service runs regardless.
 	elog, err := eventlog.Open(serviceName)
 	if err != nil {
-		return
+		elog = nil
+	} else {
+		defer elog.Close()
 	}
-	defer elog.Close()
-	_ = svc.Run(serviceName, &service{elog: elog})
+	// svc.Run's error is reported rather than discarded: if the SCM handshake
+	// fails there is no other trace of it anywhere.
+	if err := svc.Run(serviceName, &service{elog: elog}); err != nil {
+		fmt.Fprintln(os.Stderr, "service failed to start:", err)
+	}
 }
 
 func (s *service) Execute(_ []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
@@ -85,7 +100,14 @@ func (s *service) Execute(_ []string, r <-chan svc.ChangeRequest, changes chan<-
 	changes <- svc.Status{State: svc.StartPending}
 
 	cfg := loadConfig()
-	log := func(format string, a ...any) { _ = s.elog.Info(1, fmt.Sprintf(format, a...)) }
+	// `s.elog` may be nil — see runService. A service that cannot log is still a
+	// service that should filter.
+	log := func(format string, a ...any) {
+		if s.elog == nil {
+			return
+		}
+		_ = s.elog.Info(1, fmt.Sprintf(format, a...))
+	}
 	applyAll(cfg, log)
 	reportAdminChild(log)
 
@@ -113,7 +135,14 @@ func (s *service) Execute(_ []string, r <-chan svc.ChangeRequest, changes chan<-
 func reportAdminChild(log logf) {
 	admin, user, err := consoleUserIsAdmin()
 	if err != nil {
-		return // no interactive user (e.g. at the login screen) — nothing to warn about
+		// NOT SILENCE. Every failure of WTSQueryUserToken / GetTokenGroups /
+		// CreateWellKnownSid used to be treated as "no interactive user", so
+		// ADR-006's entire premise — the child must not be an administrator —
+		// degraded to saying nothing at all whenever the check itself broke.
+		// "Nobody is logged in" and "we could not tell" are different facts.
+		log("could not check whether the console user is an administrator: %v — "+
+			"ADR-006 requires a STANDARD user account for the child", err)
+		return
 	}
 	if admin {
 		log("WARNING: interactive user %s is a LOCAL ADMINISTRATOR — protections are bypassable (ADR-006). The child account must be a standard user.", user)
@@ -146,13 +175,24 @@ func install() error {
 		return err
 	}
 	defer s.Close()
-	// Auto-restart on crash OR non-zero exit / kill (the flag makes TerminateProcess count).
+	// Auto-restart on crash OR non-zero exit / kill.
 	if err := s.SetRecoveryActions([]mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 30 * time.Second},
 	}, 86400); err != nil {
 		return err
+	}
+	// THE FLAG THE COMMENT ABOVE USED TO CLAIM. Without it, Windows applies the
+	// recovery actions only when the service CRASHES — a clean non-zero exit, and
+	// a TerminateProcess from an admin, are not "failures" and the service simply
+	// stays stopped. The old comment said "the flag makes TerminateProcess count"
+	// while nothing ever set it, so the restart guarantee this service's whole
+	// anti-tamper posture leans on did not cover the case it was written for.
+	if err := s.SetRecoveryActionsOnNonCrashFailures(true); err != nil {
+		// Not fatal: crash-restart still works, and refusing to install over this
+		// would leave a machine with no service at all.
+		fmt.Println("warning: could not enable restart-on-non-crash-exit:", err)
 	}
 	if err := eventlog.InstallAsEventCreate(serviceName, eventlog.Info|eventlog.Warning|eventlog.Error); err != nil {
 		// non-fatal: service still runs, just no dedicated event source
@@ -205,9 +245,30 @@ func status() error {
 	}
 	states := map[svc.State]string{svc.Stopped: "STOPPED", svc.Running: "RUNNING", svc.StartPending: "START_PENDING", svc.StopPending: "STOP_PENDING"}
 	fmt.Printf("service: %s\n", states[st.State])
+
+	// WHAT IS ACTUALLY IN THE REGISTRY. `status` advertised "print service +
+	// policy status" and read nothing but the SCM, so it printed RUNNING on a box
+	// where every policy write had been failing since install. The one command an
+	// operator runs to check now checks the thing that does the work.
+	fmt.Println("policies:")
+	for _, line := range policyStatus() {
+		fmt.Println(line)
+	}
+
+	cfg := loadConfig()
+	if cfg.ChromeExtensionID == "" && cfg.EdgeExtensionID == "" {
+		fmt.Printf("config:  NO EXTENSION ID SET in %s — nothing is being enforced\n", configPath())
+	}
+
+	// A failure here is not "no interactive user": see admincheck.go.
 	admin, user, err := consoleUserIsAdmin()
-	if err == nil {
-		fmt.Printf("console user: %s (admin=%v)\n", user, admin)
+	switch {
+	case err != nil:
+		fmt.Printf("console user: could not be checked (%v) — cannot confirm the child is a standard user\n", err)
+	case admin:
+		fmt.Printf("console user: %s — LOCAL ADMINISTRATOR. Protections are bypassable (ADR-006).\n", user)
+	default:
+		fmt.Printf("console user: %s (standard user)\n", user)
 	}
 	return nil
 }

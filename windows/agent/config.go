@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -21,6 +22,11 @@ type Config struct {
 	ReapplyMinutes int `json:"reapplyMinutes"`
 	// If false, skip the QUIC/DoH/ECH anti-bypass block (kept simple for testing).
 	AntiBypass bool `json:"antiBypass"`
+
+	// Set when the file exists but could not be read. Not from JSON: it is what
+	// this process knows about the file, and it must reach a log rather than be
+	// swallowed into zero-value ids that look like "not configured yet".
+	ConfigError string `json:"-"`
 }
 
 func programDataDir() string {
@@ -37,7 +43,17 @@ func loadConfig() Config {
 	cfg := Config{ReapplyMinutes: 5, AntiBypass: true}
 	b, err := os.ReadFile(configPath())
 	if err == nil {
-		_ = json.Unmarshal(b, &cfg)
+		// A TRUNCATED OR HAND-EDITED FILE IS NOT AN EMPTY ONE. This was
+		// `_ = json.Unmarshal(...)`, so malformed JSON silently produced
+		// zero-value extension ids — a machine enforcing nothing, with no
+		// diagnostic, which is the same end state as never configuring it.
+		if err := json.Unmarshal(b, &cfg); err != nil {
+			cfg.ConfigError = fmt.Sprintf("%s could not be read as JSON: %v", configPath(), err)
+			// Keep the defaults rather than a half-populated struct.
+			cfg.ChromeExtensionID, cfg.EdgeExtensionID = "", ""
+		}
+	} else if !os.IsNotExist(err) {
+		cfg.ConfigError = fmt.Sprintf("%s could not be opened: %v", configPath(), err)
 	}
 	if cfg.ReapplyMinutes <= 0 {
 		cfg.ReapplyMinutes = 5
