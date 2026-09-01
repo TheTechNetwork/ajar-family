@@ -13,6 +13,21 @@
 -->
 <plist version="1.0">
 <dict>
+    <!--
+      Passkeys. `ASAuthorizationPlatformPublicKeyCredentialProvider` will only
+      produce an assertion for a relying party this app is entitled to, and the
+      rpId is the apex (backend/wrangler.toml PASSKEY_RP_ID).
+
+      This is HALF of the requirement. The other half is an
+      apple-app-site-association served from https://ajar.family listing this
+      app id, which the API router serves from APPLE_APP_IDS. Either one
+      missing produces the same opaque failure, so App/Passkeys.swift maps it to
+      copy that points the parent at the browser instead.
+    -->
+    <key>com.apple.developer.associated-domains</key>
+    <array>
+        <string>webcredentials:ajar.family</string>
+    </array>
     <key>com.apple.security.app-sandbox</key>
     <true/>
     <key>com.apple.security.network.client</key>

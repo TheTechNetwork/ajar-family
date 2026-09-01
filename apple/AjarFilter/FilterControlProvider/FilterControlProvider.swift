@@ -97,7 +97,13 @@ final class FilterControlProvider: NEFilterControlProvider {
                 "requestAccess": "\(Self.blockPageBase)?u=\(NEFilterProviderRemediationURLFlowURL)" as NSString
             ],
             NEFilterProviderRemediationMapRemediationButtonTexts: [
-                "requestAccessButton": "Request Access" as NSString
+                // The first words a child reads on this platform: iOS renders
+                // this button in its own interstitial, BEFORE any page we design.
+                // "Request Access" is the corporate-access-control phrasing
+                // BRAND.md §6 names as the off-brand example, and it sets the
+                // child's read of everything that follows — a warm page after a
+                // helpdesk button teaches that the warmth is a veneer.
+                "requestAccessButton": "Ask to open it" as NSString
             ],
         ]
         completionHandler(nil)

@@ -342,6 +342,48 @@ export const openapiDocument = {
       get: { tags: ["system"], summary: "Liveness probe", security: [],
         responses: { "200": { description: "OK", content: json({ type: "object", properties: { status: { const: "ok" }, version: { type: "string" } } }) } } },
     },
+    "/.well-known/apple-app-site-association": {
+      get: { tags: ["system"], summary: "Apple App Site Association", security: [],
+        description: "Lets the parent iOS/macOS app use the passkeys enrolled against PASSKEY_RP_ID. " +
+          "Apple fetches this from https://<rpId>/.well-known/apple-app-site-association and will only " +
+          "let a native app claim that relying party if it is listed here. Returns 404 while APPLE_APP_IDS " +
+          "is unset: an EMPTY apps list is a positive, cached statement that no app may claim the domain, " +
+          "which is not the same as \"not configured yet\".",
+        responses: {
+          "200": { description: "Associated application identifiers", content: json({
+            type: "object",
+            properties: { webcredentials: { type: "object", properties: {
+              apps: { type: "array", items: { type: "string" },
+                      description: "`<TeamID>.<bundle id>`, e.g. ABCDE12345.family.ajar.parent" } } } },
+          }) },
+          "404": { description: "No associated apps are configured on this deployment" },
+        } },
+    },
+    "/v1/devices/{deviceId}/answers": {
+      get: { tags: ["devices"], summary: "What the parent decided, for this device's child",
+        description: "Lets a block page say what actually happened instead of inferring it from " +
+          "whether a temporary rule still exists. A refusal writes a grant that expires after five " +
+          "minutes and is then dropped from the snapshot, so a refused child was shown \"waiting on " +
+          "a parent\" for up to seven days. Scoped to the device's own child; grants nothing and is " +
+          "consulted by no filter — enforcement is the signed snapshot.",
+        parameters: [{ name: "deviceId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "Decided requests from the last seven days", content: json({
+            type: "object",
+            properties: { answers: { type: "array", items: {
+              type: "object",
+              properties: {
+                requestId: { type: "string" },
+                targetType: { $ref: "#/components/schemas/PolicyTargetType" },
+                targetValue: { type: "string" },
+                answer: { type: "string", enum: ["opened", "closed"] },
+                askedAt: { type: "string", format: "date-time" },
+              },
+            } } },
+          }) },
+          "403": { description: "Device mismatch" },
+        } },
+    },
     "/v1/signing-key": {
       get: { tags: ["system"], summary: "Policy-signing public key", security: [],
         responses: { "200": { description: "Public key", content: json({ type: "object", properties: { publicKeyB64: { type: "string" }, alg: { const: "Ed25519" } } }) } } },

@@ -12,7 +12,10 @@
   a { color: var(--accent-ink); }
   .mark { display: flex; align-items: center; gap: .55rem; font-weight: 650; padding: 1rem 0 2rem; }
 
-  /* Four dots, not "Step 2 of 4" — the count is visible without being read. */
+  /* Five dots, not "Step 2 of 5" — the count is visible without being read.
+     The same fact reaches a screen reader through #stepStatus below. */
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+             overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   .dots { display: flex; gap: .4rem; margin-bottom: 2rem; }
   .dots i { height: 4px; flex: 1; border-radius: 999px; background: var(--surface-2); }
   .dots i[data-on] { background: var(--accent-strong); }
@@ -28,7 +31,11 @@
   input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
     outline: 3px solid var(--focus); outline-offset: 2px; box-shadow: 0 0 0 2px var(--focus-halo); }
 
-  button.primary { width: 100%; min-height: 52px; border: 0; border-radius: 12px; font: inherit; font-weight: 650;
+  /* border-color is required, not decorative: coral is 2.32:1 on this ground, so
+     a coral button with no edge has no perceivable boundary (SC 1.4.11). This is
+     the primary button on all five steps of the flow. */
+  button.primary { width: 100%; min-height: 52px; border: 1px solid var(--yes-ink); border-radius: 12px;
+    font: inherit; font-weight: 650;
     background: var(--yes); color: var(--yes-ink); cursor: pointer; }
   button.primary:hover:not(:disabled) { background: var(--yes-strong); }
   button.primary:disabled { opacity: .55; cursor: default; }
@@ -57,6 +64,13 @@
     Ajar
   </a>
 
+  <!-- Five dots (the comment above said four for a while, over five <i>s).
+       The dots themselves stay aria-hidden — five decorative bars read out one
+       by one are noise — but a screen-reader user was left with NO sense of
+       position at all in a five-step flow, which is exactly what the visual
+       treatment exists to give. The sr-only line carries the same fact in
+       words, updated by step(). -->
+  <p class="sr-only" id="stepStatus" aria-live="polite">Step 1 of 5</p>
   <div class="dots" aria-hidden="true">
     <i id="d1" data-on></i><i id="d2"></i><i id="d3"></i><i id="d4"></i><i id="d5"></i>
   </div>
@@ -86,7 +100,11 @@
       <label for="password">Password <span class="hint">— at least 8 characters</span></label>
       <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
     </div>
-    <p class="note">We'll email you a code to confirm this address. Check it for typos — a wrong address means no code, and no account.</p>
+    <!-- A LINK, not a code. The next screen says "We sent a link… the link is
+         what makes the account", and this one promised a code — a contradiction
+         on the two screens a parent reads back to back while waiting for an
+         email that has not arrived. The link is what actually ships. -->
+    <p class="note">We'll email you a link to confirm this address. Check it for typos — a wrong address means no link, and no account.</p>
     <button class="primary" type="submit">Create account</button>
     <button class="link" type="button" onclick="location.href='/parent/'">I already have an account</button>
   </form>

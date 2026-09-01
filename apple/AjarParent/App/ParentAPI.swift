@@ -30,6 +30,33 @@ struct TokenResponse: Codable {
     let refreshToken: String
 }
 
+/// `/v1/auth/login` when the account has a passkey enrolled: a short-lived
+/// token of a different KIND, good only for finishing at
+/// `/v1/auth/passkeys/login`. No access token, no session yet.
+///
+/// This type exists because its absence was a lockout. The password response
+/// was decoded straight into `TokenResponse`, whose fields are all
+/// non-optional, so an account with a passkey — the state signup steers every
+/// new parent into — got a `DecodingError` rendered as Foundation's *"The data
+/// couldn't be read because it is missing."* The one surface where "approve in
+/// seconds from your phone" happens was the one the security step disabled.
+struct MFAChallenge: Codable {
+    let mfaToken: String
+    let expiresIn: Int
+    let methods: [String]?
+
+    /// Whether this build can actually finish the challenge. A method we do not
+    /// implement must produce a sentence a parent can act on, not a spinner.
+    var canFinishHere: Bool { (methods ?? ["passkey"]).contains("passkey") }
+}
+
+/// What a password bought. Either a session, or permission to try the second
+/// step — never a thrown decoding error, which is what this replaced.
+enum SignInOutcome {
+    case session(userId: String)
+    case passkeyNeeded(MFAChallenge)
+}
+
 enum PolicyTargetType: String, Codable {
     case url = "URL", urlPattern = "URL_PATTERN", domain = "DOMAIN"
     case youtubeVideo = "YOUTUBE_VIDEO", youtubeChannel = "YOUTUBE_CHANNEL"
@@ -44,7 +71,7 @@ enum ApprovalScope: String, Codable, CaseIterable {
     /// The scopes that can actually MATCH a given target.
     ///
     /// This is not cosmetic. Offering a scope the target cannot produce is how
-    /// the backend once minted an unmatchable rule: the parent saw "Unlocked"
+    /// the backend once minted an unmatchable rule: the parent saw "Opened"
     /// and the child stayed blocked. Keep in step with `applicableScopes` in
     /// backend/src/domain/services.ts.
     static func applicable(to target: PolicyTargetType) -> [ApprovalScope] {
@@ -59,31 +86,37 @@ enum ApprovalScope: String, Codable, CaseIterable {
     }
 
     /// The label on the primary button — a full sentence about what will happen,
-    /// not a chip to decode. "Unlock this video" reads as a decision; "video"
+    /// not a chip to decode. "Open this video" reads as a decision; "video"
     /// next to a duration pill reads as a form to fill in.
     var actionLabel: String {
         switch self {
-        case .thisRequest: return "Unlock just this"
-        case .thisURL:     return "Unlock this page"
-        case .thisVideo:   return "Unlock this video"
-        case .thisChannel: return "Unlock this channel"
-        case .thisDomain:  return "Unlock this site"
-        case .thisDevice:  return "Unlock on this device"
-        case .thisChild:   return "Unlock for this child"
-        case .wholeFamily: return "Unlock for everyone"
+        case .thisRequest: return "Open just this"
+        case .thisURL:     return "Open this page"
+        case .thisVideo:   return "Open this video"
+        case .thisChannel: return "Open this channel"
+        case .thisDomain:  return "Open this site"
+        case .thisDevice:  return "Open on this device"
+        case .thisChild:   return "Open for this child"
+        case .wholeFamily: return "Open for everyone"
         }
     }
 
     var label: String {
         switch self {
-        case .thisRequest: return "Just this"
-        case .thisURL:     return "This page"
-        case .thisVideo:   return "This video only"
-        case .thisChannel: return "This whole channel"
+        // Word for word the console's SCOPE_LABEL (web/parent/app.js). The two
+        // surfaces described the same eight decisions differently — "This video
+        // only" against "This video", "Everyone" against "This, for everyone in
+        // the family" — so a parent who used both learned the product twice.
+        // The console's wording is the reference: it says what the decision
+        // covers rather than naming the thing.
+        case .thisRequest: return "Just this once"
+        case .thisURL:     return "This exact page"
+        case .thisVideo:   return "This video"
+        case .thisChannel: return "Everything from this channel"
         case .thisDomain:  return "This whole site"
-        case .thisDevice:  return "This device"
-        case .thisChild:   return "This child"
-        case .wholeFamily: return "Everyone"
+        case .thisDevice:  return "This, on this device"
+        case .thisChild:   return "This, on all of this child's devices"
+        case .wholeFamily: return "This, for everyone in the family"
         }
     }
 }
@@ -103,11 +136,18 @@ enum ApprovalDuration: Hashable {
 
     var label: String {
         switch self {
-        case .minutes(let m) where m % 60 == 0: return "\(m / 60)h"
+        // Same words as the console's DURATIONS (web/parent/app.js). They
+        // disagreed on both the OPTIONS and the WORDS: the app offered
+        // Once/30 min/2h/Today/Always and the console 15 min/30 min/1 hour/End
+        // of day/Just once/For good — and "Always" quietly undid the deliberate
+        // softening of "For good", on the surface where a permanent decision is
+        // hardest to undo.
+        case .minutes(let m) where m == 60: return "1 hour"
+        case .minutes(let m) where m % 60 == 0: return "\(m / 60) hours"
         case .minutes(let m): return "\(m) min"
-        case .untilEndOfDay: return "Today"
-        case .once: return "Once"
-        case .always: return "Always"
+        case .untilEndOfDay: return "End of day"
+        case .once: return "Just once"
+        case .always: return "For good"
         }
     }
 
@@ -120,8 +160,16 @@ enum ApprovalDuration: Hashable {
         }
     }
 
+    /// The same six options the console offers, in the same order
+    /// (web/parent/app.js DURATIONS). The app offered five different ones, so
+    /// the Change… sheet on the phone could not express decisions a parent had
+    /// already learned to make in the browser — and offered a 2-hour grant the
+    /// console has never had.
+    ///
+    /// Narrow → broad, with the two open-ended options last, so the list itself
+    /// argues for the shorter grant.
     static let choices: [ApprovalDuration] =
-        [.once, .minutes(30), .minutes(120), .untilEndOfDay, .always]
+        [.minutes(15), .minutes(30), .minutes(60), .untilEndOfDay, .once, .always]
 }
 
 /// The long-poll feed's envelope. The endpoint returns an OBJECT with a
@@ -192,11 +240,57 @@ actor ParentAPI {
 
     // MARK: Auth
 
-    func signIn(email: String, password: String) async throws -> String {
-        let t: TokenResponse = try await send("/v1/auth/login", method: "POST",
-                                              body: ["email": email, "password": password], authed: false)
+    /// Step one. The password alone does not always produce a session, so the
+    /// response is decoded by SHAPE rather than assumed: an account with a
+    /// passkey gets an `mfaToken` and no `accessToken`.
+    ///
+    /// Order matters. `TokenResponse` is tried first and `MFAChallenge` second,
+    /// because the challenge's only required field is `mfaToken` — a lenient
+    /// decoder asked the other way round would still be wrong the day the
+    /// server adds a field. Neither shape decoding is the real error to report.
+    func signIn(email: String, password: String) async throws -> SignInOutcome {
+        let data = try await perform(try request("/v1/auth/login", method: "POST",
+                                                 body: ["email": email, "password": password],
+                                                 authed: false, timeout: 30))
+        if let t = try? JSONDecoder().decode(TokenResponse.self, from: data) {
+            adopt(t)
+            return .session(userId: t.userId)
+        }
+        if let c = try? JSONDecoder().decode(MFAChallenge.self, from: data) {
+            return .passkeyNeeded(c)
+        }
+        throw ParentAPIError.http(200, "The sign-in server sent something this app could not read. Update Ajar and try again.")
+    }
+
+    // MARK: Passkeys
+
+    /// Step two, part one: what the platform should sign.
+    ///
+    /// The options blob is passed through to `ASAuthorization…` verbatim, so it
+    /// is `Data` rather than a modelled type — every field the server sends has
+    /// to survive, and a struct here would silently drop the ones this version
+    /// does not know about.
+    func passkeyLoginOptions(mfaToken: String) async throws -> Data {
+        try await perform(try mfaRequest("/v1/auth/passkeys/login/options", mfaToken: mfaToken, body: nil))
+    }
+
+    /// Step two, part two. On success this is a real session, exactly as if the
+    /// password had been enough.
+    func finishPasskeyLogin(mfaToken: String, credential: [String: Any]) async throws -> String {
+        let data = try await perform(try mfaRequest("/v1/auth/passkeys/login", mfaToken: mfaToken,
+                                                    body: ["credential": credential]))
+        let t = try JSONDecoder().decode(TokenResponse.self, from: data)
         adopt(t)
         return t.userId
+    }
+
+    /// The `mfa` token is a bearer token of a different kind, not our session —
+    /// so it is set by hand here rather than through `authed: true`, which would
+    /// have sent whatever stale session happened to be in `tokens`.
+    private func mfaRequest(_ path: String, mfaToken: String, body: [String: Any]?) throws -> URLRequest {
+        var r = try request(path, method: "POST", body: body, authed: false, timeout: 30)
+        r.setValue("Bearer \(mfaToken)", forHTTPHeaderField: "authorization")
+        return r
     }
 
     /// One place that owns "these are our tokens now" — sign-in and refresh must

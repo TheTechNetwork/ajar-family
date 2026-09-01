@@ -346,8 +346,14 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
   <main class="card">
     <span class="badge">ajar</span>
 
-    <h1 id="head">This one's closed right now</h1>
-    <p id="lede">Send it over and a parent gets it on their phone. Most asks come back in a couple of minutes.</p>
+    <!-- Agency-first, and the same sentence on all three block pages. The two
+         pages that grew the five-state machine kept the verdict-first headline
+         ("This one's closed right now") while the iOS page — the one with two
+         states — was the only one using the form UX_PRINCIPLES §7 prescribes.
+         The merge takes the headline from there and the state machine from
+         here, rather than picking a file and copying it. -->
+    <h1 id="head">You can ask to open this page</h1>
+    <p id="lede">Send it over and a parent sees it right away. You will get an answer here.</p>
 
     <div class="resource">
       <div class="key" id="humanLine">A YouTube video</div>
@@ -367,8 +373,12 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
     <!-- Primary first, matching the Windows screen: same product, same muscle
          memory, same tab order (SC 3.2.3 / 3.2.4). -->
     <div class="row">
-      <button type="button" class="btn-primary" id="requestBtn">Ask to unlock</button>
-      <button type="button" id="backBtn">Not now</button>
+      <button type="button" class="btn-primary" id="requestBtn">Ask to open it</button>
+      <!-- "Go back", not "Not now". That string means "child, retreat" here and
+           "parent, decline" in the console and the parent app — one label, two
+           opposite actors, on the two screens most likely to be read by the two
+           different people in the same five minutes. -->
+      <button type="button" id="backBtn">Go back</button>
       <button type="button" class="btn-yes hide" id="openBtn">Open it</button>
     </div>
 
@@ -400,6 +410,7 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
     const params = new URLSearchParams(location.search);
     const originalUrl = params.get("u") || "";
     const canonicalKey = params.get("k") || "";
+    const blockReason = params.get("reason") || "";
     const askKey = canonicalKey || (originalUrl ? `URL:${originalUrl}` : "");
 
     const $ = (id) => document.getElementById(id);
@@ -410,14 +421,52 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
     const reasonEl = $("reason");
 
     // Human label is the hero; the raw key/URL live behind Details (UX §4).
+    //
+    // DOMAIN and URL were missing and the fallback was the literal string "This
+    // video", so a blocked news site announced itself as "This video" in 18px
+    // semibold — the largest text on the screen, wrong, for every block that was
+    // not YouTube. The Windows copy has covered all five and fallen back to the
+    // hostname since it was written; this is that table, not a new one.
     const NOUN = {
       YOUTUBE_VIDEO: "A YouTube video",
       YOUTUBE_CHANNEL: "A YouTube channel",
       YOUTUBE_PLAYLIST: "A YouTube playlist",
+      DOMAIN: "A website",
+      URL: "A web page",
     };
-    $("humanLine").textContent =
-      NOUN[(canonicalKey.split(":")[0] || "").toUpperCase()] || "This video";
+    function humanLabel() {
+      const type = (canonicalKey.split(":")[0] || "").toUpperCase();
+      if (NOUN[type]) return NOUN[type];
+      // The hostname beats a guess: it is what the child typed, and it is never
+      // wrong about what they were looking at.
+      try { return new URL(originalUrl).hostname || "This page"; } catch { return "This page"; }
+    }
+
+    // WHY it is closed. UX_PRINCIPLES §9 singles this line out for reducing the
+    // threat-to-freedom that drives circumvention — a rule with a reason reads
+    // as a rule; a rule without one reads as an obstacle. Windows has had this
+    // since it was written and macOS had no equivalent at all, so the Mac page
+    // never said why.
+    const REASON_COPY = {
+      "default:youtube": "A parent keeps YouTube opt-in, video by video.",
+      "default:web": "New sites go past a parent first.",
+      "rule:YOUTUBE_VIDEO": "This video hasn't been opened yet.",
+      "rule:YOUTUBE_CHANNEL": "This channel hasn't been opened yet.",
+      "rule:YOUTUBE_PLAYLIST": "This playlist hasn't been opened yet.",
+      "rule:DOMAIN": "This site hasn't been opened yet.",
+      "rule:URL": "This page hasn't been opened yet.",
+      // Both spellings: `background.js` here emits `no-policy:fail-closed`, the
+      // Windows agent emits `failclosed:no-snapshot`. A table that only knew one
+      // of them would silently say nothing on the surface it was written for.
+      "no-policy:fail-closed": "Ajar is still waking up. Give it a few seconds, then reload.",
+      "failclosed:no-snapshot": "Ajar is still waking up. Give it a few seconds, then reload.",
+    };
+
+    $("humanLine").textContent = humanLabel();
     $("urlLine").textContent = originalUrl || "(no URL)";
+    if (REASON_COPY[blockReason] && $("lede")) {
+      $("lede").textContent = `${REASON_COPY[blockReason]} Send it over and a parent sees it right away.`;
+    }
 
     // Windows guards this; macOS used to call history.back() bare, which is a
     // silent no-op when the block page is the tab's first entry.
@@ -522,6 +571,26 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
       requestBtn.dataset.busy = "1";
       setStatus("Sending…", "info");
     }
+    /**
+     * How long this page may keep claiming a parent has not answered.
+     *
+     * A "Not now" writes a temporary BLOCK grant that expires after
+     * ONCE_GRANT_TTL_MS — five minutes (backend/src/domain/services.ts) — and
+     * `answerIn` can only see a rule while it is LIVE, because the backend
+     * drops expired temporary rules from the snapshot before signing one. So a
+     * refused child saw "declined" for five minutes at most and then this page
+     * silently went back to "Waiting on a parent", for up to the seven days the
+     * ask is remembered.
+     *
+     * That is the worst thing this screen can do: a child who was told no is
+     * left believing nobody looked, which is the exact state the design exists
+     * to prevent. The real fix is for the device to be told the DECISION rather
+     * than infer it from a rule that happens to still exist (docs/UX_PLAN.md,
+     * "the device is never told the decision"). Until then the page stops
+     * asserting what it cannot know.
+     */
+    const WAITING_CLAIM_MS = 10 * 60 * 1000;
+
     function showAsked(atIso) {
       mode = "asked";
       askedAtIso = atIso;
@@ -532,9 +601,27 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
       openBtn.classList.add("hide");
       $("askBox").classList.add("hide");
       $("askedNote").classList.remove("hide");
-      $("askedNote").textContent =
-        `You asked ${ago(atIso)}. Nothing else to do — you can leave this page open or come back to it.`;
-      setStatus("✓ Sent. Waiting on a parent.", "wait");
+      renderAskedNote();
+    }
+
+    /** The asked state's two sentences, which change once we can no longer
+     *  claim a parent has not answered. On a timer as well as on entry. */
+    function renderAskedNote() {
+      if (mode !== "asked" || !askedAtIso) return;
+      if (Date.now() - askedAtMs > WAITING_CLAIM_MS) {
+        // True whichever actually happened — approved, refused, or not yet
+        // looked at. Opening the page again puts the question to the filter,
+        // which is the only thing whose answer is authoritative.
+        $("askedNote").textContent =
+          `You asked ${ago(askedAtIso)}. If a parent has answered, opening the page again will show it.`;
+        setStatus("Sent. No answer here yet.", "wait");
+        requestBtn.removeAttribute("aria-disabled");
+        requestBtn.textContent = "Ask again";
+      } else {
+        $("askedNote").textContent =
+          `You asked ${ago(askedAtIso)}. Nothing else to do — you can leave this page open or come back to it.`;
+        setStatus("✓ Sent. Waiting on a parent.", "wait");
+      }
     }
     function showApproved() {
       if (mode === "approved") return;
@@ -593,13 +680,27 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
       let delivered = false;
       try {
         if (ext && ext.runtime && ext.runtime.sendMessage) {
-          const res = await ext.runtime.sendMessage({
+          // A background worker that never answers used to leave the child on
+          // "Sending…" with no retry and no end — the ask silently lost, and no
+          // way to tell that from a slow one. `sendMessage` returns a promise
+          // that simply never settles when the worker is gone, so the timeout
+          // has to race it rather than wrap it. Windows has guarded this since
+          // it was written; the same 12 seconds, deliberately.
+          const answered = ext.runtime.sendMessage({
             type: "REQUEST_ACCESS",
             key: canonicalKey,
             url: originalUrl,
             reason: reasonEl.value.trim(),
           });
-          delivered = !!(res && res.ok);
+          const timedOut = Symbol("timeout");
+          const res = await Promise.race([
+            answered,
+            new Promise((resolve) => setTimeout(() => resolve(timedOut), 12000)),
+          ]);
+          // A late answer is ignored rather than believed: by then the page is
+          // already showing a retry, and flipping it to "Asked" underneath a
+          // child who is mid-tap is worse than the honest failure.
+          delivered = res !== timedOut && !!(res && res.ok);
         }
       } catch (e) {
         console.warn("[ajar] background message failed:", e);
@@ -613,11 +714,61 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
       }
     });
 
+    /**
+     * The parent's ANSWER, from the server, for the thing this page is about.
+     *
+     * Preferred over `answerIn` because it is the decision itself rather than an
+     * inference from whether a rule happens to still exist. The inference stays
+     * as the fallback: it needs no network, so it still works offline and in
+     * native-host mode, and it paints an approval instantly from the cached
+     * snapshot without waiting for a round trip.
+     */
+    async function serverAnswer() {
+      let answers;
+      try {
+        const timedOut = Symbol("timeout");
+        const res = await Promise.race([
+          ext.runtime.sendMessage({ type: "GET_ANSWERS" }),
+          new Promise((resolve) => setTimeout(() => resolve(timedOut), 12000)),
+        ]);
+        if (res === timedOut || !res || !res.ok || !Array.isArray(res.answers)) return null;
+        answers = res.answers;
+      } catch { return null; }
+
+      // Match on the canonical target the ask was filed under. `canonicalKey` is
+      // what this page was redirected with; the URL is the fallback for a
+      // non-YouTube block, which is filed as URL:<the exact string>.
+      const keyType = canonicalKey ? canonicalKey.split(":")[0] : null;
+      const keyValue = canonicalKey ? canonicalKey.slice(canonicalKey.indexOf(":") + 1) : null;
+      const mine = answers.filter((a) =>
+        (keyType && a.targetType === keyType && a.targetValue === keyValue) ||
+        (a.targetType === "URL" && originalUrl && a.targetValue === originalUrl));
+      if (!mine.length) return null;
+
+      // Newest wins: a child who asked, was refused, and asked again should see
+      // the second answer, not the first.
+      mine.sort((a, b) => Date.parse(b.askedAt || 0) - Date.parse(a.askedAt || 0));
+      return mine[0].answer === "opened" ? "approved" : "declined";
+    }
+
     async function refreshFromSnapshot() {
       if (mode === "approved" || mode === "declined") return;
-      const answer = answerIn(await readSnapshot(), askedAtMs || Date.now());
-      if (answer === "approved") showApproved();
-      else if (answer === "declined" && askedAtMs) showDeclined();
+
+      // The snapshot first: already cached, so an approval paints without a
+      // round trip. It can only ever say "approved" reliably — a refusal's grant
+      // expires after five minutes and is then dropped, which is why the server
+      // is asked below.
+      const local = answerIn(await readSnapshot(), askedAtMs || Date.now());
+      if (local === "approved") { showApproved(); return; }
+
+      // Then the decision itself, which does not expire.
+      const remote = await serverAnswer();
+      if (remote === "approved") { showApproved(); return; }
+      if (remote === "declined") { showDeclined(); return; }
+
+      // Neither knows. Fall back to the local inference for the window where it
+      // is still valid, so an offline device is no worse off than before.
+      if (local === "declined" && askedAtMs) showDeclined();
     }
 
     (async function boot() {
@@ -633,10 +784,7 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
       } catch { /* no storage events here; the poll below still runs */ }
 
       setInterval(() => {
-        if (mode === "asked" && askedAtIso) {
-          $("askedNote").textContent =
-            `You asked ${ago(askedAtIso)}. Nothing else to do — you can leave this page open or come back to it.`;
-        }
+        renderAskedNote();
         refreshFromSnapshot();
       }, 20000);
     })();

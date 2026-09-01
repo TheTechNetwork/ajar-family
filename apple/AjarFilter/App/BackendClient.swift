@@ -263,6 +263,43 @@ final class BackendClient {
         return try install(policyResponse: data, deviceId: deviceId)
     }
 
+    /// One decision a parent made, as the SERVER reports it.
+    ///
+    /// The device could previously only tell that the policy had CHANGED — the
+    /// long poll wakes on any version bump, and a refusal bumps it too — so the
+    /// screen could say "there's an answer" and nothing more. Everything else on
+    /// that screen has been written around not knowing which way it went.
+    ///
+    /// Grants nothing. Enforcement still comes from the signed snapshot and this
+    /// value never reaches the filter; it decides what a sentence says.
+    struct Answer: Decodable {
+        let requestId: String
+        let targetType: String
+        let targetValue: String
+        /// "opened" or "closed" (BRAND.md §6.1). Kept as the wire string and
+        /// compared where it is used, rather than an enum that would have to
+        /// fail-closed on a value a newer server invents.
+        let answer: String
+        let askedAt: String
+    }
+
+    /// The parent's answer for one canonical target, or nil if there is none.
+    ///
+    /// Newest first: a child who asked, was refused, and asked again should see
+    /// the second answer rather than the first.
+    func answer(targetType: String, targetValue: String) async throws -> Answer? {
+        let (_, deviceId) = try credentials()
+        guard let base = Self.baseURL else { throw BackendError.noBaseURL }
+        let url = base.appendingPathComponent("v1/devices/\(deviceId)/answers")
+        let data = try await send(URLRequest(url: url), authenticated: true)
+
+        struct Envelope: Decodable { let answers: [Answer] }
+        let mine = try JSONDecoder().decode(Envelope.self, from: data).answers
+            .filter { $0.targetType == targetType && $0.targetValue == targetValue }
+            .sorted { $0.askedAt > $1.askedAt }   // ISO-8601 sorts lexicographically
+        return mine.first
+    }
+
     /// Shared by both policy paths. A body carrying `upToDate` is a no-change
     /// answer; anything else is a snapshot and goes to the verifier as-is.
     private func install(policyResponse data: Data, deviceId: String) throws -> Bool {

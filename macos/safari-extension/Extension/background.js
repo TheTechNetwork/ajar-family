@@ -21,7 +21,7 @@
  */
 
 import { normalizeYouTube, youTubePolicyKey } from "./youtube-normalize.js";
-import { getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest, consumeGrant } from "./backend-client.js";
+import { getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest, consumeGrant, getAnswers } from "./backend-client.js";
 import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
 import { makeResolver } from "./cname-resolve.js";
 
@@ -493,10 +493,15 @@ function spendOnce(res) {
   });
 }
 
-function blockedPageUrl(originalUrl, key) {
+function blockedPageUrl(originalUrl, key, reason) {
   const u = new URL(browser.runtime.getURL(BLOCKED_PAGE));
   u.searchParams.set("u", originalUrl);
   if (key) u.searchParams.set("k", key);
+  // WHY it was closed. `decide()` has always returned this and it stopped here,
+  // so the Mac block page could not say why — the one line UX_PRINCIPLES §9
+  // singles out for reducing the threat-to-freedom that drives circumvention.
+  // Same parameter name as the Windows redirect.
+  if (reason) u.searchParams.set("reason", reason);
   return u.toString();
 }
 
@@ -505,11 +510,11 @@ browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
   if (details.frameId !== 0) return; // top-level only for redirects
   if (!snapshot) await restoreCachedPolicy();
   const res = decide(details.url);
-  const { blocked, key } = res;
+  const { blocked, key, reason } = res;
   if (!blocked) spendOnce(res);
   if (blocked) {
     try {
-      await browser.tabs.update(details.tabId, { url: blockedPageUrl(details.url, key) });
+      await browser.tabs.update(details.tabId, { url: blockedPageUrl(details.url, key, reason) });
     } catch (e) {
       console.warn("[guard] redirect failed:", e);
     }
@@ -529,11 +534,14 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
     // A pushState route change is a real load as far as a parent is concerned,
     // even though no network navigation fired.
     const res = decide(msg.url);
-    const { blocked, key } = res;
+    const { blocked, key, reason } = res;
     if (!blocked) spendOnce(res);
     if (blocked && sender.tab?.id != null) {
       try {
-        await browser.tabs.update(sender.tab.id, { url: blockedPageUrl(msg.url, key) });
+        // Same three arguments as the navigation path above. An SPA route change
+        // is a real load to a parent, so it must not be the one that arrives
+        // without a reason.
+        await browser.tabs.update(sender.tab.id, { url: blockedPageUrl(msg.url, key, reason) });
       } catch (e) {
         console.warn("[guard] SPA redirect failed:", e);
       }
@@ -561,6 +569,23 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
       childId: snapshot?.childId, deviceId: snapshot?.deviceId, requestedAt: new Date().toISOString(),
     });
     return { ok: true };
+  }
+
+  // What the parent decided, asked for by the block page. The page used to work
+  // this out from a temporary BLOCK rule in the cached snapshot, and a refusal's
+  // grant expires after five minutes and is then dropped — so the answer
+  // vanished and the page went back to "waiting on a parent" for up to a week.
+  //
+  // Backend mode only. The native-host path has no equivalent route yet, and
+  // returning an empty list there would be indistinguishable from "nobody has
+  // decided", so it says so and the page keeps its time-based fallback.
+  if (msg?.type === "GET_ANSWERS") {
+    if (!BACKEND_MODE) return { ok: false, error: "not available in native-host mode" };
+    try {
+      return { ok: true, answers: await getAnswers() };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
   }
 });
 

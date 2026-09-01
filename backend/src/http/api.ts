@@ -225,6 +225,23 @@ function escapeHtml(v: string): string {
 }
 
 /**
+ * A value safe to embed in an inline `<script>`.
+ *
+ * `JSON.stringify` escapes quotes and backslashes and stops there: `</script>`
+ * inside the string would close the element and everything after it would be
+ * markup. The one value this is used on is a parsed-and-reserialised URL, where
+ * `<` and `>` are already percent-encoded and a `<` in the host makes parsing
+ * throw — so it cannot happen today. It is escaped anyway, because "cannot
+ * happen" is doing a lot of work in a sentence about script injection, and the
+ * cost is one replace.
+ */
+function jsonForScript(value: string): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c").replace(/>/g, "\\u003e")
+    .replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+}
+
+/**
  * Pull `u` out of the block page's query string WITHOUT letting a `&` inside it
  * end the value.
  *
@@ -350,6 +367,40 @@ export function buildRouter(app: App): Router {
   r.get("/v1/signing-key", async () => ok({ publicKeyB64: app.signingPublicKeyB64, alg: "Ed25519" }));
 
   /**
+   * Apple App Site Association — what lets the parent APP use the passkeys a
+   * parent enrolled in the BROWSER.
+   *
+   * A passkey is bound to its rpId (`ajar.family`). A native app may only claim
+   * that rpId if Apple can fetch this file from `https://<rpId>/.well-known/
+   * apple-app-site-association` and find the app's id under `webcredentials`.
+   * Without it `ASAuthorizationPlatformPublicKeyCredentialProvider` fails with
+   * a domain-association error, and since sign-in is password-then-passkey, the
+   * parent cannot get into the app at all.
+   *
+   * Served from the router rather than as a static asset so it exists on every
+   * deploy target, and because it must be JSON with no redirect — Apple follows
+   * neither a 30x nor an HTML error page.
+   *
+   * `appleAppIds` is empty until a real Team ID is known (APPLE_APP_IDS, e.g.
+   * `ABCDE12345.family.ajar.parent`). Serving an EMPTY apps list would tell
+   * Apple, authoritatively and with caching, that no app may claim this domain;
+   * a 404 is the honest answer for "not configured yet" and is retried.
+   */
+  r.get("/.well-known/apple-app-site-association", async () => {
+    const apps = app.appleAppIds;
+    if (apps.length === 0) return err(404, "no associated apps are configured", "NOT_FOUND");
+    // Universal Links are deliberately NOT claimed alongside webcredentials. The
+    // block page hands back via the `ajar://` scheme (AjarFilter/project.yml),
+    // and claiming paths we do not handle would swallow ordinary web links to
+    // ajar.family into an app that has no screen for them.
+    //
+    // `ok` serves this as application/json, which is what Apple requires; it
+    // does not accept text/html, and the wrong type here is indistinguishable
+    // from a missing file.
+    return ok({ webcredentials: { apps } });
+  });
+
+  /**
    * The Request-Access block page (iOS content-filter remediation target).
    *
    * When the data provider returns `.remediateVerdict`, iOS renders THIS page
@@ -392,7 +443,7 @@ export function buildRouter(app: App): Router {
     // promise without gendering anyone (docs/UX_PRINCIPLES.md §4, §9).
     const askLabel = named ? `Ask ${escapeHtml(ally)}` : "Send request";
     const subhead = named
-      ? `Ask ${escapeHtml(ally)} to unlock it — you’ll hear back right away.`
+      ? `Ask ${escapeHtml(ally)} to open it — you’ll hear back right away.`
       : "Send a request — you’ll hear back right away.";
 
     return html(`<!doctype html>
@@ -407,52 +458,173 @@ export function buildRouter(app: App): Router {
     --bg:#F6F4EE; --surface:#FFFFFF; --surface-2:#EFEDE4; --line:#E3E1D8;
     --field-line:#767468; --ink:#12241F; --ink-2:#3E4F49; --muted:#5C6B64;
     --accent-ink:#0b6355; --accent-wash:#E7F4F1; --yes:#FF8A5B; --yes-ink:#12241F;
+    --accent-strong:#0D6D5E; --on-accent:#FFFFFF;
   }
   @media (prefers-color-scheme: dark) { :root {
     --bg:#12211D; --surface:#1A2A26; --surface-2:#223531; --line:#2B3A35;
     --field-line:#7b8d87; --ink:#EAF1EE; --ink-2:#C3D2CC; --muted:#9FB1AA;
     --accent-ink:#5FD3BE; --accent-wash:#1F322D; --yes:#FF8A5B; --yes-ink:#2A1208;
+    --accent-strong:#35B7A2; --on-accent:#0B1512;
   } }
   * { box-sizing: border-box; }
-  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+  /* "safe center" and not plain "center" (no backticks anywhere in this file's
+     CSS comments: it is a template literal). At 200% zoom a centred flex child
+     taller than its container overflows in BOTH directions and the top — the
+     heading and the ask button — cannot be scrolled back to. "safe" degrades to
+     flex-start exactly then. UX_PRINCIPLES §8 records reflow as Done and cites
+     the block screens; both extension copies do this and carry the comment, and
+     this one, the only block page on the flagship platform, did not. */
+  body { margin:0; min-height:100vh; display:flex; align-items:safe center; justify-content:center;
          background:var(--bg); color:var(--ink); padding:24px;
          font:16px/1.5 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
   .card { max-width:32rem; width:100%; }
+  /* BRAND.md:247-254 settles the interim mark: the lowercase wordmark in
+     accent-ink at 16px/700. It names the exact bug it was fixing — the one
+     branded element on the child's screen rendering as small muted grey — and
+     this page, which IS the child's screen, had drifted straight back to it.
+     The console and both extension block pages have always complied. */
   .mark { display:flex; align-items:center; gap:8px; margin-bottom:32px;
-          font-size:14px; font-weight:600; color:var(--ink-2); }
+          font-size:16px; font-weight:700; color:var(--accent-ink); }
   h1 { font-size:22px; line-height:1.25; font-weight:600; margin:0 0 12px; }
   .sub { color:var(--ink-2); margin:0 0 24px; }
   .target { background:var(--surface); border:1px solid var(--line); border-radius:14px;
             padding:16px; margin-bottom:24px; }
   .target .name { font-size:18px; font-weight:600; line-height:1.25; word-break:break-word; }
   details { margin-top:12px; }
-  summary { font-size:14px; color:var(--muted); cursor:pointer; min-height:24px; }
+  /* 44, not 24. UX_PRINCIPLES §8 records 44px targets as Done — one --tap token
+     driving every button, input, select and summary; this page shipped the
+     WCAG 2.5.8 floor instead, on a control a child taps with a thumb. The flex
+     centring keeps the label vertically centred in the taller box. */
+  summary { font-size:14px; color:var(--muted); cursor:pointer;
+            min-height:44px; display:flex; align-items:center; }
   .url { font:12px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
          color:var(--muted); word-break:break-all; margin-top:8px; }
   /* Coral is FILL ONLY and carries dark ink — white on it measures 2.32:1. */
+  /* TEAL, not coral, and this is the brand rule rather than a preference.
+     BRAND.md reserves coral for THE YES — the parent's action. This button is
+     the child's ASK, which is not a yes, and both extension block pages have
+     always drawn it in accent-strong. Three block pages disagreeing on the
+     colour of the same control is exactly the variability UX_PRINCIPLES §7 says
+     stops the reflex forming; and spending coral here left it meaning two
+     different things in one loop.
+     No border needed: on-accent on accent-strong is a text pair that clears
+     4.5:1 (check-contrast.mjs), unlike white on coral at 2.32:1. */
   .btn { display:flex; align-items:center; justify-content:center; width:100%;
-         min-height:52px; background:var(--yes); color:var(--yes-ink); text-decoration:none;
+         min-height:52px; background:var(--accent-strong); color:var(--on-accent);
+         text-decoration:none;
          border-radius:999px; font-size:16px; font-weight:600; }
+  /* --line is documented decorative-only (1.31:1) and this is a real control —
+     the child's way back to the page. --field-line is the border token that
+     clears 3:1. */
+  .btn.again { background:transparent; color:var(--accent-ink); border:1px solid var(--field-line);
+               margin-top:12px; }
   .foot { font-size:14px; color:var(--muted); text-align:center; margin:16px 0 0; }
+  /* The page defined NO focus rule at all, so every control on it fell back to
+     the UA default — on the one screen in the product that is reached by being
+     stopped, and in a palette built around a two-tone ring. The two bands are
+     the same shape as tokens.css: an inner halo sitting on the control and an
+     outer band carrying the perceptibility against the page. */
+  :focus-visible { outline:none;
+                   box-shadow:0 0 0 2px var(--surface), 0 0 0 5px var(--accent-ink); }
+  .note { margin-bottom:16px; }
+  .note label { display:block; font-size:14px; color:var(--ink-2); margin-bottom:6px; }
+  .note textarea { width:100%; min-height:52px; padding:12px 14px; resize:vertical;
+                   background:var(--surface); color:var(--ink); font:inherit; font-size:16px;
+                   border:1px solid var(--field-line); border-radius:10px; }
 </style></head>
 <body><div class="card">
   <div class="mark">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M4 21V5a2 2 0 0 1 2-2h7l5 4v14"></path><path d="M13 3v18"></path>
     </svg>
-    Ajar
+    ajar
   </div>
-  ${safe ? `<h1>You can ask to unlock this page</h1>
+  ${safe ? `<h1>You can ask to open this page</h1>
   <p class="sub">${subhead}</p>
   <div class="target">
     <div class="name">${shown.replace(/^https?:\/\/(www\.)?/i, "").split("/")[0] || "This page"}</div>
     <details><summary>Details</summary><div class="url">${shown}</div></details>
   </div>
-  <a class="btn" href="${escapeHtml(deepLink)}">${askLabel}</a>
+  <div class="note">
+    <label for="note">Add a note if you want — like “it’s for homework”</label>
+    <textarea id="note" rows="2" maxlength="280" placeholder="A quick note for your parent"></textarea>
+  </div>
+  <a class="btn" href="${escapeHtml(deepLink)}" id="ask">${askLabel}</a>
+  <a class="btn again" href="${shown}" id="again">Try the page again</a>
   <p class="foot">New sites go past a parent first.</p>`
          : `<h1>This page is closed</h1>
   <p class="sub">No address came through, so there is nothing to ask about yet.</p>`}
-</div></body></html>`);
+</div>
+${safe ? `<script>
+/* Reloading this page should land the child back on the page a parent just
+   approved — not on this page again.
+ *
+ * The block page cannot ASK whether the grant landed. It is unauthenticated and
+ * holds no device token, and an endpoint that answered "is this allowed yet?"
+ * to anyone who asked would be a policy oracle. It does not need to: navigating
+ * to the target puts the question to the filter, which is the only thing whose
+ * answer is authoritative. Allowed, the page loads. Still blocked, the filter
+ * serves this page again.
+ *
+ * WHICH IS ALSO THE TRAP. Retrying on every load is an infinite bounce — block
+ * page, target, blocked, block page, target. The guard is the navigation TYPE:
+ * only a RELOAD retries. The render the filter produces when it blocks a page is
+ * a "navigate", and so is the one that comes back from a refused retry, so a
+ * reload costs exactly one attempt and can never chain into a second.
+ *
+ * That also means a child's first block is unchanged — no bounce, no flash, the
+ * page and its buttons straight away. Only an explicit refresh, which is a child
+ * saying "I think it is unlocked now", spends a navigation on finding out.
+ *
+ * Inline, and the only script here. The no-scripts rule this page was written
+ * under is about FETCHES: an external asset can itself be blocked by the filter
+ * that put the child here, and a block page that cannot render is a child who
+ * cannot ask. Inline code fetches nothing, so the reason does not apply to it.
+ * Everything below degrades to the "Try the page again" button, which needs no
+ * script at all.
+ */
+(function () {
+  var target = ${jsonForScript(safe)};
+  var reloaded = false;
+  try {
+    var nav = performance.getEntriesByType("navigation")[0];
+    if (nav) reloaded = nav.type === "reload";
+    // performance.navigation is deprecated and still the only answer in older
+    // WebKit, which is exactly what an older iOS puts this page in.
+    else if (performance.navigation) reloaded = performance.navigation.type === 1;
+  } catch (e) { /* no timing API: never auto-retry, the button still works */ }
+  // replace(), not assign(): a child who taps back should reach where they were
+  // before, not walk back through a stack of block pages.
+  if (reloaded) location.replace(target);
+
+  /* Carry the note into the app.
+   *
+   * The Windows and macOS block pages have always collected a reason, and this
+   * one did not — so the parent's card quoted nothing for every iOS family, and
+   * the quote block on both parent surfaces was dead weight on the flagship
+   * platform. The deep link is OURS (unlike the remediation URL the system
+   * substitutes into), so a second parameter is safe here; u is kept last
+   * anyway, because a reader who has learned that rule for one URL should not
+   * have to relearn where it does and does not apply.
+   * (No backticks in this comment: it lives inside a template literal.)
+   *
+   * The href starts out complete and note-less. If this script never runs, the
+   * ask still works — it just arrives without the note, which is exactly what
+   * happened before the field existed. */
+  var ask = document.getElementById("ask");
+  var note = document.getElementById("note");
+  if (ask && note) {
+    var base = ask.getAttribute("href");
+    note.addEventListener("input", function () {
+      var text = note.value.trim().slice(0, 280);
+      ask.setAttribute("href", text
+        ? "ajar://request?note=" + encodeURIComponent(text) + "&u=" + encodeURIComponent(target)
+        : base);
+    });
+  }
+})();
+</script>` : ""}
+</body></html>`);
   });
   // Machine-readable API contract (the source of truth clients integrate against).
   r.get("/openapi.json", async () => ok(openapiDocument));
@@ -899,6 +1071,51 @@ export function buildRouter(app: App): Router {
     const full = await app.policy.buildSnapshot(dev.familyId, dev.childId, dev.deviceId);
     await app.devices.heartbeat(dev.deviceId, full.version);
     return ok(full);
+  });
+
+  /**
+   * WHAT THE PARENT ACTUALLY DECIDED, told to the device rather than inferred.
+   *
+   * THE BUG THIS CLOSES. A refusal writes a temporary BLOCK grant that expires
+   * after ONCE_GRANT_TTL_MS (five minutes), and the block pages could only work
+   * out "declined" by noticing such a rule in the snapshot — which the policy
+   * builder drops as soon as it expires. So a child who was told no saw the
+   * answer for five minutes at most and then the page went back to "waiting on
+   * a parent", for up to the seven days the ask is remembered. Every honesty
+   * fix on those screens has been compensation for this endpoint's absence.
+   *
+   * Scoped to the DEVICE'S OWN CHILD, never the family: a sibling's refusals are
+   * not this device's business, and a device token is not a parent session.
+   *
+   * `status` is the whole payload beyond identity. Deliberately NOT the scope,
+   * the duration, or who decided: the child needs to know they were answered and
+   * which way, and the rest is the parent's business. Enforcement still comes
+   * from the signed snapshot — this endpoint grants nothing and is not consulted
+   * by any filter.
+   */
+  r.get("/v1/devices/:deviceId/answers", async (req) => {
+    const dev = await requireDevice(app, req);
+    if (dev.deviceId !== req.params.deviceId) return err(403, "device mismatch", "FORBIDDEN");
+    // A window, not the whole history. A block page is asking about something a
+    // child asked for minutes or hours ago; a month of decisions is a profile of
+    // the child sitting on an endpoint reachable from the device they use.
+    const windowMs = 7 * 24 * 3600 * 1000;
+    const cutoff = Date.now() - windowMs;
+    const all = await app.repo.listAccessRequests(dev.familyId);
+    const answers = all
+      .filter((r) => r.childId === dev.childId)
+      .filter((r) => r.status === "APPROVED" || r.status === "DENIED")
+      .filter((r) => Date.parse(r.createdAt) >= cutoff)
+      .map((r) => ({
+        requestId: r.id,
+        targetType: r.targetType,
+        targetValue: r.targetValue,
+        // "opened" / "closed", not APPROVED/DENIED: this is read by a screen a
+        // child looks at, and the product settled on open/closed (BRAND.md §6.1).
+        answer: r.status === "APPROVED" ? "opened" : "closed",
+        askedAt: r.createdAt,
+      }));
+    return ok({ answers });
   });
 
   /**

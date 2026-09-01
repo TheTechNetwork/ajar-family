@@ -20,7 +20,7 @@
  */
 
 import { normalizeYouTube, youTubePolicyKey, isPlaybackSupportUrl } from "./youtube-normalize.js";
-import { getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest, consumeGrant } from "./backend-client.js";
+import { getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest, consumeGrant, getAnswers } from "./backend-client.js";
 import { makeResolver } from "./cname-resolve.js";
 import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
 
@@ -682,6 +682,28 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     } catch (e) {
       sendResponse({ ok: false, error: String(e) });
     }
+    return true; // async response
+  }
+
+  // What the parent decided, asked for by the block page.
+  //
+  // The page used to work this out by looking for a temporary BLOCK rule in the
+  // cached snapshot — and a refusal writes a grant that expires after five
+  // minutes, which the backend then drops, so the answer vanished and the page
+  // silently went back to "waiting on a parent" for up to a week.
+  //
+  // Only meaningful in backend mode. The native-host path has no equivalent
+  // route yet, and answering `{ok:true, answers:[]}` there would be
+  // indistinguishable from "nobody has decided" — so it says so, and the page
+  // keeps its time-based honesty fallback.
+  if (msg && msg.type === "getAnswers") {
+    if (!BACKEND_MODE) {
+      sendResponse({ ok: false, error: "not available in native-host mode" });
+      return true;
+    }
+    getAnswers()
+      .then((answers) => sendResponse({ ok: true, answers }))
+      .catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true; // async response
   }
 });

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Ask to unlock — ajar</title>
+  <title>Ask to open it — ajar</title>
   <style>
 /* ---------------------------------------------------------------------------
    INLINE COPY of web/parent/tokens.css. MV3 extension pages can only load CSS
@@ -333,8 +333,14 @@ details { margin: 0 0 var(--s-4); }
   <main class="card">
     <span class="badge">ajar</span>
 
-    <h1 id="head">This one's closed right now</h1>
-    <p id="lede">Send it over and a parent gets it on their phone. Most asks come back in a couple of minutes.</p>
+    <!-- Agency-first, and the same sentence on all three block pages. The two
+         pages that grew the five-state machine kept the verdict-first headline
+         ("This one's closed right now") while the iOS page — the one with two
+         states — was the only one using the form UX_PRINCIPLES §7 prescribes.
+         The merge takes the headline from there and the state machine from
+         here, rather than picking a file and copying it. -->
+    <h1 id="head">You can ask to open this page</h1>
+    <p id="lede">Send it over and a parent sees it right away. You will get an answer here.</p>
 
     <p class="resource" id="resource">Loading…</p>
     <details id="details">
@@ -350,8 +356,12 @@ details { margin: 0 0 var(--s-4); }
     <p class="asked-note muted hide" id="askedNote"></p>
 
     <div class="row">
-      <button type="button" class="btn-primary" id="request">Ask to unlock</button>
-      <button type="button" id="back">Not now</button>
+      <button type="button" class="btn-primary" id="request">Ask to open it</button>
+      <!-- "Go back", not "Not now". That string means "child, retreat" here and
+           "parent, decline" in the console and the parent app — one label, two
+           opposite actors, on the two screens most likely to be read by the two
+           different people in the same five minutes. -->
+      <button type="button" id="back">Go back</button>
       <button type="button" class="btn-yes hide" id="openIt">Open it</button>
     </div>
 

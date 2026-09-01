@@ -124,7 +124,7 @@ enough."** as the evocative brand line that leans on the name.
 **Adjectives:** Calm · Warm · Confident · Plain-spoken *(and quietly quick)*.
 
 **Do**
-- Lead with *yes*, *open*, *let through*, *unlock just this*.
+- Lead with *yes*, *open*, *let through*, *open just this*.
 - Short sentences. Everyday words. Zero jargon.
 - Respect the child as a person ("ask," "want in?") — never "caught," never
   shamed.
@@ -132,8 +132,8 @@ enough."** as the evocative brand line that leans on the name.
 - Make speed feel good ("done — it's open").
 
 **Don't**
-- Never use: *filter, blocker, lock, guard, nanny, spy, monitor, restrict,
-  forbidden, violation, caught, danger* (as a scare).
+- Never use: *filter, blocker, lock, unlock, guard, nanny, spy, monitor,
+  restrict, forbidden, violation, caught, danger* (as a scare).
 - No fear-based or surveillance framing. No "gotcha." No infantilizing the child.
 - No corporate/security jargon in anything a family reads.
 
@@ -141,12 +141,52 @@ enough."** as the evocative brand line that leans on the name.
 
 | Where | Typical / off-brand | Ajar |
 |---|---|---|
-| Child block screen (headline + helper) | "Access Denied. This content is blocked by your administrator." | **"Not open yet — want in?"** · helper: *"Send a quick ask and a parent can unlock just this."* |
-| Child request button | "Request Access" | **"Ask to unlock"** |
-| Parent approval button | "Approve Request" | **"Say yes"** — primary, with a duration chip: *"Just this video · 30 min"* |
+| Child block screen (headline + helper) | "Access Denied. This content is blocked by your administrator." | **"Not open yet — want in?"** · helper: *"Send a quick ask and a parent can open just this."* |
+| Child request button | "Request Access" | **"Ask to open it"** |
+| Parent approval button | "Approve Request" | **"Open this video"** — primary, with a duration chip: *"· 30 min"* |
 
 Post-approval child confirmation: **"You're in. Have fun — this closes on its own
 later."**
+
+### 6.1 One word for one action: open / closed
+
+*Settled. The rest of this document, `UX_PRINCIPLES.md` §9 and every surface
+follow it; `docs/UX_PLAN.md` §0 records the decision and the alternatives.*
+
+The product had **four** words for a single action — "Say yes" (this table),
+"Unlock this video" (UX_PRINCIPLES §9 and the parent app), "Open this video"
+(the web console), and "Request Access" (the iOS system button) — and this
+section contradicted itself: the Don't list above banned lock language and the
+table three rows down prescribed "Ask to unlock".
+
+**A page is closed. A parent opens it. A child asks to open it.**
+
+Why open/closed and not unlock:
+
+- The product is named for a door left ajar. "Unlock" is a second metaphor
+  competing with the first, and §2 already builds the whole positioning on the
+  door.
+- Lock language casts the parent as a jailer. That framing is what drives
+  circumvention — a rule reads as an obstacle rather than a rule — which is the
+  behaviour this product exists to avoid, not provoke.
+- "Closed" is a state, and it carries its own opposite. "Unlock" has none that
+  reads naturally: nothing in the product can plausibly be called "re-locking".
+- The ban above was the deliberate decision; the "Ask to unlock" row was the
+  leftover that never got swept.
+
+A deliberate split — child "opens", parent "says yes" — was considered and
+rejected: two intentional glossaries is how a product ends up with four
+accidental ones.
+
+The words, in one place:
+
+| Thing | Say | Not |
+|---|---|---|
+| The state | closed | blocked, locked, restricted, denied |
+| What the parent does | open it / say yes | approve, grant, allow, unlock |
+| What the child does | ask to open it | request access, submit a request, unlock |
+| A standing decision | already open | whitelisted, permanently allowed |
+| A grant running out | closes on its own | expires, times out, is revoked |
 
 ---
 

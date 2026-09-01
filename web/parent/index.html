@@ -145,8 +145,48 @@
         <div class="actions">
           <button type="submit" class="btn-primary" id="btnLogin">Log in</button>
           <button type="button" class="btn-ghost" id="btnMode">Create an account</button>
+          <!-- The endpoints have existed since the reset work landed; nothing
+               anywhere linked to them, so a forgotten password was the end of
+               the account — and of every device enrolled under it. Signup even
+               told parents to "ask for a new link from the sign-in page", which
+               named this control before it existed. Hidden while registering:
+               there is nothing yet to recover. -->
+          <button type="button" class="btn-ghost" id="btnForgot">Forgot your password?</button>
         </div>
       </form>
+
+      <!-- Ask for a reset link. Separate panel rather than a second page: the
+           address is usually already typed into the form above, and carrying it
+           across saves the one step a locked-out parent is least patient for. -->
+      <div id="forgotStep" class="hide">
+        <p>Type the address you signed up with and we'll send a link to set a new password.</p>
+        <div class="field">
+          <label for="forgotEmail">Email</label>
+          <input id="forgotEmail" type="email" inputmode="email" autocomplete="username"
+                 autocapitalize="off" autocorrect="off" placeholder="you@example.com" />
+        </div>
+        <div class="actions">
+          <button type="button" class="btn-primary" id="btnForgotSend">Send the link</button>
+          <button type="button" class="btn-ghost" id="btnForgotCancel">Back to sign in</button>
+        </div>
+      </div>
+
+      <!-- Where the emailed link lands (PASSWORD_RESET_URL + ?token=). Shown
+           instead of the sign-in form, because a parent who arrives here has
+           already established they cannot fill that form in. -->
+      <div id="resetStep" class="hide">
+        <p>Choose a new password. This signs you in and signs out every other device.</p>
+        <div class="field">
+          <label for="resetPassword">New password</label>
+          <input id="resetPassword" type="password" autocomplete="new-password"
+                 aria-describedby="resetHelp" />
+          <p class="help" id="resetHelp">At least 8 characters.</p>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn-primary" id="btnReset">Set the password</button>
+          <button type="button" class="btn-ghost" id="btnResetCancel">Back to sign in</button>
+        </div>
+      </div>
       <!-- Step two of sign-in. Hidden until the password is accepted and the
            server says the account has a passkey; the form above is hidden then,
            because going back and retyping the password would start over. -->
@@ -254,13 +294,24 @@
           <div class="shrink"><button id="btnAddChild">Add</button></div>
         </div>
 
+        <!-- Which device the code is FOR. The console hardcoded WINDOWS, so a
+             parent who skipped the code during signup could never set up their
+             child's iPhone from here — and was handed extension instructions for
+             a platform they had not chosen. Same four options the signup flow
+             and the marketing table offer, in the same order. -->
+        <div class="field" style="margin-top:var(--s-3)">
+          <label for="enrollPlatform">Which device are you setting up?</label>
+          <select id="enrollPlatform">
+            <option value="IOS">iPhone</option>
+            <option value="IPADOS">iPad</option>
+            <option value="MACOS">Mac</option>
+            <option value="WINDOWS">Windows PC</option>
+          </select>
+        </div>
+
         <div id="enrollBox" class="hide" style="margin-top:var(--s-4)">
           <h3 id="enrollH">Setup code</h3>
-          <p class="help" id="enrollHelp">
-            Type this into ajar on the kid's computer — open the extension's
-            Setup page and enter it there. Eight characters, no <code>I</code>,
-            <code>O</code>, <code>L</code>, <code>0</code> or <code>1</code>.
-          </p>
+          <p class="help" id="enrollHelp"></p>
           <p>
             <span class="code" id="enrollCode" tabindex="-1"
                   aria-describedby="enrollHelp">––––––––</span>

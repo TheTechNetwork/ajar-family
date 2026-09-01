@@ -49,6 +49,7 @@ async function main(): Promise<void> {
       passkeyRpId: process.env.PASSKEY_RP_ID,
       passkeyOrigin: process.env.PASSKEY_ORIGIN,
       passkeyRpName: process.env.PASSKEY_RP_NAME,
+      appleAppIds: process.env.APPLE_APP_IDS,
     },
     // Follow CNAME chains for category lookups via the host's system resolver.
     cnameResolver: new NodeCnameResolver(),

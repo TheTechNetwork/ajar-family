@@ -46,7 +46,7 @@ export class HubNotifier implements Notifier {
  * swallowed rather than failing the request that triggered it (a child's access
  * request must not 500 because the mail provider is down)". Nothing implemented
  * it. There was no `catch` anywhere on the path, so with mail down a child
- * pressing "Ask to unlock" got a 500, and a parent asking for a password reset
+ * pressing "Ask to open it" got a 500, and a parent asking for a password reset
  * got one too — the latter ALSO an enumeration oracle, since an unknown address
  * returns before sending and still answered 202.
  *

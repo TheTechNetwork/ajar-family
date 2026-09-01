@@ -122,7 +122,7 @@ Our core loop (from `README.md` / `docs/ARCHITECTURE.md §7`): **child hits bloc
 
 **Change to our UI.**
 - Implement **actionable APNs notifications** (per §3) — the single biggest lever: decide‑from‑lockscreen turns a 30‑second app trip into a 2‑second tap and keeps the interruption tiny.
-- **Batch bursts:** if a child fires several requests in a minute, coalesce into one grouped notification ("Jane asked to unlock 3 things") rather than N buzzes — directly countering alert fatigue.
+- **Batch bursts:** if a child fires several requests in a minute, coalesce into one grouped notification ("Jane asked to open 3 things") rather than N buzzes — directly countering alert fatigue.
 - **Notification copy** must be self‑sufficient: *"Jane wants to watch a video · tap to allow 30 min or open."* Never a contentless "You have a new request."
 - Reserve pushes for **actual access requests and safety‑relevant events**; keep enrollment/status chatter in‑app.
 
@@ -139,9 +139,9 @@ Our core loop (from `README.md` / `docs/ARCHITECTURE.md §7`): **child hits bloc
 **Product requirement.** One canonical name per concept across child and parent surfaces; the primary action in the same position with the same label every time; the loop's shape never changes between requests.
 
 **Change to our UI.**
-- **Unify the verb.** Today the child taps **"Request Access"** while the parent sees **"Allow / Deny."** Pick one family of words end‑to‑end — e.g. child **"Ask to unlock"** → parent **"Unlock (30 min) / Not now"** → child sees **"Unlocked."** One mental model, reinforced every cycle. (Current strings: `blocked.html` "Request Access"; `app.js` "Allow …"/"Deny".)
+- **Unify the verb.** *Settled — see `BRAND.md` §6.1 and `docs/UX_PLAN.md` §0: **open / closed**, with "unlock" retired.* Child taps **"Ask to open it"** → parent sees **"Open this video · 30 min" / "Not now"** → child sees the answer. One mental model, reinforced every cycle. This section previously prescribed "unlock" while `BRAND.md` §6 banned lock language three rows above its own counter-example, which is how the product ended up with four words for one action.
 - **Stable primary action:** the parent's primary button stays in the same spot with the same wording for every request (see §2); don't let scope/duration reshuffle it.
-- **Consistent status language** the child recognizes instantly: "Asked ✓" → "Unlocked ✓", same words each time (replacing the current ad‑hoc "Request sent. A parent will be notified.").
+- **Consistent status language** the child recognizes instantly: "Asked ✓" → "Opened ✓", same words each time (replacing the current ad‑hoc "Request sent. A parent will be notified.").
 
 ---
 
@@ -197,13 +197,13 @@ verify them.
 
 | Requirement | State | Notes |
 |---|---|---|
-| 1 — 44 px targets | **Done** | One `--tap: 44px` token drives every button, input, select and `summary`. The three `<summary>` disclosures were 18–19.7 px, i.e. under the WCAG 24 px floor, not merely under our own bar. |
+| 1 — 44 px targets | **Done** | One `--tap: 44px` token drives every button, input, select and `summary`. The three `<summary>` disclosures were 18–19.7 px, i.e. under the WCAG 24 px floor, not merely under our own bar. *Corrected: this said Done for months while the `/blocked` route — the only block page on iOS — shipped a 24 px `summary`. It is 44 px now and `blocked-page.test.ts` asserts it, because a table cell claiming Done is what stopped anyone looking.* |
 | 2 — measured contrast | **Done** | Token sheet in `web/parent/tokens.css`; numbers in `docs/BRAND.md`. The focus ring is two-tone because no single colour clears 3:1 against both the teal and the coral fill. |
 | 3 — status never colour alone, announced | **Done** | Icon + word on every status; `role="status"` regions on all five surfaces, plus a separate `role="alert"` in the console for blocking errors. |
 | 4 — labels and names | **Done** | Orphan `<label>`s replaced with real `for`/`id` pairs; every repeated button ("Not now", "30 min") carries an `.sr-only` suffix naming which ask it belongs to. |
 | 5 — focus survives async | **Done** | The console's long-poll re-render saves and restores focus (and keeps open `Change…` panels open); the block screens use `aria-disabled` + a guard instead of `disabled`. |
 | 6 — actionable errors | **Done** | Message maps in `app.js` and both `options.js`. No surface renders a bare status code any more. |
-| 7 — reflow | **Done** | Console header wraps and truncates; block screens use `min-height` + `align-items: safe center`; both `options.html` gained the missing viewport meta. |
+| 7 — reflow | **Done** | Console header wraps and truncates; block screens use `min-height` + `align-items: safe center`; both `options.html` gained the missing viewport meta. *Corrected: "block screens" was two of the three. The `/blocked` route used plain `center`, so at 200% zoom its heading and ask button left the flex container with no way to scroll back — the exact failure this row claimed was fixed. Asserted in `blocked-page.test.ts` now.* |
 | 8 — reduced motion | **Done** | Global `prefers-reduced-motion` block; the toast's auto-dismiss is 6 s (was 1.8 s, below the time a screen-reader user needs to reach it). |
 | 9 — 16 px body | **Done** | Both `options.html` were 15 px and were never mentioned in this section; they are 16 px now. |
 | 10 — no unverified success | **Partly done, and the gap is deliberate.** | The block screens no longer say "this page opens by itself" (no code re-navigates a parked tab) and no longer report "Asked ✓" before the transport acknowledged. But the console's "Sent to Jane's device" still fires on HTTP 200 from `/decide`, before any device has acknowledged the new policy version — the API has no device-ack channel to gate it on. |
@@ -242,17 +242,17 @@ verify them.
 
 | Where | Current | Proposed | Why |
 |---|---|---|---|
-| Block `<h1>` (`blocked.html`) | "This page isn't available right now" | "You can ask to unlock this page" | Leads with agency/next action, not a verdict (§2, §4) |
-| Block subhead | "A parent set up filtering on this computer. You can ask a parent to allow this." | "Ask Mom to unlock it — she'll get a message right away." | Names the ally, promises speed, relatedness (§4, §1) |
+| Block `<h1>` (`blocked.html`) | "This page isn't available right now" | "You can ask to open this page" | Leads with agency/next action, not a verdict (§2, §4) |
+| Block subhead | "A parent set up filtering on this computer. You can ask a parent to allow this." | "Ask Mom to open it — you'll hear back right away." | Names the ally, promises speed, relatedness (§4, §1) |
 | Note label/placeholder | "Add a note for your parent (optional)" / "Why do you want to watch this?" | "Add a note (optional) — e.g. 'it's for homework'" | Autonomy‑supportive; "why do you want" reads as demanding justification (§4) |
-| Primary button (`blocked.html`) | "Request Access" | "Ask to unlock" | Plain, kid‑readable, matches unified verb (§7) |
-| Sent status (`blocked.js`) | "Request sent. A parent will be notified." | "✓ Sent. Waiting on a parent." + "You asked 4 min ago. Nothing else to do." | Says what happens next and how long it has been. **The earlier proposal here — "this page will unlock by itself" — was retracted: no code re-navigates a parked tab, so it was a promise the product does not keep.** When the answer lands the screen shows an **Open it** button (§2, §8, and requirement 10 above) |
+| Primary button (`blocked.html`) | "Request Access" | "Ask to open it" | Plain, kid‑readable, matches unified verb (§7) |
+| Sent status (`blocked.js`) | "Request sent. A parent will be notified." | "✓ Sent. Waiting on a parent." + "You asked 4 min ago. Nothing else to do." | Says what happens next and how long it has been. **The earlier proposal here — "this page will open by itself" — was retracted: no code re-navigates a parked tab, so it was a promise the product does not keep.** When the answer lands the screen shows an **Open it** button (§2, §8, and requirement 10 above) |
 | Error status (`blocked.js`) | "Couldn't send the request (the filter service may be unreachable). Try again." | "⚠ Couldn't send — [Try again]" (button, not just text) | No dead‑end; actionable; concise (§2, §8) |
 | Approved status (`blocked.js`) | *(did not exist)* | h1 "You're in" · "A parent said yes. It may close again later on its own." · **[Open it]** | A yes the child never sees is a yes that did not happen (§2) |
 | Declined status (`blocked.js`) | *(did not exist — the child sat on "Asked" forever)* | h1 "Not this one" · "A parent said not this time. You can ask again with a note, or go ask them in person." · **[Ask again]** | Closes the loop. Styled `--muted`, **never** the error colour: a no is an answer, not a fault. Never a dead end (§2, §4) |
 | Why it's closed (`blocked.js` REASON_COPY) | "This site isn't on the open list yet." | "New sites go past a parent first." / "This site hasn't been opened yet." | Names an agent instead of an invisible list, and "yet" marks the state as changeable — both reduce the freedom threat that drives circumvention (§4) |
 | Parent deny (`app.js`) | "Deny" | "Not now" | Softer, less punitive, leaves the door open (§4) — keep an explicit "Block" only inside Change… for true blocks |
-| Parent primary (`app.js`) | six "Allow 15m/30m/1h/…" buttons | "Unlock this video · 30 min" (single) + "Change…" | Collapses decision load; narrowest‑useful default (§2, §3) |
+| Parent primary (`app.js`) | six "Allow 15m/30m/1h/…" buttons | "Open this video · 30 min" (single) + "Change…" | Collapses decision load; narrowest‑useful default (§2, §3) |
 | Approved toast (`app.js`) | "Approved — child device will update in seconds" | keep (good — states outcome + speed) | Already models §1/§9 well |
 
 ---
@@ -283,17 +283,17 @@ A prioritized checklist, mapped to files. Ordered by impact‑per‑effort.
 
 1. **[Parent] Actionable push approvals** — Allow 30 min / Not now from the notification, no app open. Writes `ApprovalDecision` directly. *(APNs path, `ARCHITECTURE.md §7`; §1/§3/§6)* — **highest impact.**
 2. **[Parent] Replace 3 s polling with WS/SSE push** (`app.js` `setInterval(refreshRequests,3000)` → the backend's existing push channel). Cuts up to ~6 s of round‑trip latency. *(§1)*
-3. **[Parent] Collapse the decision to one primary button** — `renderRequest` in `app.js`: "Unlock this video · 30 min" (narrowest‑useful default) + "Not now" + a "Change…" disclosure hiding the 8‑scope × 6‑duration matrix. *(§2/§3)*
+3. **[Parent] Collapse the decision to one primary button** — `renderRequest` in `app.js`: "Open this video · 30 min" (narrowest‑useful default) + "Not now" + a "Change…" disclosure hiding the 8‑scope × 6‑duration matrix. *(§2/§3)*
 4. ~~**[Block] Optimistic "Asked ✓" on tap**~~ — **done, then corrected.** The
    optimistic flip shipped, but it reported success even when the transport
-   dropped the message, and the "unlocks by itself if yes" copy described a code
+   dropped the message, and the "opens by itself if yes" copy described a code
    path that does not exist. The screen now shows four honest states — asking /
    asked (with how long ago) / approved / declined — and only claims "sent" once
    the send was acknowledged. *(§1/§9, requirement 10)*
 5. **[Block] Demote the raw URL, add a human label** — make the resource title (via `youtube-normalize.js`) the hero; move the monospace URL behind a "details" disclosure. *(§4)*
 6. ~~**[Both] Fix tap targets to ≥ 44 px**~~ — **done**, via the `--tap` token. Note the miss the first pass made: the primary buttons were fixed and the `<summary>` disclosures (18–19.7 px, under the WCAG 24 px floor) and the options pages were not. *(§8, WCAG 2.5.8 / HIG)*
 7. ~~**[Both] Color‑independent status**~~ — **done on all five surfaces.** The first pass did the block screens and left the console's family picker (fill colour only) and both options pages (a pale wash at 1.14:1) untouched. *(§8, WCAG 1.4.1)*
-8. **[Both] Unify the verb** — child "Ask to unlock" → parent "Open this video · 30 min" / "Not now" → child "You're in" / "Not this one", identical every cycle. Done in the UI; the notification copy still needs it. *(§7)*
+8. **[Both] Unify the verb** — child "Ask to open it" → parent "Open this video · 30 min" / "Not now" → child "You're in" / "Not this one", identical every cycle. Done in the UI; the notification copy still needs it. *(§7)*
 9. **[Block] Non‑shaming copy + privacy line** — apply the §9 before/after table; add "Only pages you ask about are shared." *(§4/§5)*
 10. **[Parent] Batch bursts + "Always allow this channel"** — group same‑child/same‑channel PENDING requests with an "Allow all · 30 min" action, and expose a remember‑this escalation inside Change…. *(§3)*
 11. **[Parent] Reversibility, so a tired yes or no is safe** — **done.** A

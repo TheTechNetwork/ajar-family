@@ -4,7 +4,7 @@
  * Reads the blocked URL + reason from the query string that background.js put on
  * the redirect (blocked.html?u=<enc>&reason=<enc>&key=<enc>), shows a friendly
  * human label (the raw URL hides behind Details — UX_PRINCIPLES §4), and on
- * "Ask to unlock" posts the blocked canonical id to the service via the
+ * "Ask to open it" posts the blocked canonical id to the service via the
  * background worker's native-messaging connection.
  *
  * FOUR HONEST STATES (docs/UX_PRINCIPLES.md §2, §9)
@@ -71,7 +71,7 @@ $("target").textContent = blockedUrl || "(unknown)";
 if (!blockedUrl) $("details").classList.add("hide");
 if (REASON_COPY[reason]) {
   $("lede").textContent =
-    `${REASON_COPY[reason]} Send it over and a parent gets it on their phone.`;
+    `${REASON_COPY[reason]} Send it over and a parent sees it right away.`;
 }
 
 backBtn.addEventListener("click", () => {
@@ -86,7 +86,7 @@ function setStatus(text, kind) {
 
 // ---------------------------------------------------------------------------
 // Remembering the ask. Without this a reload resets the button to a virgin
-// "Ask to unlock" and files a duplicate, which the parent sees as spam.
+// "Ask to open it" and files a duplicate, which the parent sees as spam.
 // ---------------------------------------------------------------------------
 const ASKS_KEY = "ajarAsks";
 const askKey = key || (blockedUrl ? `URL:${blockedUrl}` : "");
@@ -162,6 +162,52 @@ function ruleHitsThisPage(rule) {
   }
 }
 
+/**
+ * The parent's ANSWER, from the server, for the thing this page is about.
+ *
+ * Preferred over `answerIn` below in every case, because it is the decision
+ * itself rather than an inference from whether a rule happens to still exist.
+ * The inference stays as the fallback: it needs no network, so it still works
+ * offline and in native-host mode, and it is what shows an approval instantly
+ * from the cached snapshot without waiting for a round trip.
+ *
+ * @returns {Promise<"approved"|"declined"|null>}
+ */
+async function serverAnswer() {
+  let answers;
+  try {
+    const res = await sendToWorker({ type: "getAnswers" });
+    if (!res || !res.ok || !Array.isArray(res.answers)) return null;
+    answers = res.answers;
+  } catch { return null; }
+
+  // Match on the same canonical target the ask was filed under. `key` is what
+  // this page was redirected with; the URL is the fallback for a non-YouTube
+  // block, which is filed as URL:<the exact string>.
+  const [keyType, keyValue] = key ? [key.split(":")[0], key.slice(key.indexOf(":") + 1)] : [null, null];
+  const mine = answers.filter((a) =>
+    (keyType && a.targetType === keyType && a.targetValue === keyValue) ||
+    (a.targetType === "URL" && blockedUrl && a.targetValue === blockedUrl));
+  if (!mine.length) return null;
+
+  // Newest wins: a child who asked, was refused, and asked again should see the
+  // second answer, not the first.
+  mine.sort((a, b) => Date.parse(b.askedAt || 0) - Date.parse(a.askedAt || 0));
+  return mine[0].answer === "opened" ? "approved" : "declined";
+}
+
+/** Promise wrapper over the callback-style runtime message, with the same 12s
+ *  guard the ask uses — a dead worker must not hang this page. */
+function sendToWorker(msg) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    setTimeout(() => done(null), 12000);
+    try { chrome.runtime.sendMessage(msg, (res) => done(res)); }
+    catch { done(null); }
+  });
+}
+
 /** @returns {"approved"|"declined"|null} */
 function answerIn(snapshot, askedAtMs) {
   if (!snapshot) return null;
@@ -198,6 +244,29 @@ function showAsking() {
   setStatus("Sending…", "info");
 }
 
+/**
+ * How long this page may keep claiming a parent has not answered.
+ *
+ * A "Not now" writes a temporary BLOCK grant that expires after
+ * ONCE_GRANT_TTL_MS — five minutes (backend/src/domain/services.ts) — and
+ * `answerIn` below can only see a rule while it is LIVE, because the backend
+ * drops expired temporary rules from the snapshot before it signs one. So a
+ * child who was told no saw "declined" for five minutes at most and then this
+ * page silently went back to "Waiting on a parent" — for up to the seven days
+ * the ask is remembered.
+ *
+ * That is the worst thing this screen can do. A child who was refused is left
+ * believing nobody has looked at all, which is precisely the state the whole
+ * design is built to avoid.
+ *
+ * The real fix is for the device to be told the DECISION rather than infer it
+ * from a rule that happens to still exist — see docs/UX_PLAN.md, "the device is
+ * never told the decision". Until then this page stops asserting what it cannot
+ * know. Ten minutes: comfortably past the five-minute grant, short enough that
+ * a child is not lied to for an afternoon.
+ */
+const WAITING_CLAIM_MS = 10 * 60 * 1000;
+
 function showAsked(atIso) {
   mode = "asked";
   askedAtIso = atIso;
@@ -208,8 +277,29 @@ function showAsked(atIso) {
   openBtn.classList.add("hide");
   $("askBox").classList.add("hide");
   $("askedNote").classList.remove("hide");
-  $("askedNote").textContent = `You asked ${ago(atIso)}. Nothing else to do — you can leave this page open or come back to it.`;
-  setStatus("✓ Sent. Waiting on a parent.", "wait");
+  renderAskedNote();
+}
+
+/** The asked state's two sentences, which change once we stop being able to
+ *  claim a parent has not answered. Called on a timer as well as on entry. */
+function renderAskedNote() {
+  if (mode !== "asked" || !askedAtIso) return;
+  const stale = Date.now() - askedAtMs > WAITING_CLAIM_MS;
+  if (stale) {
+    // True on every branch: approved (the rule is there and reloading proves
+    // it), refused (the grant has expired and left no trace here), or genuinely
+    // not looked at yet. Trying the page again puts the question to the filter,
+    // which is the only thing whose answer is authoritative.
+    $("askedNote").textContent =
+      `You asked ${ago(askedAtIso)}. If a parent has answered, opening the page again will show it.`;
+    setStatus("Sent. No answer here yet.", "wait");
+    btn.removeAttribute("aria-disabled");
+    btn.textContent = "Ask again";
+  } else {
+    $("askedNote").textContent =
+      `You asked ${ago(askedAtIso)}. Nothing else to do — you can leave this page open or come back to it.`;
+    setStatus("✓ Sent. Waiting on a parent.", "wait");
+  }
 }
 
 function showApproved() {
@@ -294,9 +384,22 @@ btn.addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 async function refreshFromSnapshot() {
   if (mode === "approved" || mode === "declined") return;
-  const answer = answerIn(await readSnapshot(), askedAtMs || Date.now());
-  if (answer === "approved") showApproved();
-  else if (answer === "declined" && askedAtMs) showDeclined();
+
+  // The snapshot first: it is already cached, so an approval paints without a
+  // round trip. It can only ever say "approved" reliably — a refusal's grant
+  // expires after five minutes and is then dropped, which is the whole reason
+  // the server is asked below.
+  const local = answerIn(await readSnapshot(), askedAtMs || Date.now());
+  if (local === "approved") { showApproved(); return; }
+
+  // Then the decision itself, which does not expire.
+  const remote = await serverAnswer();
+  if (remote === "approved") { showApproved(); return; }
+  if (remote === "declined") { showDeclined(); return; }
+
+  // Neither knows. Fall back to the local inference for the window where it is
+  // still valid, so an offline device is not worse off than before.
+  if (local === "declined" && askedAtMs) showDeclined();
 }
 
 (async function boot() {
@@ -313,10 +416,7 @@ async function refreshFromSnapshot() {
 
   // Belt and braces, and it keeps the "asked N min ago" line honest.
   setInterval(() => {
-    if (mode === "asked" && askedAtIso) {
-      $("askedNote").textContent =
-        `You asked ${ago(askedAtIso)}. Nothing else to do — you can leave this page open or come back to it.`;
-    }
+    renderAskedNote();
     refreshFromSnapshot();
   }, 20000);
 })();

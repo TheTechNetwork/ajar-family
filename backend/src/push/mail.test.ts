@@ -101,7 +101,7 @@ test("an ask does NOT go by email — the medium has to match the message", asyn
   // as no notification, only noisier.
   //
   // It also decouples the core loop from mail entirely. An unverified sending
-  // domain made a child's "Ask to unlock" return 500; a path that never touches
+  // domain made a child's "Ask to open it" return 500; a path that never touches
   // mail cannot fail that way at all.
   assert.equal(mail.sent.length, 0, "an ask must not be emailed");
 

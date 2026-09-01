@@ -1,4 +1,5 @@
 import Foundation
+import os
 import FamilyControls
 import NetworkExtension
 import ManagedSettings
@@ -57,12 +58,19 @@ final class FilterController: ObservableObject {
 
     /// Request FamilyControls `.child` authorization. On an unsupervised device
     /// this unlocks the content filter (TN3134); a parent must approve on-device.
-    func requestChildAuthorization() async {
+    /// Returns whether authorization was actually granted, so a caller does not
+    /// charge on into `enableFilter()` after a refusal — which failed a second
+    /// time for an unrelated-looking reason and overwrote the first message with
+    /// the less useful one.
+    @discardableResult
+    func requestChildAuthorization() async -> Bool {
         do {
             try await AuthorizationCenter.shared.requestAuthorization(for: .child)
             authorizationStatus = AuthorizationCenter.shared.authorizationStatus
+            return authorizationStatus == .approved
         } catch {
-            lastError = "Authorization failed: \(error.localizedDescription)"
+            fail("This device would not let Ajar turn on. Ask a parent to try again.", error)
+            return false
         }
     }
 
@@ -76,13 +84,16 @@ final class FilterController: ObservableObject {
                 cfg.filterBrowsers = true   // WebKit flow URLs (full URL) — the point
                 cfg.filterSockets = true
                 mgr.providerConfiguration = cfg
-                mgr.localizedDescription = "ParentFilter PoC"
+                // What the CHILD sees in Settings next to the filter. It said
+                // "ParentFilter PoC" — the pre-rename name, and the word PoC on
+                // a shipped device.
+                mgr.localizedDescription = "Ajar"
             }
             mgr.isEnabled = true
             try await mgr.saveToPreferences()
             filterEnabled = mgr.isEnabled
         } catch {
-            lastError = "Enable filter failed: \(error.localizedDescription)"
+            fail("Ajar could not start filtering. Try turning it on again.", error)
         }
     }
 
@@ -179,19 +190,100 @@ final class FilterController: ObservableObject {
     /// asked for rather than silently posting.
     @Published var lastRequest: String?
 
-    /// What the child is shown after tapping "Ask to unlock" on the block page.
+    /// What the child is shown after tapping "Ask to open it" on the block page.
     /// A string status could not drive a screen; this can.
     enum RequestState: Equatable {
         case idle
         case sending
         case waiting(since: Date)
         case answered
+        /// The parent said yes. Distinct from `.answered`, which only ever meant
+        /// "the policy changed" — the long poll wakes on any version bump, and a
+        /// refusal bumps it too, so the screen could not tell a child which had
+        /// happened. `.answered` is now the fallback for when the server cannot
+        /// be reached, not the only thing this screen can say.
+        case opened
+        /// The parent said not this time. An answer, never a fault.
+        case closed
         case failed(String)
     }
     @Published var requestState: RequestState = .idle
     /// A human label for the thing being asked about — never the raw URL, which
     /// reads as a system fault rather than a request (UX_PRINCIPLES §4).
     @Published var requestTarget: String = ""
+    private static let uiLog = Logger(subsystem: "family.ajar.filter", category: "ui")
+
+    /// Show a human sentence, log the machine detail.
+    ///
+    /// `lastError` and `backendStatus` are rendered by the PRODUCT screens, not
+    /// only by the debug harness, and they carried raw diagnostics into a
+    /// shipped build: "Enroll failed: The operation couldn\u{2019}t be completed.
+    /// (AjarFilter.BackendError error 3.)" on the setup screen a child is
+    /// looking at, and "Enrolled as dev_a1b2 (child chd_c3d4)" on success. That
+    /// is what makes an app read as an unfinished internal tool. The detail is
+    /// still wanted — it goes to the unified log, which is where someone
+    /// debugging is actually looking.
+    private func fail(_ message: String, _ underlying: Error? = nil) {
+        if let underlying { Self.uiLog.error("\(message, privacy: .public): \(String(describing: underlying), privacy: .public)") }
+        else { Self.uiLog.error("\(message, privacy: .public)") }
+        lastError = message
+    }
+
+    /// The URL that label stands for, so the app can OFFER TO OPEN IT.
+    ///
+    /// It used to be computed, used for the label, and dropped. The child was
+    /// then told "try example.com again" by a screen with no way to get there:
+    /// the page is in Safari, the child is in this app, and nothing here could
+    /// take them back. Shown to nobody — it is a destination, not copy.
+    @Published var requestURL: URL?
+
+    /// The `ajar://request?…` link that started the ask in flight, so a failure
+    /// can be retried in place. Without it `.failed` offered "Done" and nothing
+    /// else — while drawing a refresh icon that promised a retry which did not
+    /// exist — and the only way on was back to Safari to start again. Both
+    /// extension block pages always leave a retry; UX_PRINCIPLES §2 names dead
+    /// ends by name.
+    @Published private(set) var lastIncoming: URL?
+
+    /// The long poll ran out of rounds without seeing a policy change.
+    ///
+    /// Not the same as "refused", and the screen must not say it is. It means
+    /// only that this device has learned nothing — so the copy stops claiming a
+    /// parent has not answered, and offers the one check that IS authoritative:
+    /// open the page and let the filter decide.
+    @Published private(set) var waitedWithoutAnswer = false
+
+    /// Roughly ten minutes at the backend's 25s long-poll timeout. Long enough
+    /// to cover an attentive parent, short enough that a child is not told a
+    /// story for an afternoon.
+    static let waitRounds = 24
+
+    /// Turn a policy change into what the parent actually decided.
+    ///
+    /// Falls back to `.answered` — the old, vaguer state — when the server
+    /// cannot be reached or has nothing on file. That copy is written to be true
+    /// without knowing the answer, so degrading to it is safe; claiming a yes we
+    /// could not confirm would not be.
+    private func decision(targetType: String, targetValue: String) async -> RequestState {
+        do {
+            guard let a = try await backend.answer(targetType: targetType, targetValue: targetValue) else {
+                return .answered
+            }
+            return a.answer == "opened" ? .opened : .closed
+        } catch {
+            // Deliberately not surfaced as an error: the ask itself succeeded and
+            // something DID change. Logged, then the vaguer honest state.
+            Self.uiLog.debug("answer lookup failed: \(error.localizedDescription, privacy: .public)")
+            return .answered
+        }
+    }
+
+    /// Send the same ask again. No-op when there is nothing to resend, so the
+    /// button can be bound without a second nil check at the call site.
+    func retryLastRequest() async {
+        guard let url = lastIncoming else { return }
+        await handleIncoming(url: url)
+    }
 
     var baseURLString: String { BackendClient.baseURL?.absoluteString ?? "" }
     var policyVersion: Int? { store.current()?.version }
@@ -205,7 +297,17 @@ final class FilterController: ObservableObject {
     /// Redeem a parent-issued enrollment code. On success the device holds a
     /// token AND the backend's signing key, which is what lets it move off the
     /// DEBUG unsigned path onto verified snapshots.
+    /// True while a redeem is in flight. The setup code is SINGLE USE, so a
+    /// second tap on a slow network spends it: the first request succeeds, the
+    /// second is refused, and the child is left looking at an error for a device
+    /// that actually enrolled. The button reads this rather than relying on the
+    /// child not tapping twice.
+    @Published var enrolling = false
+
     func enroll(code: String, displayName: String) async {
+        if enrolling { return }
+        enrolling = true
+        defer { enrolling = false }
         do {
             // Same normalisation both extension options pages already do
             // (`.toUpperCase().replace(/[^A-Z0-9]/g, "")`): the server matches the
@@ -214,11 +316,14 @@ final class FilterController: ObservableObject {
             let normalized = code.uppercased().filter { $0.isLetter || $0.isNumber }
             let device = try await backend.enroll(code: normalized, displayName: displayName)
             isEnrolled = true
-            backendStatus = "Enrolled as \(device.id) (child \(device.childId))."
+            // Not the ids. A child reads this screen, and "dev_a1b2 (child
+            // chd_c3d4)" tells them nothing and looks like a fault.
+            _ = device
+            backendStatus = "This device is set up."
             await syncPolicy()
         } catch {
             backendStatus = nil
-            lastError = "Enroll failed: \(error.localizedDescription)"
+            fail("That setup code did not work. Check it with a parent — codes are used once and they expire.", error)
         }
     }
 
@@ -234,7 +339,7 @@ final class FilterController: ObservableObject {
                 : "Already up to date (v\(store.current()?.version ?? -1))."
             reloadExtensionRules()
         } catch {
-            lastError = "Policy sync failed: \(error.localizedDescription)"
+            fail("Could not reach Ajar just now. It keeps using the rules it already has.", error)
         }
     }
 
@@ -269,11 +374,24 @@ final class FilterController: ObservableObject {
     /// item, not two.
     func handleIncoming(url: URL) async {
         guard url.scheme == "ajar", url.host == "request" else { return }
-        guard let blocked = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "u" })?.value, !blocked.isEmpty else {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        guard let blocked = items?.first(where: { $0.name == "u" })?.value, !blocked.isEmpty else {
             lastError = "That link carried no address to request."
             return
         }
+        // The child's own words, typed on the block page. Both extension block
+        // pages have collected this since they were written and the deep link
+        // did not carry it, so every iOS ask reached the parent contextless and
+        // the quote block on both parent surfaces was dead weight on the
+        // flagship platform. Trimmed and bounded here as well as on the page:
+        // the link is editable by whoever holds the device.
+        let note = (items?.first(where: { $0.name == "note" })?.value ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let reason = note.isEmpty ? nil : String(note.prefix(280))
+        // Remembered so `.failed` can offer a retry that does not send the child
+        // back to Safari to start the whole ask over.
+        lastIncoming = url
+        waitedWithoutAnswer = false
 
         let yt = YouTube.normalize(blocked)
         let targetType: String, targetValue: String
@@ -293,9 +411,11 @@ final class FilterController: ObservableObject {
         // one would be worse than naming the site honestly.
         let host = URL(string: blocked)?.host?.replacingOccurrences(of: "www.", with: "")
         requestTarget = yt.videoId != nil ? "a video on YouTube" : (host ?? "this page")
+        requestURL = URL(string: blocked)
         requestState = .sending
         do {
-            try await backend.createRequest(targetType: targetType, targetValue: targetValue, url: blocked)
+            try await backend.createRequest(targetType: targetType, targetValue: targetValue,
+                                            url: blocked, reason: reason)
             backendStatus = "Request sent — waiting for a parent."
             requestState = .waiting(since: Date())
             // Park on the long poll so an approval applies without the child
@@ -311,12 +431,33 @@ final class FilterController: ObservableObject {
             // unconditionally, so a request no parent ever saw showed the child a
             // green tick and "try it again" after 25 seconds — the one lie this
             // screen must not tell. Nothing happened, so stay waiting.
-            if await waitForPolicyChange() {
-                requestState = .answered
+            // Keep parking, rather than asking ONCE. A single call meant that a
+            // timeout — which is the normal ending, not a failure — left the
+            // child on "Waiting on a parent" with nothing polling ever again:
+            // an answer given five minutes later was never noticed at all, and
+            // the screen went on claiming a parent had not looked.
+            //
+            // Bounded rather than endless: a filter app holding a long poll open
+            // forever costs battery for a screen nobody is watching. When the
+            // rounds run out the copy stops asserting what it cannot know.
+            var rounds = 0
+            while rounds < Self.waitRounds {
+                if await waitForPolicyChange() {
+                    // Which way. The bump alone does not say — a rule for a
+                    // sibling or a category refresh moves the version too.
+                    requestState = await decision(targetType: targetType, targetValue: targetValue)
+                    return
+                }
+                rounds += 1
+                // A wait that FAILED (rather than timed out cleanly) would spin
+                // this loop at network speed. `lastError` is only set on the
+                // throwing path, so it is the signal to stop.
+                if lastError != nil { break }
             }
+            waitedWithoutAnswer = true
         } catch {
-            lastError = "Request failed: \(error.localizedDescription)"
-            requestState = .failed(error.localizedDescription)
+            fail("That request did not send. Try again in a moment.", error)
+            requestState = .failed("That request did not send. Try again in a moment.")
         }
     }
 

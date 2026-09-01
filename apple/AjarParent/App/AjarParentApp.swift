@@ -34,6 +34,19 @@ final class ParentModel: ObservableObject {
     /// Signed in, and the account has no family at all yet.
     var hasNoFamily: Bool { signedIn && families.isEmpty && loadedFamilies }
 
+    /// Set between the password and the passkey. Non-nil means sign-in is
+    /// half done and the screen must say so.
+    @Published var pendingPasskey: MFAChallenge?
+
+    /// Whether the long poll is currently connected.
+    ///
+    /// The loop below used to swallow every failure with no indicator at all,
+    /// so the empty state kept promising *"A request lands here the moment one
+    /// is made"* while disconnected — a promise the app could not keep and did
+    /// not know it was breaking. The web console has always shown this
+    /// (`app.js` `setLive()`, rendered as word AND colour, never colour alone).
+    @Published var live = true
+
     private var loadedFamilies = false
     private var pollTask: Task<Void, Never>?
 
@@ -48,14 +61,63 @@ final class ParentModel: ObservableObject {
         if signedIn { await loadFamilies() }
     }
 
+    /// Step one. A password is not always a session: an account with a passkey
+    /// enrolled gets back a challenge, and this is where the app used to render
+    /// a `DecodingError` and strand the parent.
     func signIn(email: String, password: String) async {
         busy = true; defer { busy = false }
         do {
-            _ = try await ParentAPI.shared.signIn(email: email, password: password)
-            signedIn = true
-            error = nil
-            await loadFamilies()
+            switch try await ParentAPI.shared.signIn(email: email, password: password) {
+            case .session:
+                await adoptSession()
+            case .passkeyNeeded(let challenge):
+                guard challenge.canFinishHere else {
+                    self.error = "This account needs a security key Ajar can't use on this device yet. Sign in at ajar.family."
+                    return
+                }
+                error = nil
+                // Straight into the platform sheet rather than parking on a
+                // "now use your passkey" screen: the parent has just typed a
+                // password and the second step is one Face ID away. `pending`
+                // survives so a cancel lands back on a usable button.
+                pendingPasskey = challenge
+                await finishPasskeySignIn()
+            }
         } catch { self.error = error.localizedDescription }
+    }
+
+    /// Step two. Kept separate so "Try your passkey again" after a cancel does
+    /// not re-send the password.
+    func finishPasskeySignIn() async {
+        guard let challenge = pendingPasskey else { return }
+        busy = true; defer { busy = false }
+        do {
+            let options = try await ParentAPI.shared.passkeyLoginOptions(mfaToken: challenge.mfaToken)
+            let credential = try await Passkeys.signIn(optionsJSON: options)
+            _ = try await ParentAPI.shared.finishPasskeyLogin(mfaToken: challenge.mfaToken, credential: credential)
+            pendingPasskey = nil
+            await adoptSession()
+        } catch Passkeys.Failure.cancelled {
+            // Not an error to shout about — the parent chose it. The retry
+            // button stays on screen because `pendingPasskey` is untouched.
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// Abandon a half-finished sign-in. The `mfa` token expires on its own, but
+    /// leaving the passkey step on screen with no way out is a dead end.
+    func cancelPasskeySignIn() {
+        pendingPasskey = nil
+        error = nil
+    }
+
+    private func adoptSession() async {
+        signedIn = true
+        pendingPasskey = nil
+        error = nil
+        await loadFamilies()
     }
 
     func signOut() async {
@@ -63,7 +125,7 @@ final class ParentModel: ObservableObject {
         await ParentAPI.shared.signOut()
         UserDefaults.standard.removeObject(forKey: Self.lastFamilyKey)
         signedIn = false; pending = []; children = []; familyId = nil
-        families = []; loadedFamilies = false
+        families = []; loadedFamilies = false; pendingPasskey = nil; live = true
     }
 
     /// Ask the server which families this parent belongs to, then pick one
@@ -140,9 +202,17 @@ final class ParentModel: ObservableObject {
                     let fresh = try await ParentAPI.shared.waitForRequests(
                         familyId: familyId, knownCount: known)
                     guard !Task.isCancelled else { return }
-                    await MainActor.run { self?.pending = fresh.filter { $0.status == "PENDING" } }
+                    await MainActor.run {
+                        self?.pending = fresh.filter { $0.status == "PENDING" }
+                        self?.live = true
+                    }
                     backoff = 1
                 } catch {
+                    // Cancellation is this task being torn down (sign out,
+                    // family switch), not a connection problem — flagging it
+                    // would leave "reconnecting…" on a screen nobody is on.
+                    if Task.isCancelled { return }
+                    await MainActor.run { self?.live = false }
                     try? await Task.sleep(for: .seconds(backoff))
                     backoff = min(backoff * 2, 30)
                 }

@@ -153,7 +153,7 @@ test("the page a child actually gets has the ask button on it", async () => {
   assert.equal(res.status, 200);
   const page = String(res.body);
 
-  assert.match(page, /You can ask to unlock this page/);
+  assert.match(page, /You can ask to open this page/);
   assert.match(page, /ajar:\/\/request\?u=/, "the deep link the button opens");
   assert.doesNotMatch(page, /This page is closed/);
   // The site name, not a uuid and not the raw string with its scheme.
@@ -186,10 +186,117 @@ test("end to end: a multi-param page reaches the button with its query whole", a
   const res = await get(r, "/blocked?u=example.com/article?id=123&page=2");
   const page = String(res.body);
 
-  assert.match(page, /You can ask to unlock this page/);
+  assert.match(page, /You can ask to open this page/);
   // The deep link carries the WHOLE thing; the app turns it into the URL rule.
   const link = /href="(ajar:\/\/request\?u=[^"]*)"/.exec(page)?.[1];
   assert.ok(link, "the ask button is a deep link");
   const carried = new URL(link!.replace(/&amp;/g, "&")).searchParams.get("u");
   assert.equal(carried, "https://example.com/article?id=123&page=2");
+});
+
+// --- getting back to the page after a parent says yes ------------------------
+
+test("the page offers a way back to the target without any script", async () => {
+  // The load-bearing path. A child whose parent has just approved needs an
+  // action that works with no JS, no storage and no policy lookup: navigating to
+  // the target puts the question to the filter, which is the only thing whose
+  // answer is authoritative.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, "/blocked?u=www.youtube.com/watch?v=abc&t=30")).body);
+
+  const again = /<a class="btn again" href="([^"]*)"/.exec(page)?.[1];
+  assert.equal(again?.replace(/&amp;/g, "&"), "https://www.youtube.com/watch?v=abc&t=30");
+});
+
+test("the auto-retry fires only on a RELOAD, which is what stops it looping", async () => {
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, "/blocked?u=www.youtube.com/")).body);
+
+  // The filter's own render is a "navigate", and so is the one that comes back
+  // from a refused retry — so the retry can never chain into a second.
+  assert.match(page, /reloaded = nav\.type === "reload"/);
+  assert.match(page, /if \(reloaded\) location\.replace\(target\)/);
+  assert.doesNotMatch(page, /setInterval|setTimeout/, "no polling, no timers");
+});
+
+test("the closed page carries no script at all", async () => {
+  // Nothing to retry, so nothing to run.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, "/blocked")).body);
+  assert.doesNotMatch(page, /<script/);
+});
+
+test("the target is escaped for a script context, not just for HTML", async () => {
+  // JSON.stringify alone would let a `</script>` in the value close the element.
+  // A parsed URL cannot carry one — `<` is percent-encoded and a `<` in the host
+  // makes parsing throw — but the escaping does not rely on that reasoning.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, `/blocked?u=${encodeURIComponent("example.com/</script><img src=x>")}`)).body);
+
+  assert.doesNotMatch(page, /<\/script><img/, "the value did not break out of the script");
+  assert.match(page, /var target = "[^"]*"/, "and it is still a plain string literal");
+});
+
+test("a child can write a note, and it reaches the app without a script", async () => {
+  // The Windows and macOS block pages have collected a reason since they were
+  // written; this one did not, so every iOS ask reached the parent contextless
+  // and the quote block on both parent surfaces was dead weight on the flagship
+  // platform.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, "/blocked?u=www.youtube.com/")).body);
+
+  // A real label, not a placeholder standing in for one (SC 3.3.2).
+  assert.match(page, /<label for="note"/, "the note field has a real label");
+  assert.match(page, /id="note"/);
+  // Bounded on the page as well as in the app: this is reflected input on an
+  // unauthenticated screen and the deep link is editable by whoever holds the
+  // device.
+  assert.match(page, /maxlength="280"/);
+
+  // The button's href is COMPLETE before any script runs. If the inline script
+  // never executes, the ask still works — it just carries no note, which is
+  // exactly the behaviour that shipped before the field existed.
+  assert.match(page, /id="ask" *>|<a class="btn" href="ajar:\/\/request\?u=[^"]+" id="ask"/,
+    "the ask link is server-rendered with a working href");
+  assert.match(page, /ajar:\/\/request\?u=/);
+});
+
+test("the closed page has no note field to fill in", async () => {
+  // Nothing to ask about means nothing to annotate. A field here would invite a
+  // child to type an explanation into a form that cannot send it.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, "/blocked")).body);
+
+  assert.match(page, /This page is closed/);
+  assert.doesNotMatch(page, /id="note"/);
+});
+
+test("the two accessibility claims the docs record as Done are actually shipped", async () => {
+  // UX_PRINCIPLES §8 records both of these as Done and cites "the block screens"
+  // for the second. Both extension copies honour them; this page — the only one
+  // on the flagship platform — honoured neither, so the doc was describing two
+  // thirds of the product. Asserted here so the claim and the code cannot drift
+  // apart again silently.
+  const app = await App.create({ config: { authSecret: "test" } });
+  const r = buildRouter(app);
+  const page = String((await get(r, "/blocked?u=www.youtube.com/")).body);
+
+  // 44px targets, not the WCAG 2.5.8 floor of 24, on a control a child taps.
+  assert.match(page, /summary\s*\{[^}]*min-height:\s*44px/,
+    "the Details disclosure is a 44px target");
+  assert.doesNotMatch(page, /min-height:\s*24px/);
+
+  // `safe center`: at 200% zoom a plain `center` puts the heading and the ask
+  // button off the top of the flex container with no way to scroll back.
+  assert.match(page, /align-items:\s*safe center/);
+
+  // A focus ring at all. The page defined none, so every control fell back to
+  // the UA default in a palette designed around a two-tone ring.
+  assert.match(page, /:focus-visible\s*\{/);
 });

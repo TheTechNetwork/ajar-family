@@ -152,6 +152,7 @@ function setRegisterMode(on, quiet) {
   $("nameField").classList.toggle("hide", !on);
   $("btnLogin").textContent = on ? "Create account" : "Log in";
   $("btnMode").textContent = on ? "I already have an account" : "Create an account";
+  $("btnForgot").classList.toggle("hide", on);   // nothing to recover yet
   $("authH").textContent = on ? "Set up your account" : "Welcome back";
   // A password manager should offer a NEW password when registering, not the old one.
   $("password").setAttribute("autocomplete", on ? "new-password" : "current-password");
@@ -224,10 +225,7 @@ let pendingMfaToken = null;
 
 function beginPasskeyStep(token) {
   pendingMfaToken = token;
-  $("authForm").classList.add("hide");
-  $("passkeyStep").classList.remove("hide");
-  $("authH").textContent = "One more step";
-  $("authErr").textContent = "";
+  showAuthPanel("passkey");
   announce("Confirm it's you with your passkey.");
   $("btnPasskey").focus();
   // Some browsers will fill this in without a tap. Offering it immediately is
@@ -238,9 +236,7 @@ function beginPasskeyStep(token) {
 
 function endPasskeyStep() {
   pendingMfaToken = null;
-  $("passkeyStep").classList.add("hide");
-  $("authForm").classList.remove("hide");
-  $("authH").textContent = "Welcome back";
+  showAuthPanel("signin");
   $("password").value = "";
 }
 
@@ -260,10 +256,13 @@ async function usePasskey() {
     // challenge is gone either way, so the next attempt fetches a fresh one.
     // Only a token that is genuinely dead sends them back to the password.
     const msg = e && e.message ? e.message : "That didn't work. Try again.";
+    const dead = isAuthError(e);
+    // Swap the panel FIRST: showAuthPanel clears the error line, so setting the
+    // message before this would wipe the one sentence that says what to do.
+    if (dead) endPasskeyStep();
     $("authErr").classList.remove("note");
-    $("authErr").textContent = isAuthError(e) ? "That sign-in timed out. Start again." : msg;
+    $("authErr").textContent = dead ? "That sign-in timed out. Start again." : msg;
     announceAlert($("authErr").textContent);
-    if (isAuthError(e)) endPasskeyStep();
   } finally {
     btn.removeAttribute("aria-disabled");
   }
@@ -297,6 +296,122 @@ async function rawApiOrThrow(path, opts = {}) {
   if (!res.ok) throw new Error(data.error || String(res.status));
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// password recovery
+//
+// /v1/auth/forgot and /v1/auth/reset have existed since the reset work landed
+// and nothing anywhere linked to them, so a forgotten password ended the
+// account and every device enrolled under it. It was worse than a missing link:
+// the signup flow told a parent whose confirmation failed to "ask for a new
+// link from the sign-in page", naming a control that did not exist. And because
+// login authenticates the password BEFORE it checks passkeys, a forgotten
+// password locked out accounts that had a passkey too.
+// ---------------------------------------------------------------------------
+
+/** Swap which of the three auth panels is on screen. One place, so they cannot
+ *  both be visible — which is what a per-button toggle drifts into. */
+function showAuthPanel(name) {
+  $("authForm").classList.toggle("hide", name !== "signin");
+  $("forgotStep").classList.toggle("hide", name !== "forgot");
+  $("resetStep").classList.toggle("hide", name !== "reset");
+  // The passkey step is a panel in this card too, and leaving it out here is how
+  // two of them end up on screen at once.
+  $("passkeyStep").classList.toggle("hide", name !== "passkey");
+  $("authErr").textContent = "";
+  $("authErr").classList.remove("note");
+  $("authH").textContent =
+    name === "forgot" ? "Reset your password"
+    : name === "reset" ? "Choose a new password"
+    : name === "passkey" ? "One more step"
+    : state.registerMode ? "Set up your account" : "Welcome back";
+}
+
+$("btnForgot").onclick = () => {
+  // Carry the address across. A locked-out parent has usually already typed it,
+  // and asking again is the step they are least patient for.
+  $("forgotEmail").value = $("email").value.trim();
+  showAuthPanel("forgot");
+  announce("Reset your password.");
+  $("forgotEmail").focus();
+};
+$("btnForgotCancel").onclick = () => { showAuthPanel("signin"); $("email").focus(); };
+$("btnResetCancel").onclick = () => { showAuthPanel("signin"); $("email").focus(); };
+
+$("btnForgotSend").onclick = async () => {
+  const email = $("forgotEmail").value.trim();
+  if (!email) return failAuth("Type the email you signed up with.", "forgotEmail");
+  const btn = $("btnForgotSend");
+  if (btn.dataset.busy) return;
+  btn.dataset.busy = "1";
+  btn.setAttribute("aria-disabled", "true");   // never `disabled` on a focused button
+  const was = btn.textContent;
+  btn.textContent = "Sending…";
+  try {
+    await api("/v1/auth/forgot", { method: "POST", auth: false, body: { email } });
+    // The server answers the same 202 whether or not the address is known — a
+    // different answer would be a working "who has an account here?" test — so
+    // this cannot say more than that something is on its way, and must not
+    // imply the address was recognised.
+    const msg = `If we can reset that account, there is a link on its way to ${email}. `
+      + "Open it to choose a new password.";
+    $("authErr").classList.add("note");
+    $("authErr").textContent = msg;
+    announce(msg);
+  } catch (e) {
+    failAuth(friendly(e), "forgotEmail");
+  } finally {
+    delete btn.dataset.busy;
+    btn.removeAttribute("aria-disabled");
+    btn.textContent = was;
+  }
+};
+
+/** The token from the emailed link. Held in a variable, never stored: it is a
+ *  credential, it is single use, and it is already in the address bar. */
+let pendingResetToken = null;
+
+function beginReset(token) {
+  pendingResetToken = token;
+  showAuthPanel("reset");
+  // Take the token out of the address bar so it is not left in history, in a
+  // shared-computer back button, or in the Referer of the next request.
+  history.replaceState(null, "", location.pathname);
+  announce("Choose a new password.");
+  $("resetPassword").focus();
+}
+
+$("btnReset").onclick = async () => {
+  const password = $("resetPassword").value;
+  if (password.length < 8) return failAuth("Passwords need at least 8 characters.", "resetPassword");
+  const btn = $("btnReset");
+  if (btn.dataset.busy) return;
+  btn.dataset.busy = "1";
+  btn.setAttribute("aria-disabled", "true");
+  const was = btn.textContent;
+  btn.textContent = "Setting…";
+  try {
+    const out = await api("/v1/auth/reset", { method: "POST", auth: false,
+      body: { token: pendingResetToken, newPassword: password } });
+    // A reset mints a session, so there is no second sign-in to sit through.
+    pendingResetToken = null;
+    $("resetPassword").value = "";
+    setTokens(out);
+    showAuthPanel("signin");
+    await afterLogin();
+  } catch (e) {
+    // A spent or expired token is the common case and it is not the parent's
+    // fault, so it names the next step rather than reporting a code.
+    const msg = isAuthError(e) || /token|code|expire/i.test(String(e && e.message))
+      ? "That link has already been used or has run out. Ask for a new one."
+      : friendly(e);
+    failAuth(msg, "resetPassword");
+  } finally {
+    delete btn.dataset.busy;
+    btn.removeAttribute("aria-disabled");
+    btn.textContent = was;
+  }
+};
 
 function failAuth(msg, focusId) {
   $("authErr").classList.remove("note");
@@ -360,6 +475,14 @@ function renderPasskeys(keys) {
 
 async function removePasskey(id, label) {
   $("pkErr").textContent = "";
+  // These two confirm()s stay, deliberately, and the block one above did not.
+  // The difference is whether the product can offer the action back: a standing
+  // block has a rule id and a working Undo, so a modal was asking permission for
+  // something reversible one tap later. Removing a passkey is not reversible —
+  // the credential is gone from the server and has to be enrolled again from the
+  // device that holds it — and neither is losing the standing rule below without
+  // remembering exactly what it said. An unthemeable dialog is a real cost; it
+  // is the smaller one when the alternative is a silent irreversible action.
   if (!confirm(`Remove the passkey "${label}"? You'll need another way to sign in.`)) return;
   try {
     await api(`/v1/me/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -553,7 +676,7 @@ async function refreshChildren() {
         <span class="grow">${escapeHtml(k.displayName)}</span>
         <button type="button" data-cid="${escapeAttr(k.id)}">Set up a device<span class="sr-only"> for ${escapeHtml(k.displayName)}</span></button>
       </li>`).join("")
-    : `<li class="muted">No kids added yet.</li>`;
+    : `<li class="empty">No kids yet. Add a first name below — that is all it takes.</li>`;
   box.querySelectorAll("button").forEach((b) => (b.onclick = () => enrollDevice(b.dataset.cid, b)));
 }
 
@@ -573,12 +696,32 @@ $("btnAddChild").onclick = async () => {
   } catch (e) { const m = friendly(e); toast(m); announceAlert(m); }
 };
 
+/**
+ * Where the code gets typed, per platform. The console used to print Windows
+ * extension instructions whatever the parent was holding, because `platform`
+ * was hardcoded — so the one line telling them what to do next was wrong three
+ * times out of four.
+ *
+ * Same alphabet note on every branch: the code is drawn from an alphabet with
+ * no I, O, L, 0 or 1, and a parent transcribing it onto another machine needs
+ * to know that before they squint at it, not after.
+ */
+const ENROLL_STEPS = {
+  IOS: "Open Ajar on the iPhone and type this in on the first screen.",
+  IPADOS: "Open Ajar on the iPad and type this in on the first screen.",
+  MACOS: "Open Ajar on the Mac and type this in on the first screen.",
+  WINDOWS: "On the Windows PC, open the Ajar extension's Setup page and type this in.",
+};
+
 async function enrollDevice(childId, btn) {
   if (btn) { btn.dataset.busy = "1"; btn.setAttribute("aria-disabled", "true"); }
   try {
-    const out = await api(`/v1/families/${state.familyId}/enroll`, { method: "POST", body: { childId, platform: "WINDOWS" } });
+    const platform = $("enrollPlatform").value || "WINDOWS";
+    const out = await api(`/v1/families/${state.familyId}/enroll`, { method: "POST", body: { childId, platform } });
     const expires = new Date(out.expiresAt);
     $("enrollBox").classList.remove("hide");
+    $("enrollHelp").textContent = `${ENROLL_STEPS[platform] || ENROLL_STEPS.WINDOWS} `
+      + "Eight characters, and there is no I, O, L, 0 or 1 in any of them.";
     $("enrollCode").textContent = out.code;
     // Spell it out: VoiceOver reads "K7M2P9QR" as an attempted word otherwise,
     // and the parent has to transcribe it onto another machine.
@@ -610,7 +753,7 @@ const DEFAULT_DURATION_I = 1; // 30 min — the narrowest-useful default (§3)
  * This MUST be derived from the request, not hardcoded: a THIS_VIDEO grant
  * becomes a YOUTUBE_VIDEO rule whose value is matched against a canonical video
  * id, so applying it to a DOMAIN/CATEGORY/URL request produces a rule that can
- * never match — the parent is told "unlocked" and the child stays blocked.
+ * never match — the parent is told "opened" and the child stays blocked.
  *
  * Note CATEGORY: a child blocked by "all social media" is granted THIS site,
  * never the whole category. Say yes to the thing asked for, nothing wider.
@@ -719,6 +862,14 @@ async function startLiveRequests() {
       const out = await api(`/v1/families/${state.familyId}/requests/wait?count=${lastCount}&timeout=25000`);
       backoffMs = 0;
       setLive(true);
+      // The server distinguishes "nothing changed in 25 seconds" from "here is
+      // the new list", and this loop used to throw that away and re-render
+      // regardless. Every 25 seconds, forever: a screen reader re-announced the
+      // same count, any <details> a parent had opened snapped shut, and the
+      // scope <select> reset to its preselect MID-DECISION. The focus-restore
+      // code in renderRequests() is good work that only existed to survive a
+      // re-render that should never have happened.
+      if (out.upToDate) continue;
       renderRequests(out.requests || []);
     } catch (e) {
       if (isAuthError(e)) {
@@ -761,8 +912,17 @@ function renderRequests(reqs) {
   box.removeAttribute("aria-busy");
 
   if (!reqs.length) {
-    const kid = Object.values(state.childName)[0];
-    box.innerHTML = `<li class="empty">All clear. When ${escapeHtml(kid || "someone")} asks for something it lands here — usually within a second.</li>`;
+    // Name every kid, or none. This took `Object.values(...)[0]` — an ARBITRARY
+    // child, whichever the map happened to yield first — so a two-kid family
+    // read "When Jane asks…" and Bob did not exist on the screen his parent
+    // looks at most. Past two names it says "the kids", because a list of five
+    // is not reassurance any more.
+    const names = Object.values(state.childName).filter(Boolean);
+    const who = names.length === 0 ? "someone"
+      : names.length === 1 ? names[0]
+      : names.length === 2 ? `${names[0]} or ${names[1]}`
+      : "the kids";
+    box.innerHTML = `<li class="empty">All clear. When ${escapeHtml(who)} asks for something it lands here — usually within a second.</li>`;
     announce("No asks waiting.");
     return;
   }
@@ -857,12 +1017,16 @@ function wireRequest(r) {
   document.querySelectorAll(`[data-approve="${cssEscape(id)}"]`).forEach((b) =>
     (b.onclick = () => decide(r, "ALLOW", $(`scope-${id}`).value, DURATIONS[+b.dataset.di].d)));
 
+  // No confirm() here any more. The toast this produces already carries Undo —
+  // `producesStandingRule` returns true for BLOCK and the server returns the
+  // rule id — so the modal was asking a parent to confirm something the very
+  // next screen offered to take back. It was also the only place that SAID the
+  // block was reversible, and the only dark-mode-blind element on the page: an
+  // unthemeable browser dialog in a product that has a designed toast + Undo
+  // pattern. The sentence moved into the toast, where it is themed, announced,
+  // and attached to the control that actually reverses it.
   const block = q(`[data-block="${cssEscape(id)}"]`);
-  if (block) block.onclick = () => {
-    const what = hostOf(r) || r.targetValue;
-    if (!confirm(`Keep ${what} closed for good?\n\nYou can take this back any time under "What you've already decided".`)) return;
-    decide(r, "BLOCK", "THIS_DOMAIN", { kind: "ALWAYS" });
-  };
+  if (block) block.onclick = () => decide(r, "BLOCK", "THIS_DOMAIN", { kind: "ALWAYS" });
 }
 
 /** A decision that writes a STANDING rule is the only kind we can take back:
@@ -881,9 +1045,14 @@ async function decide(r, decision, scope, duration) {
 
     const ruleId = out?.decision?.producedRuleId;
     const undoable = producesStandingRule(decision, duration) && ruleId;
+    // Say what was actually written. "Left closed" undersold a standing BLOCK,
+    // which is a rule that outlives the ask; the confirm() this replaced was the
+    // only thing that had ever said so.
     const msg = decision === "ALLOW"
       ? `Sent to ${who}'s device — ${scopeLabel(scope, r.childId)}`
-      : `Left closed — ${who} sees the answer on their screen`;
+      : producesStandingRule(decision, duration)
+        ? `Kept closed for good. Undo here, or any time under "What you've already decided".`
+        : `Left closed — ${who} sees the answer on their screen`;
 
     toast(msg, undoable ? {
       label: "Undo",
@@ -922,7 +1091,7 @@ async function refreshRules() {
   }
   box.removeAttribute("aria-busy");
   if (!rules.length) {
-    box.innerHTML = `<li class="muted">Nothing standing yet — everything is on the family defaults.</li>`;
+    box.innerHTML = `<li class="empty">Nothing standing yet — everything is on the family defaults. A "yes" with a time on it runs out by itself and never lands here.</li>`;
     return;
   }
   rules.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
@@ -994,18 +1163,45 @@ async function completeConfirmation(code) {
 // Only an actual auth rejection clears the refresh token — a single offline
 // fetch used to sign the parent out permanently.
 setRegisterMode(false, true);
-const verifyCode = new URLSearchParams(location.search).get("verify");
+const params = new URLSearchParams(location.search);
+const verifyCode = params.get("verify");
+const resetToken = params.get("token");     // PASSWORD_RESET_URL + ?token=
 if (verifyCode) {
   completeConfirmation(verifyCode);
+} else if (resetToken) {
+  // Before any session is resumed. Someone arriving on a reset link has said
+  // what they came to do, and it outranks whatever stale token is in this
+  // browser — which may well belong to the account they are locked out of.
+  beginReset(resetToken);
+} else if (location.hash === "#forgot") {
+  // The parent app's "Forgot your password?" links straight here.
+  $("btnForgot").click();
 } else if (state.token || state.refresh) {
   $("authCard").classList.add("hide");           // don't show a form about to vanish
+  // Show the frame WITH its skeletons while /v1/me is in flight. They live
+  // inside #requestsCard, which stayed hidden until selectFamily() ran, so on
+  // first load they never painted and <main> was simply empty — the one moment
+  // they exist for.
+  $("requestsCard").classList.remove("hide");
   afterLogin().catch((e) => {
-    if (isAuthError(e)) { clearTokens(); $("authCard").classList.remove("hide"); }
+    if (isAuthError(e)) { clearTokens(); $("requestsCard").classList.add("hide"); $("authCard").classList.remove("hide"); }
     else {
-      $("authCard").classList.remove("hide");
-      const m = friendly(e);
-      $("authErr").textContent = m;
-      announceAlert(m);
+      // NOT the login form. Un-hiding it showed a signed-in parent "Welcome
+      // back / Log in" next to "Can't reach Ajar", which reads as having been
+      // signed out — for what is almost always a train tunnel. Keep the console
+      // frame, say what happened, offer the retry.
+      $("requests").removeAttribute("aria-busy");
+      $("requests").innerHTML = "";
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = `${friendly(e)} `;
+      const retry = document.createElement("button");
+      retry.className = "btn-ghost";
+      retry.textContent = "Try again";
+      retry.onclick = () => location.reload();
+      li.appendChild(retry);
+      $("requests").appendChild(li);
+      announceAlert(friendly(e));
     }
   });
 }

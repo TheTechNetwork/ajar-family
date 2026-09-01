@@ -24,8 +24,14 @@
   .lede { font-size: clamp(1.05rem, 2.4vw, 1.3rem); color: var(--ink-2); max-width: 46ch; margin: 0 0 2rem; }
 
   .cta { display: inline-flex; align-items: center; justify-content: center; min-height: 52px; padding: 0 1.5rem;
-         border-radius: 12px; border: 0; font: inherit; font-weight: 650; text-decoration: none; cursor: pointer; }
-  .cta-primary { background: var(--yes); color: var(--yes-ink); }
+         border-radius: 12px; border: 1px solid transparent; font: inherit; font-weight: 650;
+         text-decoration: none; cursor: pointer; }
+  /* The border is required, not decorative: coral is 2.32:1 on this ground, so a
+     coral button with no edge has no perceivable boundary (SC 1.4.11).
+     tokens.css states the rule for `.btn-yes`; this page re-implemented the
+     button and dropped it. `border: 0` above became a transparent 1px so the two
+     variants stay the same size. */
+  .cta-primary { background: var(--yes); color: var(--yes-ink); border-color: var(--yes-ink); }
   .cta-primary:hover { background: var(--yes-strong); }
   .cta-quiet { background: transparent; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
   .ctas { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
@@ -42,8 +48,13 @@
   .row { display: flex; align-items: baseline; gap: .6rem; padding: .45rem 0; }
   .row .k { font-variant-numeric: tabular-nums; }
   .verdict { font-weight: 650; font-size: .85rem; padding: .1rem .5rem; border-radius: 999px; white-space: nowrap; }
+  /* NOT coral. BRAND.md reserves coral for the yes ACTION — the one button a
+     parent presses — and spending it on comparison-table chips put four of them
+     above the fold, outranking the single coral CTA in the hero and teaching a
+     visitor that coral means "a tick" before they ever meet the button. Teal
+     wash reads as affirmative here without borrowing the action colour. */
   .no { background: var(--surface-2); color: var(--muted); }
-  .yes { background: var(--yes); color: var(--yes-ink); }
+  .yes { background: var(--accent-wash); color: var(--accent-ink); }
 
   ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 0; display: grid; gap: 1.25rem; }
   @media (min-width: 46rem) { ol.steps { grid-template-columns: repeat(3, 1fr); gap: 2rem; } }
@@ -154,9 +165,20 @@
       <thead><tr><th>Device</th><th>How it works</th><th>Status</th></tr></thead>
       <tbody>
         <tr><td>iPhone &amp; iPad</td><td>A content filter, approved by Apple's Family Controls. No VPN.</td><td><span class="tag tag-soon">in testing</span></td></tr>
-        <tr><td>Mac</td><td>A Safari extension plus a system-level filter.</td><td><span class="tag tag-soon">in testing</span></td></tr>
-        <tr><td>Windows</td><td>A browser extension plus a background service the child cannot stop.</td><td><span class="tag tag-soon">in testing</span></td></tr>
-        <tr><td>Your phone</td><td>Asks arrive by email; approve from any browser.</td><td><span class="tag tag-live">working now</span></td></tr>
+        <!-- "plus a system-level filter" described something that is not built.
+             A macOS content filter has to ship as a SYSTEM extension — a
+             different entitlement, container and distribution channel from the
+             iOS app extensions this repo has — so today the Mac is the Safari
+             extension and nothing else. A table headed "Honestly labelled" has
+             to say that. -->
+        <tr><td>Mac</td><td>A Safari extension. Other browsers on a Mac are not covered yet.</td><td><span class="tag tag-soon">in testing</span></td></tr>
+        <!-- "a background service the child cannot stop" was true only for a
+             standard (non-admin) account, which the Windows design makes a hard
+             requirement precisely because an admin child defeats every layer:
+             they can remove the policies, the certificate and the service. The
+             condition is the whole claim, so it belongs in the sentence. -->
+        <tr><td>Windows</td><td>A browser extension plus a background service. A child on a standard (non-administrator) account cannot stop it; an administrator can, so setup checks.</td><td><span class="tag tag-soon">in testing</span></td></tr>
+        <tr><td>Your phone</td><td>Asks appear the moment they are made — in a browser tab or the Ajar app, while you have it open. Alerts when it is closed are the next thing we are building.</td><td><span class="tag tag-soon">in testing</span></td></tr>
       </tbody>
     </table>
   </section>
@@ -166,8 +188,9 @@
     <div class="plain">
       <ul>
         <li><strong>Ajar is in early testing.</strong> You can create an account and set up a family today, but the device apps are still going through Apple and Microsoft review.</li>
-        <li><strong>We record what your child asks to unlock — not everywhere they go.</strong> There is no browsing history in this product, because approving a request does not need one.</li>
+        <li><strong>We record what your child asks to open — not everywhere they go.</strong> There is no browsing history in this product, because approving a request does not need one.</li>
         <li><strong>You'll confirm your email before the account exists.</strong> We send a code and nothing is created until you use it, so a typo means no account rather than a silent one you never hear from.</li>
+        <li><strong>We do not buzz your phone yet.</strong> An ask reaches you in seconds while Ajar is open in a browser tab or on your phone. Lock-screen alerts are the next thing we are building — until they land, an ask waits for you rather than finding you.</li>
         <li><strong>Your child can see that Ajar is there.</strong> It is not hidden and it is not a monitoring tool. The whole design assumes they know, and asks them to ask.</li>
       </ul>
     </div>

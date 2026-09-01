@@ -31,7 +31,26 @@ options:
     macOS: "26.0"
   createIntermediateGroups: true
 
+# Named explicitly rather than left to XcodeGen's defaults. `#if DEBUG` gates
+# more than the developer-tools button here: FlowLog records visited URLs, and
+# FilterDataProvider/FilterControlProvider set
+# `PolicyStore.allowUnsignedDevelopmentSnapshots = true`, which makes the filter
+# accept an UNSIGNED policy snapshot. A Release build that still defined DEBUG
+# would ship all three. The presets get this right today; this makes the
+# guarantee readable in the file rather than inherited from a tool's defaults,
+# and greppable when someone asks "is the shipped build a debug build?".
+configs:
+  Debug: debug
+  Release: release
+
 settings:
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+      GCC_PREPROCESSOR_DEFINITIONS: "DEBUG=1 $(inherited)"
+    Release:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: ""
+      GCC_PREPROCESSOR_DEFINITIONS: "$(inherited)"
   base:
     # Supplied at build time (xcodebuild DEVELOPMENT_TEAM=... or Xcode UI).
     DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)

@@ -94,26 +94,42 @@ function step(id) {
     if (panel) panel.hidden = panelId !== id;
   }
   $("sCheck").hidden = true;
+  const lit = Math.min(n, DOTS);
   for (let i = 1; i <= DOTS; i++) {
     const dot = $(`d${i}`);
-    if (dot) dot.toggleAttribute("data-on", i <= Math.min(n, DOTS));
+    if (dot) dot.toggleAttribute("data-on", i <= lit);
   }
+  // The dots in words. They are aria-hidden — five decorative bars announced one
+  // by one are noise — which left a screen-reader user with no sense of position
+  // at all in a five-step flow, the exact thing the dots exist to give.
+  const status = $("stepStatus");
+  if (status) status.textContent = `Step ${lit} of ${DOTS}`;
   clearError();
   const focusable = $(id)?.querySelector("input, select, button:not([hidden])");
   focusable?.focus();
 }
 
-/** Guard every submit: disable the button so a double tap is not a double POST. */
+/**
+ * Guard every submit: block a double tap without becoming a double POST.
+ *
+ * `aria-disabled` plus a guard, NOT `disabled`. A disabled button loses focus,
+ * and a screen-reader or keyboard user who submits with Return is dropped to the
+ * top of the document mid-flow with no announcement of why — UX_PRINCIPLES §8
+ * requirement 5. Both block pages and the console do it this way; only this
+ * flow, the one every new parent walks through once, regressed.
+ */
 function submitting(form, on, label) {
   const btn = form.querySelector("button.primary");
   if (!btn) return;
   if (on) {
     btn.dataset.label = btn.textContent;
+    btn.dataset.busy = "1";
     btn.textContent = label;
-    btn.disabled = true;
+    btn.setAttribute("aria-disabled", "true");
   } else {
     btn.textContent = btn.dataset.label ?? btn.textContent;
-    btn.disabled = false;
+    delete btn.dataset.busy;
+    btn.removeAttribute("aria-disabled");
   }
 }
 
@@ -196,14 +212,36 @@ function showCheckEmail() {
 }
 
 $("resend").addEventListener("click", async () => {
+  const btn = $("resend");
+  if (btn.dataset.busy) return;
   clearError();
+  // This used to call announce() and NOTHING else, so a sighted parent tapped
+  // it and the page did not change in any way — nothing distinguished "sent"
+  // from "the button is broken", on the screen where they are already anxious
+  // that the email has not arrived. Every other action in this flow gets a busy
+  // label and a visible result; this one is the same shape now.
+  btn.dataset.busy = "1";
+  btn.setAttribute("aria-disabled", "true");
+  const was = btn.textContent;
+  btn.textContent = "Sending…";
   announce("Sending it again…");
   try {
     await api("/v1/auth/verify/request", { method: "POST", auth: false, body: { email: state.pendingEmail } });
     // Always 202, whether or not that address has anything pending — the
     // endpoint refuses to say, and so does this button.
+    btn.textContent = "Sent — check your email";
     announce("Sent. Check your email.");
+    // Back to a usable button after a beat, so a second attempt is possible if
+    // the first genuinely did not arrive.
+    setTimeout(() => {
+      btn.textContent = was;
+      delete btn.dataset.busy;
+      btn.removeAttribute("aria-disabled");
+    }, 4000);
   } catch (err) {
+    btn.textContent = was;
+    delete btn.dataset.busy;
+    btn.removeAttribute("aria-disabled");
     showError(err.message);
   }
 });
@@ -227,7 +265,11 @@ async function resumeFromEmail(code) {
     // `verify` and the field is `token`, and guessing cost a 400.
     out = await api("/v1/auth/verify", { method: "POST", auth: false, body: { token: code } });
   } catch (err) {
-    showError(`${err.message} You can ask for a new link from the sign-in page.`);
+    // Names a control that exists AND does the right thing. This used to send
+    // parents to "the sign-in page" for a new link — which had no such control
+    // at all, and now has one that sends a PASSWORD RESET, which is not what a
+    // failed confirmation needs. A confirmation link is re-sent from here.
+    showError(`${err.message} Enter the same address below and we'll send a fresh link.`);
     step("s1");
     return;
   }
@@ -275,7 +317,9 @@ async function offerPasskey() {
 $("addKey").addEventListener("click", async () => {
   clearError();
   const btn = $("addKey");
-  btn.disabled = true;
+  if (btn.dataset.busy) return;               // the guard `aria-disabled` needs
+  btn.dataset.busy = "1";
+  btn.setAttribute("aria-disabled", "true");  // never `disabled` on a focused button
   btn.textContent = "Waiting for your device…";
   announce("Waiting for your device.");
   try {
@@ -291,7 +335,8 @@ $("addKey").addEventListener("click", async () => {
     // because a parent stuck on step two of six abandons the product entirely.
     $("skipKey").hidden = false;
   } finally {
-    btn.disabled = false;
+    delete btn.dataset.busy;
+    btn.removeAttribute("aria-disabled");
     btn.textContent = "Create a passkey";
   }
 });
