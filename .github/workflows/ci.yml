@@ -125,3 +125,107 @@ jobs:
             echo "building windows/$arch"
             GOARCH=$arch go build -trimpath -ldflags "-s -w" -o /dev/null .
           done
+
+  # WHY THIS EXISTS. Until now nothing in CI ever compiled the Swift. This repo
+  # checks OpenAPI drift, cross-platform policy conformance, computed contrast
+  # ratios and Go cross-compilation for two arches — and the two apps that reach
+  # a child's phone got no pre-merge verification at all. An alpha-readiness
+  # audit then found four defects in them, including a setup field that could not
+  # type its own enrollment code and a parent inbox whose every poll threw on
+  # decode. A build would not have caught those two. It would have caught the
+  # class, and its absence is why nobody looked.
+  #
+  # Build only: no signing, no archive, no upload. Those need the Family Controls
+  # distribution entitlement and live secrets, and they belong in testflight.yml.
+  # This job answers one question — does it still compile — for free.
+  apple-build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      # fetch-depth: 0 because the scope check below diffs against the base ref.
+      # At the default depth 1 that commit is not in the local object store, the
+      # check falls back to "build to be safe", and the 10x runner is spent on
+      # every PR — the exact cost the check exists to avoid.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Only spend the runner when something Apple actually changed. Done as a
+      # step rather than a paths: filter so the job still reports a result on
+      # every PR — a REQUIRED check that silently never runs is worse than one
+      # that runs and says "nothing to do".
+      - name: Does this change touch the Apple targets?
+        id: scope
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "no usable base ref — building to be safe"
+            echo "touched=yes" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git diff --name-only "$base" HEAD | grep -qE '^(apple/|\.github/workflows/ci\.yml)'; then
+            echo "touched=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "nothing under apple/ changed"
+            echo "touched=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Select an Xcode with the iOS 26 SDK or newer
+        if: steps.scope.outputs.touched == 'yes'
+        run: .github/scripts/select-xcode.sh
+
+      - name: Install XcodeGen
+        if: steps.scope.outputs.touched == 'yes'
+        run: brew install xcodegen
+
+      # Both apps, both generated from project.yml the same way a contributor
+      # does it locally. CODE_SIGNING_ALLOWED=NO because signing needs the
+      # restricted Family Controls entitlement, which is not granted yet and is
+      # irrelevant to whether the code compiles.
+      #
+      # NO trailing `|| something` on these pipelines. `set -o pipefail` fails the
+      # pipeline, then `||` runs a command that exits 0 and BECOMES the step's
+      # exit code — testflight.yml shipped exactly that bug and reported a failed
+      # archive as a passing step. Verified: `set -o pipefail; false | cat || echo hi`
+      # exits 0.
+      - name: Build AjarFilter (app + both NetworkExtension providers)
+        if: steps.scope.outputs.touched == 'yes'
+        working-directory: apple/AjarFilter
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          xcodebuild build \
+            -project AjarFilter.xcodeproj \
+            -scheme AjarFilter \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - name: Build AjarParent
+        if: steps.scope.outputs.touched == 'yes'
+        working-directory: apple/AjarParent
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          xcodebuild build \
+            -project AjarParent.xcodeproj \
+            -scheme AjarParent \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      # Release is a DIFFERENT compilation: #if DEBUG code is excluded, so a
+      # release-only break is invisible to every step above. AjarFilter carries a
+      # whole DEBUG-only harness file, which makes it exactly the target where
+      # this can diverge.
+      - name: Build AjarFilter in Release
+        if: steps.scope.outputs.touched == 'yes'
+        working-directory: apple/AjarFilter
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project AjarFilter.xcodeproj \
+            -scheme AjarFilter \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
