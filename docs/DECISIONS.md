@@ -646,3 +646,39 @@ Still true, and still the honest limit: CI compiles this target, it does not run
 Safari. Whether iOS Safari honours the `webNavigation` + content-script approach
 is unmeasured and needs a device.
 
+### Amendment 2 (2026-09-01) — one app on iOS, and it now has a way to ship
+
+The extension began as a separate app on both platforms. On iOS that was the
+wrong shape: a parent installed two apps, enrolled the same device twice, and the
+child carried two device identities. It also forced the duplication above — the
+shim could not import `PolicyStore` across Xcode projects, so it kept string
+copies of the App Group name and four storage keys.
+
+The extension sources now live at `apple/SafariExtension/` and are compiled by
+two hosts:
+
+| Platform | Container |
+|---|---|
+| iOS / iPadOS | the filter app itself, as its `SafariExtension` target |
+| macOS | `apple/AjarSafari`, its own app |
+
+macOS cannot join the iOS host: there is no FamilyControls there, and a macOS
+content filter is a system extension with a different container, entitlement and
+distribution channel. One copy of the extension, two containers, no second
+enrolment on the platform that matters most.
+
+Consequences:
+
+- The shim reads policy through `PolicyStore`. `apple/check-app-group.mjs` now
+  enforces the *absence* of the old string copies rather than their agreement.
+- The extension ships in the app `testflight.yml` already uploads, so it inherits
+  a distribution path instead of needing one. It had none: CI compiled it and
+  nothing archived, signed or uploaded it.
+- **It needs no restricted entitlement of its own** — only the App Group. Family
+  Controls gates the app's distribution, not this target's compilation.
+- The filter app's main screen now links to the enable steps and says plainly
+  that without the extension Ajar can close a whole site but not one page of it.
+  iOS gives an app no way to *check* whether its Safari extension is enabled
+  (`SFSafariExtensionManager` is macOS-only), so that is a standing prompt, never
+  a status tick.
+

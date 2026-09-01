@@ -1,5 +1,5 @@
 {
-  "_about": "PoC B \u2014 macOS Safari Web Extension manifest. UNRESOLVED direction (ADR-004). Safari supports MV3. JSON has no comment syntax, so notes live in _-prefixed keys (ignored by the WebExtension loader). See docs/MACOS_SAFARI_POC.md and ../README.md.",
+  "_about": "Ajar's Safari Web Extension \u2014 the per-request enforcement surface (ADR-018). ONE copy, two hosts: the iOS filter app (apple/AjarFilter target SafariExtension) and the macOS container (apple/AjarSafari). Safari supports MV3. JSON has no comment syntax, so notes live in _-prefixed keys, ignored by the WebExtension loader. See ../README.md and docs/MACOS_SAFARI_POC.md.",
   "_absolute_rule": "NEVER block Safari to gain enforcement. This extension gates per-video inside Safari and redirects blocked navigations to blocked.html; Safari itself stays fully functional.",
   "manifest_version": 3,
   "name": "Ajar",

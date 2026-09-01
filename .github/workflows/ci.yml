@@ -223,33 +223,21 @@ jobs:
             -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 
-      # Ajar for Safari — the per-request enforcement path (docs/DECISIONS.md
-      # ADR-018). ONE target serves both platforms, so both are built here: a
-      # target that claims two destinations and is only ever compiled for one is
-      # a claim CI is not checking.
+      # Ajar for Safari on macOS — the macOS container for the SAME extension
+      # sources the iOS app compiles (apple/SafariExtension/, built above as
+      # AjarFilter's SafariExtension target). Two hosts, one copy; this step is
+      # what proves the macOS host still compiles them.
       #
-      # This is also the FIRST macOS destination any job in this workflow has
-      # compiled. Every other step targets generic/platform=iOS, which is how a
+      # This is also the ONLY macOS destination any job in this workflow
+      # compiles. Every other step targets generic/platform=iOS, which is how a
       # macOS-only branch (an AppKit #elseif, a platform-conditional import)
       # could reach a contributor's machine having never been near a compiler.
-      - name: Build AjarSafari (iOS)
-        if: steps.scope.outputs.touched == 'yes'
-        working-directory: apple/AjarSafari
-        run: |
-          set -euo pipefail
-          xcodegen generate
-          xcodebuild build \
-            -project AjarSafari.xcodeproj \
-            -scheme AjarSafari \
-            -configuration Debug \
-            -destination 'generic/platform=iOS' \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
-
       - name: Build AjarSafari (macOS)
         if: steps.scope.outputs.touched == 'yes'
         working-directory: apple/AjarSafari
         run: |
           set -euo pipefail
+          xcodegen generate
           xcodebuild build \
             -project AjarSafari.xcodeproj \
             -scheme AjarSafari \

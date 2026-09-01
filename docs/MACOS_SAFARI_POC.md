@@ -105,7 +105,7 @@ are comparable):
 
 Both reduce to `YOUTUBE_VIDEO:<id>` via `youtube-normalize` regardless of URL
 form; the extension MUST call the same normalization (the JS port in
-`apple/AjarSafari/Extension/youtube-normalize.js`, kept in lockstep with
+`apple/SafariExtension/Extension/youtube-normalize.js`, kept in lockstep with
 the TypeScript spec).
 
 ### B1 — Block one canonical video, allow another, in Safari (never block Safari)

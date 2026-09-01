@@ -20,48 +20,67 @@ must reach the same decision.
 
 ---
 
+## Where it ships
+
+One copy of the extension, two hosts:
+
+| Platform | Container | Project |
+|---|---|---|
+| iOS / iPadOS | **Ajar** — the filter app itself, target `SafariExtension` | `apple/AjarFilter/project.yml` |
+| macOS | **Ajar for Safari** — its own app | `apple/AjarSafari/project.yml` |
+
+iOS gets one app because it can: the filter app already enrols the device and
+holds the signed snapshot, so a second app would have meant a second enrolment
+and two device identities for one child. macOS cannot join it — there is no
+FamilyControls there and a macOS content filter is a system extension with a
+different container, entitlement and distribution channel — so it keeps its own
+container around the same sources.
+
 ## Installing it on a device
 
-The Xcode project is **generated and gitignored**, so it does not arrive with a
-pull and does not update when this folder changes.
+The Xcode projects are **generated and gitignored**, so they do not arrive with
+a pull and do not update when this folder changes.
 
 ```sh
 brew install xcodegen
+# iPhone / iPad
+cd apple/AjarFilter && xcodegen generate && open AjarFilter.xcodeproj
+# Mac
 cd apple/AjarSafari && xcodegen generate && open AjarSafari.xcodeproj
 ```
 
-Re-run `xcodegen generate` after any pull that touches this folder. A file added
-upstream is simply absent from a stale project, and Swift reports that as
-"cannot find <symbol> in scope" at every *use* site rather than as a missing
-file. Close the project in Xcode before regenerating.
+Re-run `xcodegen generate` after any pull that touches `apple/SafariExtension/`
+or either project folder. A file added upstream is simply absent from a stale
+project, and Swift reports that as "cannot find <symbol> in scope" at every
+*use* site rather than as a missing file. Close the project in Xcode before
+regenerating.
 
-Then build the **AjarSafari** scheme to the device (or to My Mac), and switch the
-extension on — it is off until someone does:
+Build the scheme to the device, then switch the extension on — it is off until
+someone does, and no app can turn it on for them:
 
 - **iPhone / iPad:** Settings → Apps → Safari → Extensions → **Ajar** → on. Then
   open it and set **All Websites → Allow**. "Ask" leaves a permission prompt
-  between the child and every navigation, which is not a filter.
+  between the child and every navigation, which is not a filter. The filter
+  app's main screen links to these same steps.
 - **Mac:** Safari → Settings → Extensions → tick **Ajar**, then Websites → Ajar →
   **Allow on Every Website**.
 
-`Ajar for Safari` is a second app alongside `Ajar` (the content filter). It has to
-be: a Safari Web Extension can only ship inside an app, and that app is the only
-place a parent can be told to go and turn it on.
-
 ### It needs Ajar (the filter app) installed and enrolled
 
-The extension has no enrollment of its own on a real install. `AjarFilter`'s
-containing app enrolls the device and writes the signed `DevicePolicySnapshot`
-into the App Group `group.family.ajar.filter`; `SafariWebExtensionHandler` reads
-those bytes back out and hands them to the extension, which **re-verifies the
-Ed25519 signature itself** before trusting any of it. One enrollment, one device
-identity, one snapshot, two enforcement surfaces.
+The extension has no enrolment of its own on a real install. `AjarFilter`'s app
+enrols the device and writes the signed `DevicePolicySnapshot` into the App Group
+`group.family.ajar.filter`; `SafariWebExtensionHandler` reads it back through
+**`PolicyStore`** — the same type the content filter uses, compiled into this
+target — and hands the bytes to the extension, which **re-verifies the Ed25519
+signature itself** before trusting any of it.
 
-Both apps must be signed by the same team and carry that App Group in their
-entitlements. `node apple/check-app-group.mjs` (run in CI) fails if the group
-name or any of the four `UserDefaults` key names drifts between the two projects
-— a drifted copy compiles, runs, reads nothing, and is indistinguishable from a
-device nobody ever enrolled.
+On macOS the container is a different app, so it must be signed by the same team
+and carry the same App Group. `node apple/check-app-group.mjs` (run in CI) checks
+every entitlements file names the group `PolicyStore` defines, and that the shim
+keeps **no string copies** of the group name or the storage keys — it used to,
+back when it could not import `PolicyStore` across projects, and a drifted copy
+compiles, reads nothing, and looks exactly like a device nobody ever enrolled,
+which is the one state that allows everything.
 
 ### With no policy
 

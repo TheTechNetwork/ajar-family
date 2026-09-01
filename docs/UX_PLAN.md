@@ -150,7 +150,7 @@ reaches the parent contextless and the card's quote block is dead weight), and
 the loop never closes because the device is never told the decision.
 
 ### A9. macOS calls every blocked page "This video"
-`apple/AjarSafari/Extension/blocked.html:413-419` maps `NOUN` for
+`apple/SafariExtension/Extension/blocked.html:413-419` maps `NOUN` for
 YouTube types only and falls back to `"This video"` — so a blocked news site
 announces itself as *"This video"* in 18px semibold. Windows covers `DOMAIN`
 and `URL` too and falls back to the hostname. Same file: `requestBtn` awaits

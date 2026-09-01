@@ -104,7 +104,7 @@ struct DebugHarnessView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                         Button("Enroll this device") {
-                            Task { await controller.enroll(code: enrollCode, displayName: "PoC device") }
+                            Task { await controller.enroll(code: enrollCode, displayName: "This device") }
                         }
                     }
 
@@ -156,7 +156,7 @@ struct DebugHarnessView: View {
                     Section("Error") { Text(err).foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("ParentFilter PoC")
+            .navigationTitle("Ajar")
             // The Request-Access hand-off from the block page: the page is https
             // (NEFilterProvider requires it), its button is ajar://request?u=…,
             // and the request is filed HERE because only the app holds the

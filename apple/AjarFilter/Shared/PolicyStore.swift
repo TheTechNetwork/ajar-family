@@ -243,6 +243,22 @@ public final class PolicyStore {
         return nil
     }
 
+    /// The stored snapshot's raw bytes, EXACTLY as the backend delivered and
+    /// signed them.
+    ///
+    /// For the Safari extension shim, which hands them to JavaScript that
+    /// re-verifies the Ed25519 signature itself. Deliberately not
+    /// `current()` re-encoded: round-tripping through the Swift model could
+    /// reorder a key or renumber a value and invalidate the signature the
+    /// receiver is about to check.
+    ///
+    /// Returns whatever is stored, VERIFIED OR NOT — the recipient checks. It
+    /// pairs with `state()`, so a caller that wants a trust decision asks for
+    /// one rather than inferring it from these bytes existing.
+    public func rawSnapshotForSharing() -> Data? {
+        defaults?.data(forKey: snapshotKey)
+    }
+
     // MARK: - Trusted clock (ADR-009 — NOT yet hardened, see the type doc)
 
     public func nowUTC() -> Date { Date() }

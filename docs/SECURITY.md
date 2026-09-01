@@ -57,7 +57,7 @@ living document for an alpha, not a completed audit.
   as much as control over that config. Both extensions now pin the signing key
   and the address at first enrollment (`shared/trust/trust-anchor.ts`, mirrored
   in `windows/extension/trust-anchor.js` and
-  `apple/AjarSafari/Extension/trust-anchor.js`):
+  `apple/SafariExtension/Extension/trust-anchor.js`):
   - the pin **survives Disconnect** — disconnecting stops enforcement on that
     browser, it does not hand the next person the right to choose a new signer;
   - re-connecting to the **same address with the same key** needs nothing extra

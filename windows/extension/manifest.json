@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Ajar (PoC C)",
+  "name": "Ajar",
   "version": "0.1.0",
   "description": "Ajar — per-video YouTube approvals. Policy-installed; enforces the shared policy model with full-URL blocking webRequest.",
 

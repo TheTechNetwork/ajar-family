@@ -99,9 +99,13 @@ targets:
     sources:
       - path: App
       - path: Shared          # compiled into every target (no embedded framework)
+      # The "turn the Safari extension on" instructions, shared with the macOS
+      # container app so the two hosts cannot word them differently.
+      - path: ../SafariExtension/UI
     dependencies:
       - target: FilterDataProvider
       - target: FilterControlProvider
+      - target: SafariExtension
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: family.ajar.filter
@@ -125,7 +129,11 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: ParentFilter PoC
+        # The name on the child's home screen and in Settings. It was
+        # "ParentFilter PoC" — a working title and a research label, shipped to
+        # the one person least likely to give the product the benefit of the
+        # doubt.
+        CFBundleDisplayName: Ajar
         # XcodeGen writes a LITERAL CFBundleVersion of "1" when this is not set,
         # so passing CURRENT_PROJECT_VERSION=N to xcodebuild changed a build
         # setting nothing referenced. CI archived and exported happily and then
@@ -183,7 +191,7 @@ targets:
     info:
       path: FilterDataProvider/Info.plist
       properties:
-        CFBundleDisplayName: ParentFilter Data Provider
+        CFBundleDisplayName: Ajar Filter
         # Must match the host app exactly or App Store validation refuses the
         # bundle; same interpolation as the app for the same reason.
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
@@ -208,7 +216,7 @@ targets:
     info:
       path: FilterControlProvider/Info.plist
       properties:
-        CFBundleDisplayName: ParentFilter Control Provider
+        CFBundleDisplayName: Ajar Filter Control
         # Must match the host app exactly or App Store validation refuses the
         # bundle; same interpolation as the app for the same reason.
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
@@ -216,6 +224,53 @@ targets:
         NSExtension:
           NSExtensionPointIdentifier: com.apple.networkextension.filter-control
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FilterControlProvider
+
+  # SAFARI WEB EXTENSION — the per-request surface, inside this app rather than
+  # beside it.
+  #
+  # WHY IT LIVES HERE. It began as a separate app (apple/AjarSafari) and that was
+  # the wrong shape on iOS: a parent installed two apps, enrolled the same device
+  # twice, and the child carried two device identities. Worse, the extension
+  # could not link this project's Shared/, so its native shim kept its own string
+  # copies of the App Group name and four UserDefaults keys — a duplication whose
+  # every failure mode is silent, because a drifted copy reads nothing and looks
+  # exactly like a device nobody enrolled, which is the one state that allows
+  # everything. As a target here it imports PolicyStore and the duplication is
+  # gone.
+  #
+  # The sources live at apple/SafariExtension/ because macOS needs the SAME
+  # extension in a DIFFERENT container: there is no FamilyControls on macOS and
+  # no iOS app extension there, so apple/AjarSafari is now the macOS-only
+  # container and both projects compile these files. One copy, two hosts.
+  #
+  # NEEDS NO RESTRICTED ENTITLEMENT of its own — only the App Group. Family
+  # Controls gates this app's DISTRIBUTION, not this target's compilation.
+  SafariExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ../SafariExtension/ExtensionShim
+        excludes: ["*.entitlements"]
+      # The MV3 resources, copied in whole rather than listed file by file, so a
+      # new .js added to the extension does not need a project edit to ship.
+      - path: ../SafariExtension/Extension
+        type: folder
+        buildPhase: resources
+      - path: Shared          # PolicyStore et al — the point of the move
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: family.ajar.filter.SafariExtension
+        CODE_SIGN_ENTITLEMENTS: ../SafariExtension/ExtensionShim/SafariExtension.entitlements
+        PROVISIONING_PROFILE_SPECIFIER: $(AJAR_PROFILE_SAFARI)
+    info:
+      path: ../SafariExtension/ExtensionShim/Info.plist
+      properties:
+        CFBundleDisplayName: Ajar
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.Safari.web-extension
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SafariWebExtensionHandler
 
 schemes:
   AjarFilter:

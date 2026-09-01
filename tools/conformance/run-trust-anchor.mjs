@@ -107,7 +107,7 @@ function reset() { DB.clear(); REQUESTS.length = 0; }
 const MIRRORS = [
   { id: "shared", mod: { decideEnrollment: sharedDecideEnrollment, decideUnenroll: sharedDecideUnenroll, isAllowedBackendUrl: sharedIsAllowedBackendUrl } },
   { id: "windows", mod: await import(new URL("../../windows/extension/trust-anchor.js", import.meta.url).href) },
-  { id: "macos", mod: await import(new URL("../../apple/AjarSafari/Extension/trust-anchor.js", import.meta.url).href) },
+  { id: "macos", mod: await import(new URL("../../apple/SafariExtension/Extension/trust-anchor.js", import.meta.url).href) },
 ];
 
 for (const m of MIRRORS) {
@@ -136,7 +136,7 @@ for (const m of MIRRORS) {
 // ---------------------------------------------------------------------------
 const CLIENTS = [
   { id: "windows", path: "../../windows/extension/backend-client.js", anchorPath: "../../windows/extension/trust-anchor.js" },
-  { id: "macos", path: "../../apple/AjarSafari/Extension/backend-client.js", anchorPath: "../../apple/AjarSafari/Extension/trust-anchor.js" },
+  { id: "macos", path: "../../apple/SafariExtension/Extension/backend-client.js", anchorPath: "../../apple/SafariExtension/Extension/trust-anchor.js" },
 ];
 
 const CODE = "K7M2P9QR";
@@ -299,7 +299,7 @@ reset();   // module-scope startup code must see an unenrolled device
 
 const WORKERS = [
   { id: "windows", path: "../../windows/extension/background.js", key: "snapshot" },
-  { id: "macos", path: "../../apple/AjarSafari/Extension/background.js", key: "devicePolicySnapshot" },
+  { id: "macos", path: "../../apple/SafariExtension/Extension/background.js", key: "devicePolicySnapshot" },
 ];
 
 for (const w of WORKERS) {
