@@ -629,6 +629,15 @@ vendor; documented in `docs/WINDOWS_FILTER_POC.md`.)
   privacy-preserving by construction (PIR + OHTTP: neither Apple nor we see
   browsing). COPPA / GDPR-K / Apple child-safety considerations are tracked in
   [§12](#12-compliance-notes-not-legal-advice).
+- **But "no browsing history" is not the same as "private."** The server holds
+  every rule, every ask (target, title, URL, the child's reason, the referring
+  host) and an audit log — a listing of everything the family has an opinion
+  about, which is sensitive whether or not anyone watched a browser. The
+  candidate answer is to encrypt the values end-to-end and keep only the shapes,
+  which the on-device-decision architecture makes possible because the server
+  never evaluates policy; it is designed in `docs/ROADMAP.md` §5 and is **not
+  built**. Until it is, say what is true: we do not observe browsing, and we can
+  read the policy.
 
 ### 10.1 Observation is off by default, and opt-in is scoped to a purpose
 
@@ -653,6 +662,14 @@ Rules that follow, for any future feature that wants that third row:
   data collection". "Let Ajar watch what Sam uses for seven days so it can
   suggest a starting point" is a thing a person can actually consent to; a
   permanent global toggle is not.
+- **There is no permanent option, and not offering one is the point.** Every
+  opt-in carries a duration; "until I turn it off" is not one of the choices and
+  must not appear in the UI at all. A control that *can* be set to forever will
+  be set to forever — by a parent clearing a prompt, by a default someone
+  softens later, by a support script telling someone to just leave it on. The
+  guarantee has to be structural: if the shortest path to "always" is to
+  re-consent every window, the product cannot drift into permanent observation
+  no matter who is holding it.
 - **It expires with its purpose.** The strong version of "the parent can turn it
   off when learning is done" is that it turns ITSELF off and staying on takes a
   deliberate act — a setting a parent has to remember to disable is a setting
@@ -667,6 +684,11 @@ Rules that follow, for any future feature that wants that third row:
 The first feature this governs is learn mode (`docs/ROADMAP.md` §3), which cannot
 run without that opt-in — deliberately, because it is the feature that makes the
 rule real rather than theoretical.
+
+This rule governs what we *observe*. It says nothing about what we *store*,
+which is the separate and currently unanswered problem above and in
+`docs/ROADMAP.md` §5. Both have to be true for the privacy claim to mean
+anything.
 
 ## 11. Anti-bypass checklist (documented, mitigated, non-invasive)
 

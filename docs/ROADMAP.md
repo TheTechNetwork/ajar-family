@@ -249,3 +249,161 @@ at all (youtube.com → youtube.com is noise); whether "no referrer" is worth
 distinguishing from "typed directly", which is a real signal of intent; and
 whether the block page should show the child what it is about to tell their
 parent, which the product's no-surprises posture probably requires.
+
+
+## 5. End-to-end encrypted policy — because the server holds a listing
+
+**The question that forced this.** "Policy stored on our server, which is a
+requirement — how is that private if we have a listing of everything?"
+
+It is not, and the current claim is thinner than it sounds. §10.1 of
+`ARCHITECTURE.md` draws an honest line around *observation* — the product does
+not collect what a child visited. That line is real, and it is not the whole
+story, because of what the server holds without observing anything:
+
+- **Every rule.** Every site, channel, video and category the family has an
+  opinion about. A blocklist is a statement about a family; a list of what a
+  parent decided their child may not see is not less sensitive than a history,
+  it is more considered.
+- **Every ask.** `AccessRequest` carries the target, the page **title**, the
+  **URL**, the child's free-text **reason**, and now the **referring host**.
+  Those are things the child chose to surface — to their parent. The server is
+  not the parent.
+- **The audit log**, whose `detail` embeds `"${targetType}:${targetValue}"`
+  verbatim.
+
+"There is no browsing history in this product" is true and answers a question
+nobody asked. The listing is the thing.
+
+**Why E2E is actually available here, and not a stretch.** The server never
+*evaluates* policy. Every decision is on-device — that is the founding
+constraint of this product, and it turns out to be the thing that makes the
+privacy answer possible. The backend stores, versions, signs, and relays. Those
+four jobs need structure. Only two of them need to read values, and both have a
+way out (below).
+
+**Signatures still work.** Sign the ciphertext. `signSnapshot` covers the
+canonical JSON of the snapshot; whether a field holds `"youtube.com"` or an
+AES-GCM blob does not change what an Ed25519 signature proves — that *this*
+server issued *this* version to *this* device, which is what defeats forgery and
+rollback. Provenance and confidentiality are orthogonal properties and we get to
+keep both. This is the load-bearing observation: nothing about the anti-tamper
+model has to be given up.
+
+### 5.1 Encrypt values, not shapes
+
+The instinct is to encrypt the whole record. That is wrong, and it is wrong in
+the direction that has already bitten this codebase three times: it moves
+server-side safety checks onto the child's device.
+
+`childRequestTargetError` exists because a device that could name its own target
+could ask for `CATEGORY:adult` or `DOMAIN:com` and get a parent to tap the green
+button on "the entire web, for two hours, above every standing rule". That check
+must not become client-side. So:
+
+| Field | Disposition | Why |
+|---|---|---|
+| `targetType` (enum) | **Plaintext** | Low-cardinality. "This family has 47 rules, 12 about YouTube videos" is not a listing. Keeps the child-request type check, the approval-scope compatibility check, and the ONCE/scope machinery server-side. |
+| `scope`, `childId`, `deviceId`, `version`, `expiresAt`, `consumedAt`, `status`, timestamps | **Plaintext** | Routing and lifecycle. The server cannot do its four jobs without them, and none of them says *what*. |
+| `targetValue`, `title`, `url`, `reason`, `referrerHost`, audit `detail` | **Ciphertext** | This is the listing. All of it. |
+
+Leaking the shape and keeping the values is the trade that preserves the safety
+floor. Say so out loud rather than discovering it later.
+
+### 5.2 The two places the server reads a value today
+
+1. **Dedupe** (`createRequest`) compares `(childId, deviceId, targetType,
+   targetValue)` against pending asks, so a reloading blocked page does not bury
+   the console. Replace `targetValue` with a **blinded index**:
+   `HMAC-SHA256(familyKey, canonical(targetType, targetValue))`. The server sees
+   an opaque tag, can test two asks for equality, and cannot invert it. Equality
+   is the only thing dedupe ever needed.
+2. **Category inlining** (`buildSnapshot`) scans rules for `target ===
+   "CATEGORY"` to inline only the category maps a device actually needs. With
+   `targetType` in plaintext the server still knows a CATEGORY rule exists; it no
+   longer knows *which* category. Two ways out, and the second is better: send
+   the device the whole signed category asset it already fetches separately
+   (`signCanonical` exists for exactly that asset) and let it expand locally.
+   Costs bytes, removes a read, and deletes a per-device server computation.
+
+Nothing else on the server ever looks inside a rule.
+
+### 5.3 Keys
+
+**Do not invent anything.** WebCrypto on the parent console, CryptoKit on Apple,
+CNG/Go stdlib on Windows — all three have the same primitives:
+
+- **Key derivation: the WebAuthn PRF extension.** The parent already
+  authenticates with a passkey (`backend/src/domain/passkeys.ts`); PRF derives a
+  stable secret from that same authenticator, so the console can decrypt in a
+  browser with no password to remember and no key material on the server. HKDF
+  the PRF output into a family key. *Not present today — grep for `prf` returns
+  nothing.* PRF is also not universal across authenticators, so the design needs
+  a fallback wrap from the start, not bolted on.
+- **Content: AES-256-GCM**, per-record nonce, the record's plaintext-side
+  identifiers (`familyId`, record id, `targetType`) as AAD so a blob cannot be
+  moved between records.
+- **Blinded index: HMAC-SHA256** under a separate HKDF-derived subkey. Never the
+  same key as content.
+
+**Getting the key to a child device.** Enrollment is already a parent action
+with a short-lived single-use token and a device keypair. The parent's console
+wraps the family key to the device's enrollment public key; the server relays a
+blob it cannot open. No reusable family secret ever exists on the server — which
+was already the rule, now with teeth.
+
+**Client-managed vs system-managed.** Client-managed (the family holds the key,
+we hold ciphertext) is the default and the honest one. "System-managed when
+analytics are enabled" is coherent — you cannot analyze what you cannot read —
+but it is precisely the place where a convenience default silently defeats the
+whole thing. Rules: per-family, explicitly chosen, never inferred from another
+setting, and **forward-only** — turning it off stops future disclosure and does
+not un-see what was already seen, and the UI must say that rather than implying
+a rollback it cannot perform.
+
+### 5.4 What breaks, stated plainly
+
+E2E is not free and the costs are not small. Anyone proposing this has to own
+all four:
+
+- **Recovery becomes data loss.** Lose every passkey and the policy is gone —
+  we genuinely cannot help. Mitigation is a wrap per parent device plus a printed
+  recovery code (a second wrap under a PBKDF2/scrypt KEK) plus iCloud Keychain
+  syncing the passkey itself. **This makes an already-open gap load-bearing:
+  there are no passkey recovery codes today.** That gap has to close first or
+  this feature ships a footgun.
+- **Notifications go quiet.** APNs/Web Push payloads transit our servers, so
+  they can say "Sam asked for something" and not what. The full ask renders after
+  the console decrypts. That is a genuine UX regression on the product's core
+  loop ("say yes in seconds") and it is the cost most likely to be
+  underestimated.
+- **Support becomes impossible.** No reading a family's rules to explain why
+  something was blocked. Every debugging path becomes "reproduce it on the
+  device". This is the correct outcome and it is still a real operational cost.
+- **Server-side features that need values are permanently off the table** —
+  cross-family category suggestions, "families like yours block X", server-side
+  policy linting. Ruling those out is a strategy decision, not a technical one,
+  and it should be made deliberately rather than discovered when someone asks
+  for one.
+
+### 5.5 iCloud is two separate things
+
+Do not conflate them:
+
+- **iCloud Keychain for the key** — the standard answer to the recovery problem
+  above. The passkey syncs; the family key rides along in its wrap. Apple
+  handles the hard part and we do not touch it.
+- **CloudKit private database for the record** — the family's own durable
+  what/when/where, in an account we have no access to. This is the good version
+  of "parents and children have a record": it is theirs, it survives us, and it
+  is not a listing on our server. But it is **Apple-only**, and a family with a
+  Windows child cannot be told their history lives in iCloud. The cross-platform
+  answer is a parent-initiated export from the console, not a second cloud.
+
+**Open questions.** Whether `targetType` in plaintext is a line we hold under
+pressure (the first feature that wants one more plaintext field is the test);
+whether the blinded index needs rotation when a parent is removed from a family,
+and what re-encrypting a family's whole policy costs; whether PRF coverage is
+good enough in 2026 to be primary rather than an optimization; and whether a
+family that opts into system-managed keys can ever go back to client-managed
+without a full re-key (it can, but only forward — see 5.3).
