@@ -310,6 +310,24 @@ must not become client-side. So:
 Leaking the shape and keeping the values is the trade that preserves the safety
 floor. Say so out loud rather than discovering it later.
 
+**Every ciphertext field carries its own format version**, as a prefix on the
+blob rather than a column beside it — `v1:<nonce>:<ct>`, and a reader that does
+not recognise the version refuses rather than guesses. This is nearly free now
+and impossible to retrofit: the day the AEAD, the KDF, or the AAD composition
+has to change, every device in the field is holding blobs in the old shape, and
+without a version marker there is no way to tell them apart except by trying to
+decrypt and seeing what happens. Note the snapshot's monotonic `version` does
+NOT cover this — that counts policy edits, not envelope format, and the two move
+independently.
+
+*Prior art worth naming*: RethinkDNS `serverless-dns` encodes an entire blocklist
+selection into a versioned URL-safe "blockstamp" (`v:b64` / `v-b32`) carried in
+the request path, so the resolver holds no per-user state at all — configuration
+travels with the request. Ajar cannot go that far (the approval loop needs
+durable state the child's device does not carry), but it is the same instinct
+one step further, and it has run in production at scale: the version prefix is
+what let that encoding go from v0 to v1 without stranding installed clients.
+
 ### 5.2 The two places the server reads a value today
 
 1. **Dedupe** (`createRequest`) compares `(childId, deviceId, targetType,
