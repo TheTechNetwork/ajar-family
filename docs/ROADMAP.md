@@ -104,6 +104,32 @@ starting set. Learn mode is how a family gets to default-deny without a bad week
 filing an AccessRequest — otherwise a week of learn mode floods the parent
 console with hundreds of asks, which is the opposite of the point.
 
+**It cannot run unless a parent turns it on, and it turns itself off.**
+
+`docs/ARCHITECTURE.md` §10.1 is the rule: nothing observes a child unless a
+parent switches it on for a stated reason, and it ends with that reason. Learn
+mode is the first feature that rule governs, and deliberately so — a principle
+whose first use case is exempt from it is not a principle.
+
+What that means concretely:
+
+- **Off by default, and off means the observation code does not run** — not
+  gathered and discarded. A switch that only stops the display is not a switch,
+  and this one should be testable from outside: with learn mode off, nothing
+  writes an observation anywhere.
+- **The opt-in is scoped to this, and to a window.** "Let Ajar watch what Sam
+  uses for seven days so it can suggest a starting point" is a thing a person can
+  consent to. A permanent "allow data collection" toggle is not, and would be a
+  worse deal for a parent who only ever wanted the one thing.
+- **It expires with the window.** The user's framing was that a parent *can*
+  turn it off when learning is done; the stronger version, and the one worth
+  building, is that it turns ITSELF off and staying on takes a deliberate act. A
+  setting a parent has to remember to disable is a setting that stays on for
+  years.
+- **Ending it early ends the collection immediately**, and produces whatever
+  baseline it has — a parent who has seen enough after two days should not have
+  to choose between stopping and getting a result.
+
 **The thing this collides with, and it is the important part.**
 
 The product's central privacy claim is that **there is no browsing history in

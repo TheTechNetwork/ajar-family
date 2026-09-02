@@ -627,8 +627,46 @@ vendor; documented in `docs/WINDOWS_FILTER_POC.md`.)
 - **Privacy**: minimize collection. Store the **blocked request that needs
   approval** + **decision metadata**, not full browsing history. `NEURLFilter` is
   privacy-preserving by construction (PIR + OHTTP: neither Apple nor we see
-  browsing). Activity reporting is opt-in. COPPA / GDPR-K / Apple child-safety
-  considerations are tracked in [§12](#12-compliance-notes-not-legal-advice).
+  browsing). COPPA / GDPR-K / Apple child-safety considerations are tracked in
+  [§12](#12-compliance-notes-not-legal-advice).
+
+### 10.1 Observation is off by default, and opt-in is scoped to a purpose
+
+**Nothing observes a child unless a parent turns it on for a stated reason, and
+it turns itself off again.** This is a product rule, not an aspiration, and it
+decides the shape of anything that would need to watch.
+
+Draw the line in the right place, or the rule becomes incoherent:
+
+| | Is it "collection"? |
+|---|---|
+| What a child **asked** to open, and what the parent decided | **No.** That is the product. A request the child made deliberately, to a parent, is not something being gathered about them behind their back. Not opt-in — turning it off would be turning Ajar off. |
+| The audit log of what a **parent** did | **No.** A record of the account holder's own actions. |
+| What a child **visited** — including everything that was never blocked and never asked about | **Yes, and this is the only thing the rule is about.** Off by default. Nothing in the product collects it today. |
+
+Rules that follow, for any future feature that wants that third row:
+
+- **Off by default, and off means the code does not run** — not gathered and
+  discarded, not held briefly. A switch that only stops the display is not a
+  switch.
+- **Opt-in is scoped to one purpose and one window**, never a blanket "allow
+  data collection". "Let Ajar watch what Sam uses for seven days so it can
+  suggest a starting point" is a thing a person can actually consent to; a
+  permanent global toggle is not.
+- **It expires with its purpose.** The strong version of "the parent can turn it
+  off when learning is done" is that it turns ITSELF off and staying on takes a
+  deliberate act — a setting a parent has to remember to disable is a setting
+  that stays on for years.
+- **The raw observations are deleted when the thing they were for is produced**,
+  and they never leave the device in the first place (see ROADMAP §3).
+- **The parent consents; the child is told.** The parent is the account holder
+  and consents on the child's behalf, but the terms say Ajar "is not hidden and
+  it is not a monitoring tool" and that "the whole design assumes they know".
+  Legal consent and honest disclosure are two obligations, not one.
+
+The first feature this governs is learn mode (`docs/ROADMAP.md` §3), which cannot
+run without that opt-in — deliberately, because it is the feature that makes the
+rule real rather than theoretical.
 
 ## 11. Anti-bypass checklist (documented, mitigated, non-invasive)
 
