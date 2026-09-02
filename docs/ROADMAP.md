@@ -386,24 +386,164 @@ all four:
   and it should be made deliberately rather than discovered when someone asks
   for one.
 
-### 5.5 iCloud is two separate things
+### 5.5 Key hierarchy — one root, three purposes, per-child separation
 
-Do not conflate them:
+A single family key handed to every device would mean a compromised child device
+exposes a sibling's asks and their reasons. Derive instead, and derive once:
 
-- **iCloud Keychain for the key** — the standard answer to the recovery problem
-  above. The passkey syncs; the family key rides along in its wrap. Apple
-  handles the hard part and we do not touch it.
-- **CloudKit private database for the record** — the family's own durable
-  what/when/where, in an account we have no access to. This is the good version
-  of "parents and children have a record": it is theirs, it survives us, and it
-  is not a listing on our server. But it is **Apple-only**, and a family with a
-  Windows child cannot be told their history lives in iCloud. The cross-platform
-  answer is a parent-initiated export from the console, not a second cloud.
+```
+familyKey                       (parent console only; never leaves it unwrapped)
+├─ HKDF(familyKey, "policy")    → FAMILY-scoped rule values
+├─ HKDF(familyKey, "child:<childId>")
+│    ├─ HKDF(·, "content")      → CHILD/DEVICE rules, AccessRequests, audit detail
+│    └─ HKDF(·, "index")        → the blinded-index HMAC subkey (§5.2)
+└─ (recovery wraps — §5.7)
+```
+
+Who gets what:
+
+- **A child's device** receives the `policy` subkey and its own
+  `child:<childId>` subkeys. Nothing else. It can decrypt what it must enforce
+  and what its own child asked for; a sibling's asks are opaque to it.
+- **The parent console** holds `familyKey` and derives everything.
+- **The server** holds none of it, ever, in any form it can unwrap.
+
+Scoping the index subkey per child is free and worth taking: the server cannot
+correlate "these two children asked for the same thing", which it could if one
+family-wide index key produced the same tag for both.
+
+A FAMILY-scoped rule is readable by every child device, deliberately — it is
+enforced on all of them, so its existence is not a secret from any of them.
+
+### 5.6 Where the key lives, on each platform, and what protects it from whom
+
+Two rules apply everywhere, and they are what make the per-platform table short:
+
+1. **Decryption happens in the most privileged component on the platform.**
+   Never in a browser extension. `windows/extension/background.js` already
+   carries the reason in its own comment — `chrome.storage.local` lives in the
+   child's profile directory, which the child owns and can read. A key placed
+   there is a key given to the child.
+2. **The key at rest is protected by the OS mechanism that resists the child,**
+   and we state plainly what it does not resist. Nothing here resists a local
+   administrator, which is consistent with — not a new exception to — the
+   standing rule that the child must be a standard, non-admin account (ADR-006).
+
+| | iOS / iPadOS | macOS | Windows | Parent console |
+|---|---|---|---|---|
+| **Key at rest** | Keychain, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, access group shared with both NE providers and the Safari extension | Same, app keychain + access group | CNG key in the **Microsoft Platform Crypto Provider** (TPM-backed, non-exportable); floor is DPAPI machine scope inside `%ProgramData%\Ajar` | **Memory only** — never `localStorage`, never IndexedDB |
+| **What protects it** | OS sandbox; unreachable by other apps on a non-jailbroken device | Sandbox + standard-account separation | The `%ProgramData%\Ajar` DACL (SYSTEM + Administrators, **no Users**), already applied by `install.ps1`; TPM makes the material non-exportable even with the file | Page lifetime; re-derived per session |
+| **What it does *not* protect against** | Jailbreak | Local admin (can dump keychains) | Local admin. **DPAPI machine scope alone protects an offline/stolen disk, not a local process** — the DACL is what stops the child, so it is load-bearing, not defense in depth | A compromised browser |
+| **Who decrypts** | `PolicyStore` — already the single read point for every consumer | `PolicyStore` (same shared code) | **The LocalSystem service.** It already verifies the Ed25519 signature before forwarding over native messaging; decryption goes in that same seam and the extension keeps receiving plaintext it was always going to hold | WebCrypto, non-extractable `CryptoKey` |
+| **How the key arrives** | Wrapped to the device enrollment keypair at enrollment; relayed by a server that cannot open it | Same | Same, terminating at the service — the extension is never a party to it | Unwrapped from a passkey (§5.7) |
+
+Two consequences worth stating rather than leaving implied:
+
+- **Windows needs no new transport.** The service→extension native-messaging
+  channel already carries verified snapshots; it will carry decrypted ones. The
+  only new thing on Windows is the CNG/DPAPI key store. This is the sense in
+  which Windows "is different": a different key store, not a different design.
+- **The extension's backend HTTP mode cannot carry E2E, and that is fine** — it
+  is already labelled "dev / browser-testable" in `background.js`. There is no
+  privileged component in that mode, so a key would land in the child's profile.
+  It must be blocked outright when a family has E2E enabled, not degraded
+  silently.
+- On Apple this finally forces something `PolicyStore` already flags in its own
+  "Known limits": the marker and high-water mark live in the App Group they
+  defend, and the fix it names is the Keychain. The key must go there, so the
+  marker can go with it.
+
+### 5.7 Recovery: one invariant, several ways to satisfy it
+
+The temptation is a per-platform recovery story. The right shape is a
+**platform-neutral invariant with platform-specific ways to meet it**:
+
+> **Two independent unwraps of `familyKey` must exist before E2E can be
+> enabled.** The console counts them and refuses to finish setup at one.
+
+"Independent" means they do not fail together. A second passkey on the same
+laptop is one unwrap, not two.
+
+| Mechanism | Counts as an unwrap | Notes |
+|---|---|---|
+| A passkey synced by **iCloud Keychain** | 1 (and survives device loss) | The Apple path; a second Apple device adds redundancy for free |
+| A passkey in **Windows Hello** | 1, **device-bound** | Historically does not sync. Microsoft-account passkey backup exists but **the design must not depend on it** — verify before counting it |
+| A **cross-device (hybrid) passkey** — a Windows browser authenticating against the parent's phone | 1 | Fully supported and worth naming: a Windows parent with an iPhone gets iCloud Keychain redundancy anyway |
+| A **hardware security key** | 1 | The clean answer for a Windows-only family that wants no printed secret |
+| A **printed recovery code** (wrap under an Argon2id/PBKDF2 KEK) | 1 | Always available, always offered |
+| A second parent's passkey | 1 | Also the answer to "two parents, one policy" |
+
+**The consequence for a Windows-only family is concrete, not vague:** one PC,
+one Windows Hello passkey, no phone and no security key = **one** unwrap, and the
+console must refuse and say why. A printed recovery code or a second factor is
+mandatory there. On Apple the same rule is usually satisfied invisibly, which is
+exactly why it must be a counted invariant and not a platform note — otherwise
+the Windows family is the only one that ever meets it deliberately, and it will
+be the one that gets a "skip" button.
+
+**PRF has a fallback, and the fallback is not E2E.** The WebAuthn PRF extension
+needs the authenticator's `hmac-secret`; availability on Windows Hello varies by
+build and must be verified, not assumed. Where PRF is unavailable, the only
+self-contained fallback is a KEK derived from the parent's account password —
+and the server sees that password at login, so it could derive the KEK. That
+means two tiers, and they must be named differently everywhere they appear:
+
+| | Protects against a database dump | Protects against us | May be called |
+|---|---|---|---|
+| **PRF or recovery-code derived** | Yes | Yes | "End-to-end encrypted" |
+| **Password derived** | Yes | **No** | "Encrypted at rest" — never "end-to-end" |
+
+Collapsing those two into one reassuring word is the single most likely way this
+feature ends up lying, so the distinction belongs in the data model and the UI
+copy, not only in this document.
+
+### 5.8 The durable record: define the mechanism, then the automation
+
+Point 4 — a record of what, when, and where that the family keeps — is a
+separate thing from key storage, and conflating them is how "iCloud" becomes a
+hand-wave.
+
+**The defined mechanism, on every platform, is a parent-initiated export from
+the console.** It contains the same ciphertext blobs plus a wrap of `familyKey`
+under the recovery-code KEK, so the export is a file that is useless to whoever
+finds it and openable by the family forever, including after we stop existing.
+That property — outliving the vendor — is worth more than convenience and it is
+the same on Windows, macOS and iOS.
+
+**CloudKit is an Apple-only automation of that mechanism**, not a capability
+Windows lacks: same records, in the family's own iCloud account, written
+continuously instead of on a button press. Where an automation for Windows is
+wanted later, the honest options are a scheduled local export to a
+parent-chosen folder (which the LocalSystem service can already write) or the
+parent's own storage provider — **not** a second Ajar cloud, which would
+reintroduce the listing this whole section exists to remove.
+
+So the correct statement is not "Windows can't do the iCloud thing". It is:
+every platform has the export; Apple additionally has it automatically.
 
 **Open questions.** Whether `targetType` in plaintext is a line we hold under
 pressure (the first feature that wants one more plaintext field is the test);
 whether the blinded index needs rotation when a parent is removed from a family,
-and what re-encrypting a family's whole policy costs; whether PRF coverage is
-good enough in 2026 to be primary rather than an optimization; and whether a
-family that opts into system-managed keys can ever go back to client-managed
-without a full re-key (it can, but only forward — see 5.3).
+and what re-encrypting a family's whole policy costs; whether a family that opts
+into system-managed keys can go back to client-managed without a full re-key (it
+can, but only forward — see 5.3); and how the console re-derives the key each
+session without asking a parent to touch their authenticator on every visit,
+which is the one UX cost of memory-only key storage (§5.6) and has no obvious
+answer that is not "cache the key somewhere", i.e. not an answer.
+
+**Must be verified before any of this is designed further** — each is a fact
+about a platform, not a judgement call, and each changes the shape above:
+
+1. **WebAuthn PRF / `hmac-secret` support in Windows Hello**, per build. If it
+   is absent on the builds families actually run, the password tier stops being
+   a fallback and becomes the common case for Windows-only parents — and that
+   tier is not end-to-end (§5.7).
+2. **Whether Windows Hello passkeys sync** via Microsoft-account backup, and
+   whether that is dependable enough to count as surviving device loss. Until
+   verified it counts as one device-bound unwrap.
+3. **TPM/CNG non-exportable key availability** on consumer Windows 11 Home,
+   including machines with no usable TPM, where the floor is DACL + DPAPI alone.
+4. **Keychain access-group behaviour** for a key shared between the containing
+   app, two NetworkExtension providers and a Safari extension — the same App
+   Group set, but the Keychain is a different sharing mechanism than the App
+   Group container `PolicyStore` uses today.
