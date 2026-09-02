@@ -739,10 +739,32 @@ function spendOnce(res) {
     .catch((e) => console.warn("[ajar] could not report a spent grant to the app:", e));
 }
 
-function blockedPageUrl(originalUrl, key, reason) {
+/**
+ * The HOST of a page, or nothing. Used for the referrer, where the host is the
+ * whole point: "from reddit.com" is the signal a parent needs, and the rest of
+ * that URL is not ours to move. Reduced HERE, at capture, so a full referring
+ * URL never enters the block page's address bar in the first place.
+ */
+function hostOf(url) {
+  try {
+    const h = new URL(url).hostname.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
+    return h.includes(".") ? h : "";
+  } catch {
+    return "";
+  }
+}
+
+function blockedPageUrl(originalUrl, key, reason, fromHost) {
   const u = new URL(browser.runtime.getURL(BLOCKED_PAGE));
   u.searchParams.set("u", originalUrl);
   if (key) u.searchParams.set("k", key);
+  // WHERE THEY WERE. Display context for the parent — "from
+  // classroom.google.com" and "from a YouTube search" are not the same decision
+  // and looked identical in the console. Never used to decide anything here or
+  // on the server (docs/ROADMAP.md §4): any approved domain that hosts user
+  // content is a laundering surface, so a referrer is evidence for a person,
+  // not an input. Same-host referrers are dropped as noise.
+  if (fromHost && fromHost !== hostOf(originalUrl)) u.searchParams.set("from", fromHost);
   // WHY it was closed. `decide()` has always returned this and it stopped here,
   // so the Mac block page could not say why — the one line UX_PRINCIPLES §9
   // singles out for reducing the threat-to-freedom that drives circumvention.
@@ -760,7 +782,11 @@ browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
   if (!blocked) spendOnce(res);
   if (blocked) {
     try {
-      await browser.tabs.update(details.tabId, { url: blockedPageUrl(details.url, key, reason) });
+      // The page they are LEAVING. `onBeforeNavigate` fires before the tab's URL
+      // changes, so the tab still holds where they came from.
+      let fromHost = "";
+      try { fromHost = hostOf((await browser.tabs.get(details.tabId))?.url ?? ""); } catch { /* new tab */ }
+      await browser.tabs.update(details.tabId, { url: blockedPageUrl(details.url, key, reason, fromHost) });
     } catch (e) {
       console.warn("[guard] redirect failed:", e);
     }
@@ -787,8 +813,11 @@ for (const event of ["onHistoryStateUpdated", "onReferenceFragmentUpdated"]) {
     const res = decide(details.url);
     if (!res.blocked) { spendOnce(res); return; }
     try {
+      // onHistoryStateUpdated fires AFTER the URL changed, so the tab no longer
+      // holds where they came from; there is no referrer to give here and the
+      // block page simply omits the line. content.js's message carries one.
       await browser.tabs.update(details.tabId,
-        { url: blockedPageUrl(details.url, res.key, res.reason) });
+        { url: blockedPageUrl(details.url, res.key, res.reason, "") });
     } catch (e) {
       console.warn("[ajar] in-page redirect failed:", e);
     }
@@ -820,6 +849,9 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
     // `sender.frameId` is the browser's account of where the message came from,
     // not the page's, so a hostile frame cannot claim to be the top one.
     const isTopFrame = sender.frameId === 0;
+    // For an in-page route change the "referrer" is the route they were on,
+    // which content.js tracks as `lastUrl` and sends as `from`.
+    const fromHost = hostOf(msg.from || sender.tab?.url || "");
     const res = decide(msg.url);
     const { blocked, key, reason } = res;
     // Only a top-level load spends a one-time grant, same rule as the
@@ -830,7 +862,7 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
         // Same three arguments as the navigation path above. An SPA route change
         // is a real load to a parent, so it must not be the one that arrives
         // without a reason.
-        await browser.tabs.update(sender.tab.id, { url: blockedPageUrl(msg.url, key, reason) });
+        await browser.tabs.update(sender.tab.id, { url: blockedPageUrl(msg.url, key, reason, fromHost) });
       } catch (e) {
         console.warn("[guard] SPA redirect failed:", e);
       }
@@ -850,7 +882,10 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
     if (BACKEND_MODE) {
       const [targetType, targetValue] = key ? key.split(/:(.+)/) : ["URL", msg.url];
       try {
-        await postAccessRequest({ targetType, targetValue, title: msg.title || undefined, url: msg.url, reason: msg.reason || undefined });
+        await postAccessRequest({
+          targetType, targetValue, title: msg.title || undefined, url: msg.url,
+          reason: msg.reason || undefined, referrerHost: msg.from || undefined,
+        });
         return { ok: true };
       } catch (e) {
         return { ok: false, error: String(e) };

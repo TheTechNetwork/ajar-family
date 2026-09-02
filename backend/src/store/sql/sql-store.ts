@@ -466,17 +466,18 @@ export class SqlStore implements Repository {
   // access requests & decisions
   async createAccessRequest(r: AccessRequest) {
     await this.db.run(
-      `INSERT INTO access_requests(id,family_id,child_id,device_id,target_type,target_value,title,url,reason,status,created_at)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-      [r.id, r.familyId, r.childId, r.deviceId, r.targetType, r.targetValue, s(r.title), s(r.url), s(r.reason), r.status, r.createdAt]);
+      `INSERT INTO access_requests(id,family_id,child_id,device_id,target_type,target_value,title,url,reason,referrer_host,status,created_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [r.id, r.familyId, r.childId, r.deviceId, r.targetType, r.targetValue, s(r.title), s(r.url), s(r.reason),
+       s(r.referrerHost), r.status, r.createdAt]);
     return r;
   }
   async getAccessRequest(id: string) { return this.mapRequest(await this.db.get("SELECT * FROM access_requests WHERE id=?", [id])); }
   async updateAccessRequest(r: AccessRequest) {
     // title/url/reason are updatable too: a deduped re-file can carry richer
     // context than the first bare request did (see ApprovalService.createRequest).
-    await this.db.run("UPDATE access_requests SET status=?, title=?, url=?, reason=? WHERE id=?",
-      [r.status, s(r.title), s(r.url), s(r.reason), r.id]);
+    await this.db.run("UPDATE access_requests SET status=?, title=?, url=?, reason=?, referrer_host=? WHERE id=?",
+      [r.status, s(r.title), s(r.url), s(r.reason), s(r.referrerHost), r.id]);
     return r;
   }
   async listAccessRequests(familyId: string, status?: string) {
@@ -490,6 +491,7 @@ export class SqlStore implements Repository {
       id: r.id as string, familyId: r.family_id as string, childId: r.child_id as string, deviceId: r.device_id as string,
       targetType: r.target_type as PolicyTargetType, targetValue: r.target_value as string,
       title: (r.title as string) ?? undefined, url: (r.url as string) ?? undefined, reason: (r.reason as string) ?? undefined,
+      referrerHost: (r.referrer_host as string) ?? undefined,
       status: r.status as AccessRequest["status"], createdAt: r.created_at as string,
     } : null;
   }

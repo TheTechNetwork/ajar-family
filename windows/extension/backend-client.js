@@ -253,13 +253,15 @@ export async function consumeGrant(ruleId) {
 }
 
 /** Post an access request from the block page. */
-export async function postAccessRequest({ targetType, targetValue, title, url, reason }) {
+export async function postAccessRequest({ targetType, targetValue, title, url, reason, referrerHost }) {
   const cfg = await getConfig();
   if (!cfg.backendUrl || !cfg.deviceToken) throw new Error("not enrolled");
   const res = await fetch(`${cfg.backendUrl}/v1/requests`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${cfg.deviceToken}` },
-    body: JSON.stringify({ targetType, targetValue, title, url, reason }),
+    // `referrerHost` is the HOST the child was on, not the URL — display context
+    // for the parent, never an input to any decision (docs/ROADMAP.md §4).
+    body: JSON.stringify({ targetType, targetValue, title, url, reason, referrerHost }),
   });
   if (!res.ok) throw new Error(`request failed: ${res.status}`);
   return res.json();

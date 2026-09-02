@@ -132,11 +132,21 @@ build it; it is the constraint the design has to be shaped around:
 - **Hosts, not URLs.** A baseline of exact URLs re-closes on every new page of a
   site the child already uses, which is the interrupting behaviour learn mode
   exists to avoid. DOMAIN rules are the right output.
-- **YouTube does not baseline.** You cannot turn "the 300 videos they watched"
-  into an allowlist, and doing it per-channel quietly widens what a parent
-  thought they were approving. YouTube keeps its own default and stays out of the
-  proposed set — the per-video flow is the product, not something to pre-approve
-  in bulk.
+- **YouTube baselines by CHANNEL, and only with provenance.** "The 300 videos
+  they watched" is not an allowlist, and a bare list of channels quietly widens
+  what a parent thought they were approving. But a channel the child reached
+  **from a domain that is already in the baseline** — an embed on the school
+  site, a link from a homework page — is a different object: it arrives with
+  evidence of why it is there. Propose those, each shown with where it came
+  from ("Kurzgesagt — first seen from classroom.google.com"), and leave channels
+  found by searching YouTube out of it. The per-video flow stays the product for
+  everything else.
+
+  This needs the referring domain to be recorded, which is item 4 below, and it
+  needs that referrer treated as **evidence for a human, never an input to an
+  automatic decision** — see the trust note there. A proposal a parent ticks is
+  fine; a promotion that happens because a referrer claimed something is the
+  playlist bug again.
 - **The parent reviews before it becomes policy.** Auto-applying is wrong twice:
   anything the child found in week one is in the baseline forever, and a parent
   who never saw the list cannot be said to have set it. The end state is a
@@ -160,3 +170,56 @@ new policy target type and no new evaluator tier.
 coverage-based ("we have seen enough"); what happens to a device enrolled
 mid-window; whether a second child inherits the first one's baseline as a
 starting suggestion; and the disclosure question above, which is the blocker.
+
+
+## 4. The referring domain, in the ask
+
+**Idea.** When a child asks to open something, tell the parent where they were
+when they hit it.
+
+**Why.** These are not the same decision, and today they look identical in the
+console:
+
+> **Kurzgesagt — The Egg** · YouTube video
+> from **classroom.google.com**
+
+> **Kurzgesagt — The Egg** · YouTube video
+> from **youtube.com** (search results)
+
+A parent deciding in fifteen seconds on their phone is doing it on context, and
+the single most useful piece of context is the one thing the product currently
+throws away. It is also what makes learn mode able to say anything at all about
+YouTube (item 3).
+
+**THE TRUST BOUNDARY, and it is the whole design.** The referrer is supplied by
+the child's device, and this codebase has already been bitten three times by
+exactly this shape: `resolvedHosts` opened the safety floor, `list=` opened every
+video on YouTube, and an unvalidated `targetType` opened the entire web. A
+referrer is worse than those in one way — a child does not even need to forge it.
+Any approved domain that hosts user content (a forum, a doc, a blog, a subreddit)
+is a laundering surface: put the link there, follow it, and the referrer honestly
+says "approved domain".
+
+So: **display only.** The referrer is shown to a parent, who can weigh it. It
+must never widen a rule, never satisfy a match, never promote anything
+automatically, and never appear in `EvalContext`. If a future feature wants to
+act on it, that feature is wrong.
+
+**Privacy.** A referrer is another URL the child visited, and the product's claim
+is that only the thing they explicitly ask about is ever sent. Send the referring
+**host**, not the URL — "from reddit.com", never
+"from reddit.com/r/<something they would not want shown>". That keeps the signal
+a parent needs and drops nearly all of the exposure.
+
+**Where it can come from.** The Safari and Windows extensions have it
+(`webRequest` `initiator` / `documentUrl`, and `document.referrer` in the content
+script for an in-page route change). `NEFilterDataProvider` does **not** — a
+browser flow carries the URL and no referrer — so on iOS this is a
+Safari-extension-only signal and the field has to be optional everywhere, with
+the console saying nothing rather than "unknown" when it is absent.
+
+**Open questions.** Whether to show the referring host for a same-host referrer
+at all (youtube.com → youtube.com is noise); whether "no referrer" is worth
+distinguishing from "typed directly", which is a real signal of intent; and
+whether the block page should show the child what it is about to tell their
+parent, which the product's no-surprises posture probably requires.

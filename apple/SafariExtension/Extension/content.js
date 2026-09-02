@@ -23,6 +23,7 @@
 
   function notify(url) {
     if (url === lastUrl) return;
+    const previous = lastUrl;
     lastUrl = url;
     try {
       // Ask the background worker to evaluate.
@@ -34,7 +35,10 @@
       // allowed page because an embed on it is blocked is its own bug — so this
       // frame is what closes itself. Stop the media and empty the document, and
       // the surrounding page carries on.
-      browser.runtime.sendMessage({ type: "EVALUATE_URL", url }).then((res) => {
+      // `from` is the route they were ON — the referrer for an in-page change.
+      // Captured before `lastUrl` is overwritten above; the background worker
+      // reduces it to a host and never lets it decide anything.
+      browser.runtime.sendMessage({ type: "EVALUATE_URL", url, from: previous }).then((res) => {
         if (!res || !res.blocked) return;
         hardStopPlayback();
         // `res.top` is the background worker's reading of sender.frameId, not

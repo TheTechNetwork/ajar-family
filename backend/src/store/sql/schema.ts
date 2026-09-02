@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS policy_versions (
 CREATE TABLE IF NOT EXISTS access_requests (
   id TEXT PRIMARY KEY, family_id TEXT NOT NULL, child_id TEXT NOT NULL, device_id TEXT NOT NULL,
   target_type TEXT NOT NULL, target_value TEXT NOT NULL, title TEXT, url TEXT, reason TEXT,
-  status TEXT NOT NULL, created_at TEXT NOT NULL
+  referrer_host TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_requests_family ON access_requests(family_id);
 
@@ -152,4 +152,8 @@ export const MIGRATIONS_SQL: string[] = [
   // has genuinely never proved its address, and saying otherwise in the column
   // that means "proved" would be a lie the rest of the system then trusts.
   "ALTER TABLE users ADD COLUMN email_verified_at TEXT",
+  // Where the child was when they hit it. Nullable and never backfilled: a
+  // request filed before this existed genuinely has no referrer, and iOS's
+  // content filter has none to give at all.
+  "ALTER TABLE access_requests ADD COLUMN referrer_host TEXT",
 ];

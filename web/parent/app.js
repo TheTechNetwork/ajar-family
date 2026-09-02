@@ -979,6 +979,15 @@ function renderRequest(r) {
          title is genuinely the useful part when it is honest.
          (No backticks in this comment: it lives inside a template literal.) -->
     <p class="target">${escapeHtml(TYPE_LABEL[r.targetType] ?? r.targetType)} — <span class="target-value">${escapeHtml(r.targetValue)}</span></p>
+    <!-- WHERE THEY WERE. The single most useful piece of context for a decision
+         made in fifteen seconds on a phone, and the product used to throw it
+         away: the same video reached from a school page and from a search
+         results page looked identical here.
+
+         Absent is normal, not an error — iOS's content filter has no referrer
+         to give — so nothing is rendered rather than "unknown", which would
+         read as a finding about the child. -->
+    ${r.referrerHost ? `<p class="fromline">from <strong>${escapeHtml(r.referrerHost)}</strong></p>` : ""}
     ${r.reason ? `<p class="quote">“${escapeHtml(r.reason)}”</p>` : ""}
     ${r.url && r.url !== r.targetValue ? `<details>
       <summary>Details</summary>

@@ -1026,6 +1026,38 @@ export class PolicyService {
 // ---------------------------------------------------------------------------
 
 /** Outer bound on an unconsumed "just once" grant. See ApprovalService.consumeGrant. */
+/**
+ * The referring host, cleaned up, or nothing.
+ *
+ * DISPLAY ONLY — see `AccessRequest.referrerHost`. It never reaches the
+ * evaluator and never widens a rule; the only thing riding on this function is
+ * whether a parent is shown a plausible hostname or nothing at all.
+ *
+ * Anything that is not a plausible host is DROPPED rather than shown. A device
+ * that sends junk, a full URL, or a sentence gets no referrer line — which is
+ * the honest outcome, because a parent reading "from <something odd>" would be
+ * being told something the product cannot stand behind. Accepts a full URL too,
+ * since a client sending `document.referrer` verbatim is the obvious mistake to
+ * absorb rather than punish.
+ */
+export function normalizeReferrerHost(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let v = raw.trim();
+  if (!v) return undefined;
+  // A client that sent the whole referrer: take its host and drop the rest,
+  // which is the part we deliberately do not carry.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) {
+    try { v = new URL(v).hostname; } catch { return undefined; }
+  }
+  v = v.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
+  if (v.length > 253 || v.length === 0) return undefined;
+  const labels = v.split(".");
+  if (labels.length < 2) return undefined;                       // no bare TLDs, no "localhost"
+  if (!/^[a-z]{2,63}$/.test(labels[labels.length - 1]!)) return undefined;
+  if (!labels.every((l) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(l))) return undefined;
+  return v;
+}
+
 export const ONCE_GRANT_TTL_MS = 5 * 60_000;
 
 /**
@@ -1173,6 +1205,7 @@ export class ApprovalService {
   async createRequest(input: {
     familyId: string; childId: string; deviceId: string;
     targetType: PolicyTargetType; targetValue: string; title?: string; url?: string; reason?: string;
+    referrerHost?: string;
   }): Promise<AccessRequest> {
     const device = await this.repo.getDevice(input.deviceId);
     if (!device || device.familyId !== input.familyId || device.childId !== input.childId)
@@ -1217,9 +1250,13 @@ export class ApprovalService {
         title: duplicate.title ?? input.title,
         url: duplicate.url ?? input.url,
         reason: duplicate.reason ?? input.reason,
+        // FIRST referrer wins, like the rest of this block. A re-file after the
+        // child has wandered elsewhere would otherwise rewrite where they were
+        // when they hit it, which is the one thing this field is for.
+        referrerHost: duplicate.referrerHost ?? normalizeReferrerHost(input.referrerHost),
       };
       const changed = enriched.title !== duplicate.title || enriched.url !== duplicate.url
-        || enriched.reason !== duplicate.reason;
+        || enriched.reason !== duplicate.reason || enriched.referrerHost !== duplicate.referrerHost;
       if (changed) await this.repo.updateAccessRequest(enriched);
       return enriched;
     }
@@ -1228,6 +1265,7 @@ export class ApprovalService {
       id: uid(), familyId: input.familyId, childId: input.childId, deviceId: input.deviceId,
       targetType: input.targetType, targetValue: input.targetValue,
       title: input.title, url: input.url, reason: input.reason,
+      referrerHost: normalizeReferrerHost(input.referrerHost),
       status: "PENDING", createdAt: now(),
     });
     await this.repo.addAuditEvent({

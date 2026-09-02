@@ -706,6 +706,10 @@
           "reason": {
             "type": "string"
           },
+          "referrerHost": {
+            "type": "string",
+            "description": "The host the child was on when they hit this. Display context for the parent only — never an input to any decision. Often absent."
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -4107,6 +4111,10 @@
                   },
                   "reason": {
                     "type": "string"
+                  },
+                  "referrerHost": {
+                    "type": "string",
+                    "description": "The HOST the child was on when they hit this, e.g. \"classroom.google.com\" — not the page, because only the thing a child explicitly asks about is ever sent. DISPLAY ONLY: it is shown to the parent and never widens a rule, satisfies a match, or promotes anything automatically. Any approved domain hosting user content is a laundering surface, so a referrer is evidence for a person, not an input to the evaluator. Normalized server-side; a value that is not a plausible host is dropped rather than shown. Optional and often absent — iOS's content filter has no referrer to give."
                   }
                 },
                 "required": [

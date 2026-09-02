@@ -31,6 +31,9 @@
 const params = new URLSearchParams(location.search);
 const blockedUrl = params.get("u") || "";
 const reason = params.get("reason") || "";
+// Where they were. A HOST, reduced by the worker before it reached this address
+// bar; passed straight back so the console can show it. Decides nothing.
+const fromHost = params.get("from") || "";
 const key = params.get("key") || "";
 
 // Why it's closed. An agent, not a passive voice; no invisible "list"; and
@@ -360,6 +363,7 @@ btn.addEventListener("click", () => {
         type: "requestAccess",
         url: blockedUrl,
         key: key || null,
+        from: fromHost || null,
         userReason: $("note").value || null,
       },
       (resp) => {

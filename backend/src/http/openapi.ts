@@ -222,6 +222,7 @@ const schemas = {
       id: { type: "string" }, familyId: { type: "string" }, childId: { type: "string" }, deviceId: { type: "string" },
       targetType: { $ref: "#/components/schemas/PolicyTargetType" }, targetValue: { type: "string" },
       title: { type: "string" }, url: { type: "string" }, reason: { type: "string" },
+      referrerHost: { type: "string", description: "The host the child was on when they hit this. Display context for the parent only — never an input to any decision. Often absent." },
       status: { type: "string", enum: ["PENDING", "APPROVED", "DENIED", "EXPIRED"] },
       createdAt: { type: "string", format: "date-time" },
     },
@@ -634,7 +635,7 @@ export const openapiDocument = {
           + " type claims. URL_PATTERN and CATEGORY are parent-authoring constructs and are refused here:"
           + " the rule a parent's approval mints comes from these two fields, and a device that could name"
           + " its own target could name a wildcard.",
-        requestBody: { required: true, content: json({ type: "object", properties: { targetType: { $ref: "#/components/schemas/PolicyTargetType" }, targetValue: { type: "string" }, title: { type: "string" }, url: { type: "string" }, reason: { type: "string" } }, required: ["targetType", "targetValue"] }) },
+        requestBody: { required: true, content: json({ type: "object", properties: { targetType: { $ref: "#/components/schemas/PolicyTargetType" }, targetValue: { type: "string" }, title: { type: "string" }, url: { type: "string" }, reason: { type: "string" }, referrerHost: { type: "string", description: "The HOST the child was on when they hit this, e.g. \"classroom.google.com\" — not the page, because only the thing a child explicitly asks about is ever sent. DISPLAY ONLY: it is shown to the parent and never widens a rule, satisfies a match, or promotes anything automatically. Any approved domain hosting user content is a laundering surface, so a referrer is evidence for a person, not an input to the evaluator. Normalized server-side; a value that is not a plausible host is dropped rather than shown. Optional and often absent — iOS's content filter has no referrer to give." } }, required: ["targetType", "targetValue"] }) },
         responses: { "201": { description: "Request", content: json({ $ref: "#/components/schemas/AccessRequest" }) }, "401": errorResponses["401"], "403": errorResponses["403"] } },
     },
     "/v1/families/{familyId}/requests": {

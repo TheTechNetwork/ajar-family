@@ -411,6 +411,10 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
     const originalUrl = params.get("u") || "";
     const canonicalKey = params.get("k") || "";
     const blockReason = params.get("reason") || "";
+    // Where they were. A HOST, reduced by the background worker before it ever
+    // reached this address bar. Passed straight back so the parent's console can
+    // show it; nothing on this page or the server decides anything with it.
+    const fromHost = params.get("from") || "";
     const askKey = canonicalKey || (originalUrl ? `URL:${originalUrl}` : "");
 
     const $ = (id) => document.getElementById(id);
@@ -688,6 +692,7 @@ footer { margin-top: var(--s-5); font-size: var(--t-sm); color: var(--muted); }
           // it was written; the same 12 seconds, deliberately.
           const answered = ext.runtime.sendMessage({
             type: "REQUEST_ACCESS",
+            from: fromHost,
             key: canonicalKey,
             url: originalUrl,
             reason: reasonEl.value.trim(),

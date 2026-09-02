@@ -86,6 +86,10 @@ const bodies = {
     targetType: v.oneOf(TARGET_VALUES), targetValue: v.str({ max: 2048 }),
     title: v.optional(v.str({ max: 512 })), url: v.optional(v.str({ max: 2048 })),
     reason: v.optional(v.str({ max: 1024 })),
+    // A HOST, so the cap is a host's length and not a URL's. See
+    // AccessRequest.referrerHost: display only, normalized server-side, and a
+    // value that fails to look like a host is dropped rather than shown.
+    referrerHost: v.optional(v.str({ max: 253 })),
   }),
   decide: v.object({
     decision: v.oneOf(ACTION_VALUES), scope: v.oneOf(APPROVAL_SCOPE_VALUES),
@@ -1060,7 +1064,8 @@ ${safe ? `<script>
     const b = await v.readBody(req, bodies.createRequest);
     const reqRec = await app.approvals.createRequest({
       familyId: dev.familyId, childId: dev.childId, deviceId: dev.deviceId,
-      targetType: b.targetType, targetValue: b.targetValue, title: b.title, url: b.url, reason: b.reason,
+      targetType: b.targetType, targetValue: b.targetValue, title: b.title, url: b.url,
+      reason: b.reason, referrerHost: b.referrerHost,
     });
     return ok(reqRec, 201);
   });

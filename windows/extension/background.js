@@ -189,7 +189,7 @@ async function reevaluateOpenTabs() {
       // On a real page that policy now blocks (cold-start slip, or a new rule).
       const res = decide(tab.url, "main_frame");
       if (res.action === "BLOCK") {
-        chrome.tabs.update(tab.id, { url: blockedUrlFor(tab.url, res) });
+        chrome.tabs.update(tab.id, { url: blockedUrlFor(tab.url, res, "") });
       }
     }
   }
@@ -630,9 +630,31 @@ function spendOnce(res) {
   });
 }
 
-function blockedUrlFor(url, res) {
+/**
+ * The HOST of a page, or "". The referrer is carried as a host and nothing more:
+ * "from reddit.com" is the signal a parent needs, and the rest of that URL is
+ * not ours to move. Reduced HERE, at capture, so a full referring URL never
+ * enters the block page's address bar.
+ */
+function hostOf(url) {
+  try {
+    const h = new URL(url).hostname.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
+    return h.includes(".") ? h : "";
+  } catch {
+    return "";
+  }
+}
+
+function blockedUrlFor(url, res, fromHost) {
+  // `from` is display context for the parent — "from classroom.google.com" and
+  // "from a search results page" are not the same decision and looked identical
+  // in the console. It NEVER decides anything, here or on the server
+  // (docs/ROADMAP.md §4): any approved domain hosting user content is a
+  // laundering surface, so a referrer is evidence for a person, not an input.
+  // Same-host referrers are dropped as noise.
+  const from = fromHost && fromHost !== hostOf(url) ? `&from=${encodeURIComponent(fromHost)}` : "";
   return `${EXT_BLOCK_PAGE}?u=${encodeURIComponent(url)}&reason=${encodeURIComponent(res.reason)}` +
-    (res.matchedKey ? `&key=${encodeURIComponent(res.matchedKey)}` : "");
+    (res.matchedKey ? `&key=${encodeURIComponent(res.matchedKey)}` : "") + from;
 }
 
 function onBeforeRequestBlocking(details) {
@@ -645,7 +667,10 @@ function onBeforeRequestBlocking(details) {
     // Redirect only real page navigations to the friendly block page; for
     // sub-resources cancel instead (a redirect would break the parent page).
     if (details.type === "main_frame") {
-      return { redirectUrl: blockedUrlFor(url, res) };
+      // `initiator` is the browser's own account of the origin that started this
+      // navigation — better than reading the tab, and not something the page
+      // supplies about itself.
+      return { redirectUrl: blockedUrlFor(url, res, hostOf(details.initiator || details.documentUrl || "")) };
     }
     return { cancel: true };
   }
@@ -714,6 +739,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       postAccessRequest({
         targetType, targetValue,
         title: msg.title || undefined, url: msg.url, reason: msg.userReason || undefined,
+        referrerHost: msg.from || undefined,
       })
         .then(() => sendResponse({ ok: true }))
         .catch((e) => sendResponse({ ok: false, error: String(e) }));
