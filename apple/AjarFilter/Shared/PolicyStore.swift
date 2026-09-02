@@ -90,9 +90,13 @@ public final class PolicyStore {
     private let highWaterKey = "policy_version_high_water"
     private let provisionedKey = "policy_device_provisioned"
     private let tamperKey = "policy_tamper_detected"
+    // NOT #if DEBUG: `spendGrant` is how a ONCE approval is burned on a real
+    // device, so this key has to exist in Release. It briefly did not, and the
+    // only thing that noticed was the iOS build — Release compiles the same
+    // source that `#if DEBUG` had quietly emptied.
+    private let spentGrantsKey = "policy_spent_grant_ids"
     #if DEBUG
     private let devUnsignedKey = "policy_dev_unsigned"
-    private let spentGrantsKey = "policy_spent_grant_ids"
     #endif
 
     /// Where the category Bloom filters come from. Injectable so the self-test
