@@ -80,3 +80,25 @@ Not "Ajar (PoC B)". This string is what a child sees in Safari's extension list 
 
 Was "YouTube Guard" — off-brand, and YouTube-specific on an extension whose whole point is that the policy model is not YouTube-only.
 
+
+## What a child reads, and why it changed (2026-09-03)
+
+Two strings in this manifest are rendered by Safari on the child's own device,
+in Settings, under the extension's name. They were written for a reader of this
+repository and shipped to a reader of a phone.
+
+**`description`** said *"Ajar — per-video YouTube approvals in Safari, consuming
+the shared policy model. Experiment scaffold — not production."* Two faults, and
+this file already names the first one under `_name_note`: shipping the letters
+PoC to a child's screen is the same defect as the filter calling itself
+"ParentFilter PoC" in Settings, which a device screenshot caught once already.
+The second is that it describes the product as YouTube-specific on the one
+surface where a child forms their idea of what this thing is, when the policy
+model has never been YouTube-only.
+
+**`host_permissions`** listed `*://localhost/*` and `*://127.0.0.1/*`. Safari
+renders granted hosts by name, so a child's permission screen showed two
+development addresses. They were also redundant: `<all_urls>` is present and
+subsumes every specific entry, so all of them bought nothing. The list is now
+`<all_urls>` alone, which is what the extension actually needs and what the
+justification above is written about.

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ajar",
   "version": "0.0.1",
-  "description": "Ajar — per-video YouTube approvals in Safari, consuming the shared policy model. Experiment scaffold — not production.",
+  "description": "Ask a parent to open a page, and get an answer in seconds. Everything else in Safari works normally.",
   "icons": {
     "48": "icon-48.png",
     "96": "icon-96.png",
@@ -37,13 +37,6 @@
     "nativeMessaging"
   ],
   "host_permissions": [
-    "*://*.youtube.com/*",
-    "*://youtu.be/*",
-    "*://m.youtube.com/*",
-    "*://*.youtube-nocookie.com/*",
-    "*://youtubei.googleapis.com/*",
-    "*://localhost/*",
-    "*://127.0.0.1/*",
     "<all_urls>"
   ],
   "web_accessible_resources": [
