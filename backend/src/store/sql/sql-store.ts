@@ -393,7 +393,15 @@ export class SqlStore implements Repository {
       [r.id, r.scope.familyId, r.target, r.value, r.action, r.scope.type, s(r.scope.childId), s(r.scope.deviceId), r.priority ?? null, r.createdAt, r.createdBy]);
     return r;
   }
-  async deleteRule(_familyId: string, ruleId: string) { await this.db.run("DELETE FROM rules WHERE id=?", [ruleId]); }
+  // Scoped to the family, because the caller passes one and the tenancy check
+  // upstream is about a DIFFERENT family's membership. Ignoring it made
+  // `DELETE /v1/families/<mine>/rules/<a rule of yours>` return 200 and delete
+  // your rule — the one tenancy hole in an otherwise clean set. It needs a known
+  // rule id, so it was not remotely exploitable; it was still the store quietly
+  // not honouring an argument its own signature declares.
+  async deleteRule(familyId: string, ruleId: string) {
+    await this.db.run("DELETE FROM rules WHERE id=? AND family_id=?", [ruleId, familyId]);
+  }
   async listRules(familyId: string) {
     return (await this.db.all("SELECT * FROM rules WHERE family_id=?", [familyId])).map((r): PolicyRule => ({
       id: r.id as string, target: r.target as PolicyTargetType, value: r.value as string, action: r.action as RuleAction,
@@ -421,6 +429,9 @@ export class SqlStore implements Repository {
   }
   /** Single-use consumption: the UPDATE itself is the guard, so two devices
    *  racing on the same grant cannot both spend it. */
+  async deleteTemporaryRule(familyId: string, id: string) {
+    await this.db.run("DELETE FROM temp_rules WHERE id=? AND family_id=?", [id, familyId]);
+  }
   async markTemporaryRuleConsumed(id: string, at: string) {
     const before = await this.getTemporaryRule(id);
     if (!before || before.consumedAt) return false;
@@ -455,17 +466,18 @@ export class SqlStore implements Repository {
   // access requests & decisions
   async createAccessRequest(r: AccessRequest) {
     await this.db.run(
-      `INSERT INTO access_requests(id,family_id,child_id,device_id,target_type,target_value,title,url,reason,status,created_at)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-      [r.id, r.familyId, r.childId, r.deviceId, r.targetType, r.targetValue, s(r.title), s(r.url), s(r.reason), r.status, r.createdAt]);
+      `INSERT INTO access_requests(id,family_id,child_id,device_id,target_type,target_value,title,url,reason,referrer_host,status,created_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [r.id, r.familyId, r.childId, r.deviceId, r.targetType, r.targetValue, s(r.title), s(r.url), s(r.reason),
+       s(r.referrerHost), r.status, r.createdAt]);
     return r;
   }
   async getAccessRequest(id: string) { return this.mapRequest(await this.db.get("SELECT * FROM access_requests WHERE id=?", [id])); }
   async updateAccessRequest(r: AccessRequest) {
     // title/url/reason are updatable too: a deduped re-file can carry richer
     // context than the first bare request did (see ApprovalService.createRequest).
-    await this.db.run("UPDATE access_requests SET status=?, title=?, url=?, reason=? WHERE id=?",
-      [r.status, s(r.title), s(r.url), s(r.reason), r.id]);
+    await this.db.run("UPDATE access_requests SET status=?, title=?, url=?, reason=?, referrer_host=? WHERE id=?",
+      [r.status, s(r.title), s(r.url), s(r.reason), s(r.referrerHost), r.id]);
     return r;
   }
   async listAccessRequests(familyId: string, status?: string) {
@@ -479,6 +491,7 @@ export class SqlStore implements Repository {
       id: r.id as string, familyId: r.family_id as string, childId: r.child_id as string, deviceId: r.device_id as string,
       targetType: r.target_type as PolicyTargetType, targetValue: r.target_value as string,
       title: (r.title as string) ?? undefined, url: (r.url as string) ?? undefined, reason: (r.reason as string) ?? undefined,
+      referrerHost: (r.referrer_host as string) ?? undefined,
       status: r.status as AccessRequest["status"], createdAt: r.created_at as string,
     } : null;
   }

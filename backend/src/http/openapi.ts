@@ -222,6 +222,7 @@ const schemas = {
       id: { type: "string" }, familyId: { type: "string" }, childId: { type: "string" }, deviceId: { type: "string" },
       targetType: { $ref: "#/components/schemas/PolicyTargetType" }, targetValue: { type: "string" },
       title: { type: "string" }, url: { type: "string" }, reason: { type: "string" },
+      referrerHost: { type: "string", description: "The host the child was on when they hit this. Display context for the parent only — never an input to any decision. Often absent." },
       status: { type: "string", enum: ["PENDING", "APPROVED", "DENIED", "EXPIRED"] },
       createdAt: { type: "string", format: "date-time" },
     },
@@ -580,6 +581,9 @@ export const openapiDocument = {
         responses: { "200": { description: "Audit events", content: json({ type: "array", items: { $ref: "#/components/schemas/AuditEvent" } }) }, "403": errorResponses["403"] } },
     },
     "/v1/families/{familyId}/children/{childId}/defaults": {
+      get: { tags: ["policy"], summary: "Read a child's default policy (web + YouTube)", security: userAuth,
+        parameters: [familyIdParam, { name: "childId", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Defaults", content: json({ $ref: "#/components/schemas/DefaultPolicy" }) }, "401": errorResponses["401"], "403": errorResponses["403"] } },
       put: { tags: ["policy"], summary: "Set a child's default policy (web + YouTube)", security: userAuth,
         parameters: [familyIdParam, { name: "childId", in: "path", required: true, schema: { type: "string" } }],
         requestBody: { required: true, content: json({ $ref: "#/components/schemas/DefaultPolicy" }) },
@@ -591,6 +595,22 @@ export const openapiDocument = {
         responses: { "201": { description: "Rule", content: json({ $ref: "#/components/schemas/PolicyRule" }) }, "401": errorResponses["401"], "403": errorResponses["403"] } },
       get: { tags: ["policy"], summary: "List policy rules", security: userAuth, parameters: [familyIdParam],
         responses: { "200": { description: "Rules", content: json({ type: "array", items: { $ref: "#/components/schemas/PolicyRule" } }) }, "403": errorResponses["403"] } },
+    },
+    "/v1/categories/attribution": {
+      get: { tags: ["categories"], summary: "Credit required by the category data's licence", security: [],
+        description: "Public on purpose: it is a credit, and gating a credit behind a login defeats it. Rendered by /legal.html from this endpoint rather than retyped, so it cannot go stale.",
+        responses: { "200": { description: "Attribution", content: json({ type: "object", properties: { license: { type: "string" }, sources: { type: "array", items: { type: "object", properties: { name: { type: "string" }, url: { type: "string" }, license: { type: "string" } } } } } }) } } },
+    },
+    "/v1/families/{familyId}/grants": {
+      get: { tags: ["policy"], summary: "List live temporary grants (not expired, not spent)", security: userAuth,
+        parameters: [familyIdParam],
+        responses: { "200": { description: "Grants", content: json({ type: "array", items: { $ref: "#/components/schemas/TemporaryRule" } }) }, "401": errorResponses["401"], "403": errorResponses["403"] } },
+    },
+    "/v1/families/{familyId}/grants/{grantId}": {
+      delete: { tags: ["policy"], summary: "Take back a live grant before it runs out", security: userAuth,
+        description: "A permanent decision could always be deleted; a timed one could not, so a misfired \"30 minutes\" had to be waited out. Deletes rather than marking consumed \u2014 \"consumed\" means a ONCE grant was spent, and reusing it here would make the audit log say the child opened something they never did.",
+        parameters: [familyIdParam, { name: "grantId", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Revoked", content: json({ type: "object", properties: { revoked: { const: true } } }) }, "401": errorResponses["401"], "403": errorResponses["403"], "404": errorResponses["404"] } },
     },
     "/v1/families/{familyId}/rules/{ruleId}": {
       delete: { tags: ["policy"], summary: "Delete a policy rule", security: userAuth,
@@ -609,8 +629,13 @@ export const openapiDocument = {
     },
     "/v1/requests": {
       post: { tags: ["requests"], summary: "File an access request (device token)", security: userAuth,
-        description: "Requires a **device token**. The child device asks a parent to open one canonical target.",
-        requestBody: { required: true, content: json({ type: "object", properties: { targetType: { $ref: "#/components/schemas/PolicyTargetType" }, targetValue: { type: "string" }, title: { type: "string" }, url: { type: "string" }, reason: { type: "string" } }, required: ["targetType", "targetValue"] }) },
+        description: "Requires a **device token**. The child device asks a parent to open ONE canonical target."
+          + " `targetType` is limited to things a device actually hits — URL, DOMAIN, YOUTUBE_VIDEO,"
+          + " YOUTUBE_CHANNEL, YOUTUBE_PLAYLIST, APPLICATION — and `targetValue` must be the shape that"
+          + " type claims. URL_PATTERN and CATEGORY are parent-authoring constructs and are refused here:"
+          + " the rule a parent's approval mints comes from these two fields, and a device that could name"
+          + " its own target could name a wildcard.",
+        requestBody: { required: true, content: json({ type: "object", properties: { targetType: { $ref: "#/components/schemas/PolicyTargetType" }, targetValue: { type: "string" }, title: { type: "string" }, url: { type: "string" }, reason: { type: "string" }, referrerHost: { type: "string", description: "The HOST the child was on when they hit this, e.g. \"classroom.google.com\" — not the page, because only the thing a child explicitly asks about is ever sent. DISPLAY ONLY: it is shown to the parent and never widens a rule, satisfies a match, or promotes anything automatically. Any approved domain hosting user content is a laundering surface, so a referrer is evidence for a person, not an input to the evaluator. Normalized server-side; a value that is not a plausible host is dropped rather than shown. Optional and often absent — iOS's content filter has no referrer to give." } }, required: ["targetType", "targetValue"] }) },
         responses: { "201": { description: "Request", content: json({ $ref: "#/components/schemas/AccessRequest" }) }, "401": errorResponses["401"], "403": errorResponses["403"] } },
     },
     "/v1/families/{familyId}/requests": {

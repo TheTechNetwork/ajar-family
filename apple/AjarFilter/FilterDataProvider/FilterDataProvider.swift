@@ -198,10 +198,23 @@ final class FilterDataProvider: NEFilterDataProvider {
             if fromDefault, store.hasActiveVideoGrant() {
                 decision = EvalResult(action: .allow, reason: "playback-support",
                                       matchedRuleId: nil, matchedKey: "PLAYBACK:\(Host.normalize(host))")
-            } else if fromDefault, decision.action == .allow, decision.reason == "default:web" {
+            } else if fromDefault, decision.action == .allow, decision.reason == "default:web",
+                      YouTube.isExclusiveMediaHost(host) {
                 // No grant, and the ONLY thing letting this through was the web
                 // default. Shut it: this is YouTube's plumbing, and the family
                 // asked for YouTube to be opt-in.
+                //
+                // `isExclusiveMediaHost`, NOT `isPlaybackSupport`. The support
+                // list is a NEVER-BLOCK list — what must stay reachable while a
+                // video is approved — and this branch read it as its own
+                // inverse. `fonts.gstatic.com` is on it, so with no video
+                // approved (the normal state, most of every day) Google Fonts
+                // was blocked on EVERY site the child visited, with a browser
+                // flow getting the "Ask to open it" page for a font file and a
+                // parent-facing reason naming YouTube plumbing on a site that
+                // has nothing to do with YouTube. Approving any video made the
+                // whole web's fonts come back, which is not a clue anyone
+                // unwinds. Blocking is narrow; reachability stays generous.
                 decision = EvalResult(action: .block, reason: "playback-support:no-grant",
                                       matchedRuleId: nil, matchedKey: "PLAYBACK:\(Host.normalize(host))")
             }
@@ -260,6 +273,23 @@ final class FilterDataProvider: NEFilterDataProvider {
 
         switch decision.action {
         case .allow:
+            // SPEND A "JUST ONCE" GRANT, on a top-level page load only.
+            //
+            // `remediable` is true exactly for a browser flow — a page the child
+            // navigated to. A sub-resource must never burn the grant: it would
+            // be spent before the approved page had finished rendering, and the
+            // child would watch it fail in front of them. Same rule as the
+            // Safari extension.
+            //
+            // Until this existed, "Just once" was a TIMED grant with a five
+            // minute backstop: the child could close the tab and reopen it as
+            // often as they liked. The console offered an option the device did
+            // not implement.
+            if remediable,
+               decision.reason == "temporary:ONCE",
+               let ruleId = decision.matchedRuleId {
+                store.spendGrant(ruleId)
+            }
             return .allow()
         case .block:
             guard remediable else { return .drop() }

@@ -45,6 +45,12 @@
     .req .t { font-size: var(--t-lg); font-weight: var(--w-semi);
               line-height: var(--lh-tight); margin: 0 0 var(--s-1); overflow-wrap: anywhere; }
     .req .meta { color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
+    /* What a tap actually opens. Second line under the headline, never folded
+       away: the headline is free text from the child's device, this is not. */
+    .req .target { color: var(--ink-2); font-size: var(--t-sm); margin: var(--s-1) 0 0; overflow-wrap: anywhere; }
+    .req .fromline { color: var(--muted); font-size: var(--t-sm); margin: var(--s-1) 0 0; overflow-wrap: anywhere; }
+    .req .fromline strong { color: var(--ink-2); font-weight: var(--w-semi); }
+    .req .target-value { color: var(--ink); font-weight: 600; }
     .req .quote { color: var(--ink-2); font-size: var(--t-sm); margin: var(--s-1) 0 0; }
     .req[data-busy="1"] { opacity: .55; pointer-events: none; }
     .change { margin-top: var(--s-3); padding-top: var(--s-3);
@@ -67,6 +73,26 @@
            padding: 0 var(--s-2); border: 1px solid currentColor; }
     .tag-open   { color: var(--accent-ink); }
     .tag-closed { color: var(--err); }
+    /* Device liveness. `tag-warn` is a real warning colour, not a softened one:
+       "we have not heard from this device" is the sentence a parent most needs
+       to not skim past. */
+    .tag-warn   { color: var(--err); }
+    .tag-ok     { color: var(--ok); }
+    .rules .sub2 { display: block; color: var(--muted); font-size: var(--t-sm); }
+    .subh { font-size: var(--t-base); font-weight: var(--w-semi); color: var(--ink-2);
+            margin: var(--s-4) 0 var(--s-2); }
+    .sitefoot { text-align: center; color: var(--muted); font-size: var(--t-sm);
+                margin: var(--s-6) 0 var(--s-5); }
+    .sitefoot a { color: var(--muted); }
+
+    /* "Close something yourself" — a disclosure inside a card, not a card of
+       its own: it is an exception to the list above it, not a separate idea. */
+    details.sub { margin-top: var(--s-4); border-top: 1px solid var(--line); padding-top: var(--s-3); }
+    details.sub > summary { font-weight: var(--w-semi); color: var(--accent-ink);
+                            cursor: pointer; min-height: var(--tap);
+                            display: flex; align-items: safe center; }
+    details.sub > summary:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+    details.sub > form { margin-top: var(--s-3); }
 
     /* --- children -------------------------------------------------------- */
     .kids { list-style: none; margin: 0 0 var(--s-3); padding: 0; }
@@ -263,10 +289,81 @@
         <button class="btn-ghost" id="btnRefreshRules">Refresh</button>
       </div>
       <ul class="rules" id="rules"></ul>
+
+      <!-- LIVE GRANTS, and a way to take one back.
+           A permanent decision could always be deleted; a timed one could not,
+           so a misfired "30 minutes" had to be waited out. The moment a parent
+           most wants this control is the moment they realise they got it wrong. -->
+      <div id="grantsBox" class="hide">
+        <h3 id="grantsH" class="subh">Open right now, with a timer</h3>
+        <ul class="rules" id="grants" aria-labelledby="grantsH"></ul>
+      </div>
+
+      <!-- CLOSE SOMETHING WITHOUT WAITING TO BE ASKED.
+           POST /v1/families/:id/rules has existed, tested and documented, since
+           the policy engine landed, and no client ever called it. Neither did
+           anything call the defaults setter. So every child sat on the hardcoded
+           posture — websites open, YouTube closed — and the only thing a parent
+           could do was answer asks. This console could delete rules it had no way
+           to create. -->
+      <details class="sub" id="addRuleBox">
+        <summary>Close something yourself</summary>
+        <form id="addRuleForm" novalidate>
+          <div class="row">
+            <div class="field grow">
+              <label for="ruleValue">Website, page, or YouTube link</label>
+              <input id="ruleValue" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="tiktok.com" aria-describedby="ruleValueHelp" />
+              <p class="help" id="ruleValueHelp">
+                Paste a link or type a site name. Ajar works out what it is.
+              </p>
+            </div>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="ruleWho">Who for</label>
+              <select id="ruleWho"></select>
+            </div>
+            <div class="field">
+              <label for="ruleAction">Open or closed</label>
+              <select id="ruleAction">
+                <option value="BLOCK" selected>Closed</option>
+                <option value="ALLOW">Open</option>
+              </select>
+            </div>
+            <div class="shrink"><button type="submit" class="btn-primary" id="btnAddRule">Save</button></div>
+          </div>
+          <p class="muted" id="rulePreview" aria-live="polite"></p>
+          <p class="errline" id="ruleErr"></p>
+        </form>
+      </details>
+    </section>
+
+    <!-- ================= 2b. The posture, per child ================= -->
+    <section class="card hide" id="defaultsCard" aria-labelledby="defH">
+      <div class="cardhead">
+        <h2 id="defH">What's open to start with</h2>
+      </div>
       <p class="help">
-        Only standing decisions show here — a "yes" with a time on it runs out by
-        itself and isn't listed.
+        This is the answer for anything you haven't decided about. Everything
+        above is an exception to it.
       </p>
+      <ul class="rules" id="defaults" aria-busy="true"></ul>
+    </section>
+
+    <!-- ================= 2c. Is it actually running? =================
+         The backend has tracked lastSeenAt, upToDate and a stale flag per
+         device since heartbeats landed, and NO CLIENT EVER READ ANY OF IT. A
+         deleted app, a disabled Safari extension, a laptop that has not phoned
+         home in three weeks and a quiet week were indistinguishable, on every
+         screen, forever. A filter a parent believes is running is worse than one
+         they know is off. -->
+    <section class="card hide" id="devicesCard" aria-labelledby="devH">
+      <div class="cardhead">
+        <h2 id="devH">Where Ajar is running</h2>
+        <button class="btn-ghost" id="btnRefreshDevices">Refresh</button>
+      </div>
+      <ul class="rules" id="devices" aria-busy="true"></ul>
     </section>
 
     <!-- ================= 3. Setup, collapsed ================= -->
@@ -322,12 +419,21 @@
     </details>
   </main>
 
+  <!-- The console had no route to the privacy notice or the terms at all, so a
+       parent who wanted to know what Ajar keeps had to go looking for the
+       marketing site. One line, at the bottom, where it belongs. -->
+  <p class="sitefoot">
+    <a href="/legal.html#privacy">What Ajar keeps</a> ·
+    <a href="/legal.html#terms">Terms</a>
+  </p>
+
   <div class="toast" id="toast">
     <span class="msg" id="toastMsg"></span>
     <button type="button" class="hide" id="toastUndo">Undo</button>
   </div>
 
   <script src="webauthn.js"></script>
+<script src="classify.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

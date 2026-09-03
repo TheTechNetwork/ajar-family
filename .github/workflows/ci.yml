@@ -73,6 +73,47 @@ jobs:
       - name: Swift theme matches the canonical tokens
         run: node apple/check-theme-tokens.mjs
 
+      # The Safari extension's native handler reads AjarFilter's policy out of a
+      # shared App Group, and it cannot import PolicyStore — different Xcode
+      # project — so it keeps its own copy of the group name and four key names.
+      # A drifted copy compiles, runs, reads nothing, and looks exactly like a
+      # device the parent never enrolled, which is the one state that allows
+      # everything. Nothing but this catches it.
+      - name: App Group and its keys match across targets
+        run: node apple/check-app-group.mjs
+
+      # A member declared behind `#if DEBUG` and used unconditionally compiles
+      # fine in Debug and not at all in Release. `spentGrantsKey` — how a ONCE
+      # approval is burned on a real device — was declared next to a debug-only
+      # key and broke the Release build; the only thing that noticed was the
+      # macOS Xcode job, minutes into the run. This is the same check in seconds,
+      # on Linux, before that job starts.
+      - name: No DEBUG-only member is used from Release code
+        run: node apple/check-debug-symbols.mjs
+
+      # Two XcodeGen mistakes that leave the build GREEN: a web-extension resource
+      # directory added as a folder reference (manifest.json lands under
+      # Resources/Extension/, Safari only reads the resources root, so the
+      # extension silently never appears), and a generated Info.plist that is not
+      # ignored (shows up untracked, reads as 'forgot to commit', gets committed).
+      - name: XcodeGen projects hold their invariants
+        run: node apple/check-project-yml.mjs
+
+      # Icons are generated, not drawn — regenerate and fail if the tree drifts, so
+      # nobody hand-edits a PNG that a command owns.
+      - name: Extension icons match the generator
+        run: |
+          node tools/appicon/make-icon.mjs extension apple/SafariExtension/Extension
+          git diff --exit-code -- 'apple/SafariExtension/Extension/icon-*.png'
+
+      # The parent console's JavaScript is not compiled, not linted, and not run
+      # by any test, so a syntax error in it reaches a parent as a blank page and
+      # a message only devtools shows. That happened — a backtick inside an HTML
+      # comment inside a template literal. Also checks that what a parent TYPES
+      # becomes the right policy target.
+      - name: Browser JavaScript parses, and the rule classifier is right
+        run: node tools/conformance/check-console-js.mjs
+
       # The OpenAPI document is the client contract; fail if the committed file
       # drifts from the one the code generates.
       - name: OpenAPI is in sync
@@ -214,33 +255,21 @@ jobs:
             -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 
-      # Ajar for Safari — the per-request enforcement path (docs/DECISIONS.md
-      # ADR-018). ONE target serves both platforms, so both are built here: a
-      # target that claims two destinations and is only ever compiled for one is
-      # a claim CI is not checking.
+      # Ajar for Safari on macOS — the macOS container for the SAME extension
+      # sources the iOS app compiles (apple/SafariExtension/, built above as
+      # AjarFilter's SafariExtension target). Two hosts, one copy; this step is
+      # what proves the macOS host still compiles them.
       #
-      # This is also the FIRST macOS destination any job in this workflow has
-      # compiled. Every other step targets generic/platform=iOS, which is how a
+      # This is also the ONLY macOS destination any job in this workflow
+      # compiles. Every other step targets generic/platform=iOS, which is how a
       # macOS-only branch (an AppKit #elseif, a platform-conditional import)
       # could reach a contributor's machine having never been near a compiler.
-      - name: Build AjarSafari (iOS)
-        if: steps.scope.outputs.touched == 'yes'
-        working-directory: apple/AjarSafari
-        run: |
-          set -euo pipefail
-          xcodegen generate
-          xcodebuild build \
-            -project AjarSafari.xcodeproj \
-            -scheme AjarSafari \
-            -configuration Debug \
-            -destination 'generic/platform=iOS' \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
-
       - name: Build AjarSafari (macOS)
         if: steps.scope.outputs.touched == 'yes'
         working-directory: apple/AjarSafari
         run: |
           set -euo pipefail
+          xcodegen generate
           xcodebuild build \
             -project AjarSafari.xcodeproj \
             -scheme AjarSafari \

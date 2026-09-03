@@ -31,7 +31,8 @@ $env:GOOS="windows"; $env:GOARCH="amd64"; go build -o ajar-agent.exe .
 .\install\install.ps1 -ExePath .\ajar-agent.exe `
   -ChromeExtensionId <webstore-id> -BackendUrl http://localhost:8787 -ChildUser "PC\Jane"
 
-ajar-agent.exe status     # service + console-user admin state
+ajar-agent.exe status     # service state, THE POLICIES ACTUALLY IN THE REGISTRY, and
+                          # whether the console user is an administrator
 ajar-agent.exe apply      # (elevated) apply policies once, without the service — for testing
 .\install\uninstall.ps1     # stop + remove service and policies
 ```

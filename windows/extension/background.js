@@ -189,7 +189,7 @@ async function reevaluateOpenTabs() {
       // On a real page that policy now blocks (cold-start slip, or a new rule).
       const res = decide(tab.url, "main_frame");
       if (res.action === "BLOCK") {
-        chrome.tabs.update(tab.id, { url: blockedUrlFor(tab.url, res) });
+        chrome.tabs.update(tab.id, { url: blockedUrlFor(tab.url, res, "") });
       }
     }
   }
@@ -276,17 +276,36 @@ function normalizeExactUrl(raw) {
     const u = new URL(raw);
     u.hostname = u.hostname.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
     u.hash = "";
+    // Credentials in the authority: same page, and it used to be a different key.
+    u.username = "";
+    u.password = "";
     u.searchParams.sort();
     let s = u.toString();
     s = s.replace(/\/$/, "");
+    // Percent-encoding, decoded ONLY where unambiguous — a decode that
+    // reintroduces a delimiter changes what the URL means.
+    s = s.replace(/%[0-9A-Fa-f]{2}/g, (esc) => {
+      let ch;
+      try { ch = decodeURIComponent(esc); } catch { return esc; }
+      return /^[A-Za-z0-9\-._~]$/.test(ch) ? ch : esc;
+    });
     return s;
   } catch {
     return raw;
   }
 }
 
+/** Both sides normalized, including the wildcard branch — it used to compare
+ *  the pattern against the RAW url while the exact branch normalized, so an
+ *  allow-pattern missed and a block-pattern was evaded by one character. */
 function matchesPattern(url, pattern) {
-  if (pattern.endsWith("*")) return url.startsWith(pattern.slice(0, -1));
+  if (pattern.endsWith("*")) {
+    const prefix = pattern.slice(0, -1);
+    let np;
+    try { np = normalizeExactUrl(prefix); new URL(prefix); }
+    catch { return url.startsWith(prefix); }
+    return normalizeExactUrl(url).startsWith(np);
+  }
   return normalizeExactUrl(url) === normalizeExactUrl(pattern);
 }
 
@@ -367,10 +386,18 @@ function categoriesFromFilters(host) {
 
 // --- SAFETY FLOOR: lockstep mirror of shared/safety/safety-floor.ts. Crisis and
 // emergency resources are ALLOWED above every tier and are never reported.
+//
+// It was not a mirror: this and the Safari copy both carried four entries the
+// spec does not have (who.int, cdc.gov, samhsa.gov, nhs.uk). A floor entry
+// outranks a parent's explicit BLOCK and is never reported, so the divergence
+// made a rule the console calls active silently not hold on the one platform
+// that ships. Removed rather than promoted — whose block a child may override is
+// a decision for the spec, made once. tools/conformance/check-safety-floor.mjs
+// now fails CI if the four copies drift again.
 const SAFETY_FLOOR_DOMAINS = ["988lifeline.org","suicidepreventionlifeline.org","crisistextline.org",
   "befrienders.org","findahelpline.com","samaritans.org","papyrus-uk.org","thetrevorproject.org",
   "childline.org.uk","kidshelpphone.ca","childhelphotline.org","youthline.co.nz","rainn.org",
-  "thehotline.org","childhelp.org","humantraffickinghotline.org","who.int","cdc.gov","samhsa.gov","nhs.uk"];
+  "thehotline.org","childhelp.org","humantraffickinghotline.org"];
 function isSafetyFloorHost(host) {
   const h = (host || "").replace(/\.$/, "").replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
   if (!h) return false;
@@ -385,10 +412,23 @@ function matchTarget(r, ctx, yt, hosts, hostCats) {
       return matchesPattern(ctx.url, r.value) ? `URL_PATTERN:${r.value}` : null;
     case "YOUTUBE_VIDEO":
       return yt.videoId && yt.videoId === r.value ? `YOUTUBE_VIDEO:${r.value}` : null;
-    case "YOUTUBE_PLAYLIST":
-      return yt.playlistId && yt.playlistId === r.value ? `YOUTUBE_PLAYLIST:${r.value}` : null;
-    case "YOUTUBE_CHANNEL":
-      return yt.channelId === r.value || yt.channelHandle === r.value ? `YOUTUBE_CHANNEL:${r.value}` : null;
+    case "YOUTUBE_PLAYLIST": {
+      // `list=` is a query parameter the child types and nothing can verify the
+      // video is in the playlist, so an ALLOW on a playlist used to open EVERY
+      // video on YouTube. An untrusted value may ADD a block, never an allow:
+      // BLOCK matches a video carrying the list, ALLOW is the playlist page only.
+      if (!yt.playlistId || yt.playlistId !== r.value) return null;
+      if (r.action === "ALLOW" && yt.kind !== "playlist") return null;
+      return `YOUTUBE_PLAYLIST:${r.value}`;
+    }
+    case "YOUTUBE_CHANNEL": {
+      // Handles fold case in a YouTube URL; channel IDs (UC...) do not.
+      if (yt.channelId && yt.channelId === r.value) return `YOUTUBE_CHANNEL:${r.value}`;
+      if (yt.channelHandle && yt.channelHandle.toLowerCase() === r.value.toLowerCase()) {
+        return `YOUTUBE_CHANNEL:${r.value}`;
+      }
+      return null;
+    }
     case "DOMAIN":
       // Match the request host OR any CNAME-resolved canonical name (anti-cloaking).
       return hosts.some((h) => h === r.value || h.endsWith(`.${r.value}`)) ? `DOMAIN:${r.value}` : null;
@@ -430,7 +470,11 @@ export function evaluate(snapshot, ctx) {
   }
 
   // Tier 0 — safety floor, above every other tier (never blocked, never reported).
-  for (const h of hosts) if (isSafetyFloorHost(h)) return { action: "ALLOW", reason: "safety-floor", matchedKey: `SAFETY:${h}` };
+  // `host` only, never the resolved chain: ctx.resolvedHosts comes from DNS on
+  // the child's own device, and the floor is the one tier where that untrusted
+  // list would produce an ALLOW — above every rule, and never reported. See
+  // shared/policy/policy-model.ts.
+  if (isSafetyFloorHost(host)) return { action: "ALLOW", reason: "safety-floor", matchedKey: `SAFETY:${host}` };
 
   const applicable = snapshot.rules.filter((r) => ruleAppliesToScope(r, ctx));
 
@@ -458,7 +502,11 @@ export function evaluate(snapshot, ctx) {
       .sort(
         (a, b) =>
           (b.priority ?? 0) - (a.priority ?? 0) ||
-          scopeSpecificity(b.scope) - scopeSpecificity(a.scope),
+          scopeSpecificity(b.scope) - scopeSpecificity(a.scope) ||
+          // Deny wins a tie. Same tier, same priority, same scope fell through
+          // to insertion order, so the OLDEST rule won and a parent's later
+          // "keep it closed for good" was inert forever.
+          (a.action === b.action ? 0 : a.action === "BLOCK" ? -1 : 1),
       );
     for (const r of inTier) {
       const hit = matchTarget(r, ctx, yt, hosts, hostCats);
@@ -582,9 +630,31 @@ function spendOnce(res) {
   });
 }
 
-function blockedUrlFor(url, res) {
+/**
+ * The HOST of a page, or "". The referrer is carried as a host and nothing more:
+ * "from reddit.com" is the signal a parent needs, and the rest of that URL is
+ * not ours to move. Reduced HERE, at capture, so a full referring URL never
+ * enters the block page's address bar.
+ */
+function hostOf(url) {
+  try {
+    const h = new URL(url).hostname.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
+    return h.includes(".") ? h : "";
+  } catch {
+    return "";
+  }
+}
+
+function blockedUrlFor(url, res, fromHost) {
+  // `from` is display context for the parent — "from classroom.google.com" and
+  // "from a search results page" are not the same decision and looked identical
+  // in the console. It NEVER decides anything, here or on the server
+  // (docs/ROADMAP.md §4): any approved domain hosting user content is a
+  // laundering surface, so a referrer is evidence for a person, not an input.
+  // Same-host referrers are dropped as noise.
+  const from = fromHost && fromHost !== hostOf(url) ? `&from=${encodeURIComponent(fromHost)}` : "";
   return `${EXT_BLOCK_PAGE}?u=${encodeURIComponent(url)}&reason=${encodeURIComponent(res.reason)}` +
-    (res.matchedKey ? `&key=${encodeURIComponent(res.matchedKey)}` : "");
+    (res.matchedKey ? `&key=${encodeURIComponent(res.matchedKey)}` : "") + from;
 }
 
 function onBeforeRequestBlocking(details) {
@@ -597,7 +667,10 @@ function onBeforeRequestBlocking(details) {
     // Redirect only real page navigations to the friendly block page; for
     // sub-resources cancel instead (a redirect would break the parent page).
     if (details.type === "main_frame") {
-      return { redirectUrl: blockedUrlFor(url, res) };
+      // `initiator` is the browser's own account of the origin that started this
+      // navigation — better than reading the tab, and not something the page
+      // supplies about itself.
+      return { redirectUrl: blockedUrlFor(url, res, hostOf(details.initiator || details.documentUrl || "")) };
     }
     return { cancel: true };
   }
@@ -666,6 +739,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       postAccessRequest({
         targetType, targetValue,
         title: msg.title || undefined, url: msg.url, reason: msg.userReason || undefined,
+        referrerHost: msg.from || undefined,
       })
         .then(() => sendResponse({ ok: true }))
         .catch((e) => sendResponse({ ok: false, error: String(e) }));

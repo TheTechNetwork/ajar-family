@@ -147,6 +147,10 @@ async function getRouter(env: Env): Promise<Router> {
           signingPublicKeyB64: env.SIGNING_PUBLIC_KEY_B64,
           signingPrivateKeyB64: env.SIGNING_PRIVATE_KEY_B64,
           categoryAdminToken: env.CATEGORY_ADMIN_TOKEN,
+          // Not needed on Workers: `cf-connecting-ip` is set at the edge and a
+          // client copy is stripped, so clientKey() already has a trustworthy
+          // value without trusting x-forwarded-for.
+          trustProxyHeaders: false,
           mailEndpoint: env.MAIL_ENDPOINT,
           mailToken: env.MAIL_TOKEN,
           mailFrom: env.MAIL_FROM,

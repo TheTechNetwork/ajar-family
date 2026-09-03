@@ -199,6 +199,7 @@ struct TurnOnView: View {
 /// that invents activity to look busy invites poking at it.
 struct ProtectedView: View {
     @ObservedObject var controller: FilterController
+    @State private var showingSafariSteps = false
     #if DEBUG
     @State private var showingHarness = false
     #endif
@@ -218,6 +219,40 @@ struct ProtectedView: View {
             Text("If something is closed, you’ll see a page with a way to ask.")
                 .ajarFont(16).foregroundStyle(Ajar.ink2)
                 .multilineTextAlignment(.center)
+
+            // THE SECOND HALF, AND IT IS NOT OPTIONAL.
+            //
+            // The content filter is asked once per flow: a top-level navigation
+            // carries its full URL, everything a page fetches for itself carries
+            // only a hostname. So inside a single-page app this alone enforces at
+            // HOST level, and the Safari extension is what makes the product's
+            // one claim — per-URL — true (ADR-018).
+            //
+            // It ships in this app and it is OFF until someone turns it on, and
+            // iOS gives an app no way to ask whether it is on: there is no
+            // SFSafariExtensionManager here. So this is a standing prompt rather
+            // than a status. "Ajar is on" above is about the filter; without
+            // saying this, that tick would be read as covering both, which is the
+            // overclaim this screen would otherwise make.
+            Button {
+                showingSafariSteps = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "safari").accessibilityHidden(true)
+                    Text("Turn on Ajar in Safari too")
+                }
+                .ajarFont(15, relativeTo: .subheadline)
+                .foregroundStyle(Ajar.accentInk)
+                .frame(minHeight: Ajar.tap)
+            }
+            .padding(.top, 20)
+            .sheet(isPresented: $showingSafariSteps) { SafariEnableScreen() }
+
+            Text("Safari checks each page against what you’ve allowed. Until the extension is on, Ajar can only close a whole site, not one page of it.")
+                .ajarFont(13, relativeTo: .footnote).foregroundStyle(Ajar.muted)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 8)
 
             Spacer()
 

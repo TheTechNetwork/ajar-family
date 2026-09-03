@@ -89,7 +89,15 @@ test("MVP flow: approve one video for 30m, others stay blocked, auto-expire", as
   assert.equal(evaluate(snap, ctx(BLOCKED, later)).action, "BLOCK", "approved video auto-expires");
 
   // Idempotent sync: device already current → null.
+  //
+  // The heartbeat is what makes the device current. `since` is now clamped to
+  // the version the server has actually SENT this device (services.ts
+  // clampSyncedVersion), because an unclamped claim let a device assert
+  // ?since=999999999 and be told "up to date" forever. So a device that really
+  // has the policy has to have been recorded as receiving it — which the HTTP
+  // sync route does on every poll.
   const current = await app.repo.getPolicyVersion(fam.id, child.id);
+  await app.devices.heartbeat(device.id, current);
   assert.equal(await app.policy.syncSince(fam.id, child.id, device.id, current), null, "no change → null");
 });
 

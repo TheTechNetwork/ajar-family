@@ -83,9 +83,20 @@ WebView2 host executables that a child could use as a bare browser; **use
 publisher/hash conditions, never user-writable path allowances** (`%LOCALAPPDATA%`,
 `C:\Windows\Tasks`).
 
-`--disable-extensions` has no policy block; the service detects a browser launched
-with it via ETW `Microsoft-Windows-Kernel-Process` and terminates+relaunches,
-telling the child why (documented, not stealth).
+`--disable-extensions` has no policy block. **NOT IMPLEMENTED, AND NOT DETECTED.**
+This paragraph used to describe ETW `Microsoft-Windows-Kernel-Process` monitoring
+that terminates and relaunches the browser — there is no ETW code in the agent,
+there never was, and a reader planning against this doc would have planned around
+a defence that does not exist.
+
+What that means today: a standard user edits a shortcut's Target field, appends
+`--disable-extensions`, and every per-URL control is gone. No admin, no file
+writes, nothing logged anywhere, and the parent console still shows the device
+running — because the service IS running, and the service is not what enforces.
+
+The same is true of any browser we do not write policies for (Firefox, Brave,
+Vivaldi, Opera, a portable Chromium): not stopped, not noticed. AppLocker
+publisher deny-rules are the documented answer below and are also not built.
 
 ## Sources
 - Chrome ExtensionInstallForcelist — <https://chromeenterprise.google/policies/extension-install-forcelist/>

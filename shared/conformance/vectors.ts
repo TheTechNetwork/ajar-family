@@ -11,9 +11,15 @@
  *   - a trailing root dot ("reddit.com.") defeated every DOMAIN and CATEGORY
  *     rule in the shared engine while the mirrors used different normalization.
  *
- * Every vector runs against EVERY implementation (see tools/conformance/) and
- * they must all agree. Adding a case here is the cheapest way to pin behaviour
- * across four codebases at once. The JSON is also emitted for the Swift port.
+ * Every vector runs against the SPEC ITSELF and both JS mirrors (see
+ * tools/conformance/run-mirrors.mjs) and they must all agree. Adding a case here
+ * is the cheapest way to pin behaviour across three codebases at once.
+ *
+ * THE SWIFT IS NOT ONE OF THEM. This header used to say "the JSON is also
+ * emitted for the Swift port"; nothing emitted it and nothing read it. The
+ * Apple side is pinned by `apple/AjarFilter/Shared/SelfTest.swift`, which runs
+ * on a device — keep the two in step by hand until something better exists, and
+ * do not read this file as covering Swift.
  */
 import type { DevicePolicySnapshot, EvalContext, RuleAction } from "../policy/policy-model.js";
 
@@ -59,6 +65,89 @@ export const VECTORS: Vector[] = [
   { name: "approving one video does NOT open YouTube search",
     snapshot: snap({ rules: [rule("YOUTUBE_VIDEO", "dQw4w9WgXcQ", "ALLOW")] }),
     ctx: at("https://www.youtube.com/results?search_query=x"), expect: { action: "BLOCK" } },
+
+  // --- a playlist grant is not a key to YouTube ----------------------------
+  //
+  // `list=` is a query parameter the child types, and nothing can check from the
+  // URL that the video is in the playlist. So an ALLOW on a playlist used to
+  // open every video on YouTube. An untrusted value may add a block, never an
+  // allow — the same rule the safety floor follows.
+  { name: "an allowed playlist opens the playlist page",
+    snapshot: snap({ rules: [rule("YOUTUBE_PLAYLIST", "PLapprovedHomework", "ALLOW")] }),
+    ctx: at("https://www.youtube.com/playlist?list=PLapprovedHomework"),
+    expect: { action: "ALLOW" } },
+  { name: "THE BYPASS: an allowed playlist does NOT open an arbitrary video",
+    snapshot: snap({ rules: [rule("YOUTUBE_PLAYLIST", "PLapprovedHomework", "ALLOW")] }),
+    ctx: at("https://www.youtube.com/watch?v=9bZkp7q19f0&list=PLapprovedHomework"),
+    expect: { action: "BLOCK" } },
+  { name: "...nor through youtu.be",
+    snapshot: snap({ rules: [rule("YOUTUBE_PLAYLIST", "PLapprovedHomework", "ALLOW")] }),
+    ctx: at("https://youtu.be/9bZkp7q19f0?list=PLapprovedHomework"),
+    expect: { action: "BLOCK" } },
+  { name: "a BLOCKED playlist still catches a video carrying it (over-blocking is safe)",
+    snapshot: snap({ defaults: { webDefault: "ALLOW", youTubeDefault: "ALLOW" },
+                     rules: [rule("YOUTUBE_PLAYLIST", "PLbadbadbadbad", "BLOCK")] }),
+    ctx: at("https://www.youtube.com/watch?v=9bZkp7q19f0&list=PLbadbadbadbad"),
+    expect: { action: "BLOCK" } },
+
+  // --- channel handles fold case; channel IDs do not ------------------------
+  { name: "a channel block is not defeated by lowercasing the handle",
+    snapshot: snap({ defaults: { webDefault: "ALLOW", youTubeDefault: "ALLOW" },
+                     rules: [rule("YOUTUBE_CHANNEL", "@SomeCreator", "BLOCK")] }),
+    ctx: at("https://www.youtube.com/@somecreator"), expect: { action: "BLOCK" } },
+  { name: "a channel allow works whatever casing the child's link carries",
+    snapshot: snap({ rules: [rule("YOUTUBE_CHANNEL", "@SomeCreator", "ALLOW")] }),
+    ctx: at("https://www.youtube.com/@SOMECREATOR"), expect: { action: "ALLOW" } },
+
+  // --- deny wins a tie ------------------------------------------------------
+  //
+  // Same tier, same priority, same scope fell through to insertion order, and
+  // both stores return rules in insertion order — so the OLDEST rule won and a
+  // parent's later "keep it closed for good" was inert forever, with a 200 and
+  // an Undo toast to say otherwise.
+  { name: "a later BLOCK beats an earlier ALLOW at the same specificity",
+    snapshot: snap({ rules: [
+      rule("DOMAIN", "gamesite.example", "ALLOW"),
+      rule("DOMAIN", "gamesite.example", "BLOCK", { id: "r-later" }),
+    ] }),
+    ctx: at("https://gamesite.example/play"), expect: { action: "BLOCK" } },
+  { name: "...and the order they were written in does not change that",
+    snapshot: snap({ rules: [
+      rule("DOMAIN", "gamesite.example", "BLOCK", { id: "r-first" }),
+      rule("DOMAIN", "gamesite.example", "ALLOW"),
+    ] }),
+    ctx: at("https://gamesite.example/play"), expect: { action: "BLOCK" } },
+  { name: "an explicit priority still outranks the deny default",
+    snapshot: snap({ rules: [
+      rule("DOMAIN", "gamesite.example", "ALLOW", { priority: 10 }),
+      rule("DOMAIN", "gamesite.example", "BLOCK"),
+    ] }),
+    ctx: at("https://gamesite.example/play"), expect: { action: "ALLOW" } },
+
+  // --- exact-URL canonicalization ------------------------------------------
+  { name: "percent-encoding does not create a second key for one page",
+    snapshot: snap({ defaults: { webDefault: "BLOCK", youTubeDefault: "BLOCK" },
+                     rules: [rule("URL", "https://example.com/page", "ALLOW")] }),
+    ctx: at("https://example.com/%70age"), expect: { action: "ALLOW" } },
+  { name: "credentials in the authority do not slip a URL block",
+    snapshot: snap({ rules: [rule("URL", "https://example.com/page", "BLOCK")] }),
+    ctx: at("https://user@example.com/page"), expect: { action: "BLOCK" } },
+  { name: "an encoded slash is NOT decoded — it means something else",
+    snapshot: snap({ rules: [rule("URL", "https://example.com/a/b", "BLOCK")] }),
+    ctx: at("https://example.com/a%2Fb"), expect: { action: "ALLOW" } },
+
+  // --- URL_PATTERN normalizes both sides ------------------------------------
+  { name: "a wildcard pattern matches whatever casing and www the link carries",
+    snapshot: snap({ defaults: { webDefault: "BLOCK", youTubeDefault: "BLOCK" },
+                     rules: [rule("URL_PATTERN", "https://example.com/safe/*", "ALLOW")] }),
+    ctx: at("https://WWW.EXAMPLE.com/safe/x"), expect: { action: "ALLOW" } },
+  { name: "a wildcard BLOCK is not evaded by a trailing root dot",
+    snapshot: snap({ rules: [rule("URL_PATTERN", "https://example.com/bad/*", "BLOCK")] }),
+    ctx: at("https://example.com./bad/x"), expect: { action: "BLOCK" } },
+  { name: "a wildcard pattern still does not match outside its prefix",
+    snapshot: snap({ defaults: { webDefault: "BLOCK", youTubeDefault: "BLOCK" },
+                     rules: [rule("URL_PATTERN", "https://example.com/safe/*", "ALLOW")] }),
+    ctx: at("https://example.com/unsafe/x"), expect: { action: "BLOCK" } },
 
   // --- domain + normalization ---------------------------------------------
   { name: "DOMAIN block covers subdomains",

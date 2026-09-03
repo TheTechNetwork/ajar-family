@@ -328,7 +328,7 @@ code { font-family: var(--font-mono); font-size: var(--t-sm);
     <h1>Set up ajar on Safari</h1>
     <p>
       Enter the 8-character code from your parent's ajar screen. This links just
-      this browser — nothing else on the computer changes.
+      this browser — nothing else on the device changes.
     </p>
 
     <!-- ===================== already connected ===================== -->
@@ -365,6 +365,19 @@ code { font-family: var(--font-mono); font-size: var(--t-sm);
     </div>
 
     <!-- ===================== connect ===================== -->
+    <!-- Managed by the containing app. Shown INSTEAD of the connect form when
+         native messaging answers, because enrolling here would give one child a
+         second device identity for the same phone. See options.js render(). -->
+    <section id="managed" hidden>
+      <h2>This device is set up in the Ajar app</h2>
+      <p id="managedState">Checking…</p>
+      <p class="help">
+        Safari gets its rules from the Ajar app on this device, so there is
+        nothing to enter here. To change what is allowed, or to disconnect,
+        use the app.
+      </p>
+    </section>
+
     <form id="form">
       <div id="pinnedNote" class="panel panel-info" hidden>
         This browser is already set up for <code id="pinnedUrl"></code>. A
@@ -411,7 +424,7 @@ code { font-family: var(--font-mono); font-size: var(--t-sm);
       <div class="field">
         <label for="name">Name for this device</label>
         <input id="name" type="text" autocomplete="off"
-               placeholder="MacBook (Safari)" value="MacBook (Safari)" required />
+               placeholder="Safari" value="Safari" required />
       </div>
 
       <div class="actions">

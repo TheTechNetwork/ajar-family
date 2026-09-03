@@ -17,6 +17,7 @@ import type {
   NotificationEndpoint, PasswordResetToken, EmailVerificationToken, PendingRegistration,
 } from "./model.js";
 import type { DevicePolicySnapshot } from "@ajar/shared/policy";
+import { childRequestTargetError } from "@ajar/shared/policy/targets";
 import type { CategoryProvider } from "../categories/provider.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { endOfLocalDayIso, isValidTimeZone, safeTimeZone } from "./time.js";
@@ -638,6 +639,27 @@ export class FamilyService {
     return m;
   }
 
+  /**
+   * The children this membership may see. `null` means "every child".
+   *
+   * LIMITED_GUARDIAN is the deliberately narrow role — a babysitter, a
+   * step-parent, an ex-partner — and `model.ts` describes `assignedChildIds` as
+   * "the children they may see/act on". `DeviceService.listWithStatus` and
+   * `ApprovalService.decide` honoured that; the request feed, the child list,
+   * the rule list and the audit log did not, and each of them returned the whole
+   * family.
+   *
+   * That leak was not abstract: an access request carries the URL, the title and
+   * the child's own free-text reason for wanting it. A guardian assigned to one
+   * child could read every other child's asks, verbatim. Given what the safety
+   * floor says about the cost of a child being seen, that is the most sensitive
+   * data this product holds.
+   */
+  async visibleChildIds(familyId: string, userId: string): Promise<Set<string> | null> {
+    const m = await this.membership(familyId, userId);
+    return m.role === "LIMITED_GUARDIAN" ? new Set(m.assignedChildIds) : null;
+  }
+
   private async requireRole(familyId: string, userId: string,
                             pred: (r: Role) => boolean, action: string) {
     const m = await this.membership(familyId, userId);
@@ -788,6 +810,24 @@ export class PolicyService {
     private categories: CategoryProvider,
   ) {}
 
+  /**
+   * The posture a child is on right now.
+   *
+   * There was a setter and no getter, so the only way to see what a child's
+   * defaults were was to build their device's snapshot. A console cannot offer a
+   * control it can't show the current value of, which is one reason nothing ever
+   * called `setDefaults`.
+   */
+  async getDefaults(familyId: string, actingUserId: string, childId: string): Promise<DefaultPolicy> {
+    const m = await this.repo.getMembership(familyId, actingUserId);
+    if (!m) throw new DomainError("not a member of this family", "FORBIDDEN");
+    if (m.role === "LIMITED_GUARDIAN" && !m.assignedChildIds.includes(childId)) {
+      throw new DomainError("not this guardian's child", "FORBIDDEN");
+    }
+    return (await this.repo.getDefaultPolicy(familyId, childId))
+      ?? { webDefault: "ALLOW", youTubeDefault: "BLOCK" };
+  }
+
   async setDefaults(familyId: string, actingUserId: string, childId: string, d: DefaultPolicy) {
     await this.requireManage(familyId, actingUserId);
     await this.repo.setDefaultPolicy(familyId, childId, d);
@@ -799,6 +839,52 @@ export class PolicyService {
     const created = await this.repo.createRule({ ...rule, id: uid(), createdAt: now(), createdBy: actingUserId });
     await this.bumpForScope(familyId, rule.scope);
     return created;
+  }
+
+  /**
+   * The live grants a parent could still want back.
+   *
+   * Expired and consumed ones are filtered out here rather than shown greyed:
+   * a grant that has run out is not a thing to act on, and a list that mixes
+   * "still open" with "over" is a list a parent has to read carefully at the
+   * exact moment they are worried.
+   */
+  async listActiveGrants(familyId: string, actingUserId: string, nowMs = Date.now()) {
+    const m = await this.repo.getMembership(familyId, actingUserId);
+    if (!m) throw new DomainError("not a member of this family", "FORBIDDEN");
+    const visible = m.role === "LIMITED_GUARDIAN" ? new Set(m.assignedChildIds) : null;
+    return (await this.repo.listTemporaryRules(familyId))
+      .filter((t) => !t.consumedAt && Date.parse(t.expiresAt) > nowMs)
+      .filter((t) => !visible || (t.scope.childId ? visible.has(t.scope.childId) : false))
+      .sort((a, b) => Date.parse(a.expiresAt) - Date.parse(b.expiresAt));
+  }
+
+  /**
+   * Take back a live grant before it runs out.
+   *
+   * THERE WAS NO WAY TO DO THIS. A permanent decision could be deleted, but a
+   * timed one could not — the console said so in a comment and shrugged. So a
+   * parent who tapped "30 minutes" by accident, or approved something and then
+   * learned more about it, had to wait it out. The moment a parent most wants a
+   * control is the moment they realise they got it wrong.
+   *
+   * Deleted, not marked consumed: "consumed" means a ONCE grant was spent, and
+   * reusing it here would make the audit log say the child used something they
+   * never opened.
+   */
+  async revokeGrant(familyId: string, actingUserId: string, grantId: string): Promise<void> {
+    await this.requireManage(familyId, actingUserId);
+    const grant = (await this.repo.listTemporaryRules(familyId)).find((t) => t.id === grantId);
+    if (!grant) throw new DomainError("unknown grant", "NOT_FOUND");
+    await this.repo.deleteTemporaryRule(familyId, grantId);
+    // Devices must find out. Without this the child keeps the grant until their
+    // next full sync, which is exactly the window a parent is trying to close.
+    await this.bumpForScope(familyId, grant.scope);
+    await this.repo.addAuditEvent({
+      id: uid(), familyId, actorId: actingUserId, kind: "grant.revoked",
+      detail: { grantId, target: grant.target, value: grant.value, childId: grant.scope.childId },
+      createdAt: now(),
+    });
   }
 
   async removeRule(familyId: string, actingUserId: string, ruleId: string) {
@@ -852,8 +938,33 @@ export class PolicyService {
   async syncSince(familyId: string, childId: string, deviceId: string, sinceVersion: number):
     Promise<DevicePolicySnapshot | null> {
     const version = await this.repo.getPolicyVersion(familyId, childId);
-    if (version <= sinceVersion) return null;
+    // CLAMP THE DEVICE'S CLAIM. `since` is an unbounded number from the child's
+    // device. Unclamped, `?since=999999999` made `version <= sinceVersion` true
+    // forever: the device was told "up to date" and never received another
+    // policy, while `DeviceService.heartbeat` stored 999999999 as the version it
+    // held — behind a `Math.max` that never moves backwards, so it was
+    // permanent. The console then showed that device green, "up to date",
+    // "protection running", for the rest of its life, and every new block the
+    // parent added went nowhere. Both halves of the lie came from one
+    // unvalidated query parameter.
+    const claimed = await this.clampSyncedVersion(deviceId, sinceVersion);
+    if (version <= claimed) return null;
     return this.buildSnapshot(familyId, childId, deviceId);
+  }
+
+  /**
+   * What a device may legitimately claim to hold.
+   *
+   * Never MORE than the server has actually sent it — that is the whole point.
+   * A device reporting LESS is honest and useful (it lost its cache and wants a
+   * full snapshot), so downward claims pass through; upward ones are the attack
+   * and are clamped to the server's own record.
+   */
+  async clampSyncedVersion(deviceId: string, claimed: number): Promise<number> {
+    const device = await this.repo.getDevice(deviceId);
+    const ceiling = device?.lastSyncedVersion ?? 0;
+    const asked = Number.isFinite(claimed) ? claimed : 0;
+    return Math.min(Math.max(asked, 0), ceiling);
   }
 
   /**
@@ -915,7 +1026,56 @@ export class PolicyService {
 // ---------------------------------------------------------------------------
 
 /** Outer bound on an unconsumed "just once" grant. See ApprovalService.consumeGrant. */
+/**
+ * The referring host, cleaned up, or nothing.
+ *
+ * DISPLAY ONLY — see `AccessRequest.referrerHost`. It never reaches the
+ * evaluator and never widens a rule; the only thing riding on this function is
+ * whether a parent is shown a plausible hostname or nothing at all.
+ *
+ * Anything that is not a plausible host is DROPPED rather than shown. A device
+ * that sends junk, a full URL, or a sentence gets no referrer line — which is
+ * the honest outcome, because a parent reading "from <something odd>" would be
+ * being told something the product cannot stand behind. Accepts a full URL too,
+ * since a client sending `document.referrer` verbatim is the obvious mistake to
+ * absorb rather than punish.
+ */
+export function normalizeReferrerHost(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let v = raw.trim();
+  if (!v) return undefined;
+  // A client that sent the whole referrer: take its host and drop the rest,
+  // which is the part we deliberately do not carry.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) {
+    try { v = new URL(v).hostname; } catch { return undefined; }
+  }
+  v = v.replace(/\.$/, "").replace(/^www\./i, "").toLowerCase();
+  if (v.length > 253 || v.length === 0) return undefined;
+  const labels = v.split(".");
+  if (labels.length < 2) return undefined;                       // no bare TLDs, no "localhost"
+  if (!/^[a-z]{2,63}$/.test(labels[labels.length - 1]!)) return undefined;
+  if (!labels.every((l) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(l))) return undefined;
+  return v;
+}
+
 export const ONCE_GRANT_TTL_MS = 5 * 60_000;
+
+/**
+ * How long an unanswered ask stays worth answering.
+ *
+ * `AccessRequestStatus` has declared "EXPIRED" since the model was written, and
+ * `GET .../requests?status=EXPIRED` is published in the OpenAPI — and NOTHING
+ * EVER SET IT. There is no sweeper and no TTL, so an ask stayed PENDING for
+ * ever: the console's "Waiting on you" list only grew, filling with things a
+ * child wanted three weeks ago and has long since stopped caring about, and the
+ * count beside it stopped meaning anything.
+ *
+ * The child's side already gives up honestly — the iOS app after ~10 minutes,
+ * the block pages on their own timer — so the ask a parent is looking at was
+ * already abandoned on the other end. Three days is long enough that a parent
+ * away for a weekend still sees it, and short enough that the list is about now.
+ */
+export const REQUEST_EXPIRES_AFTER_MS = 3 * 24 * 60 * 60_000;
 
 /**
  * Turn a duration into a concrete expiry, in the CHILD's time zone.
@@ -1045,10 +1205,31 @@ export class ApprovalService {
   async createRequest(input: {
     familyId: string; childId: string; deviceId: string;
     targetType: PolicyTargetType; targetValue: string; title?: string; url?: string; reason?: string;
+    referrerHost?: string;
   }): Promise<AccessRequest> {
     const device = await this.repo.getDevice(input.deviceId);
     if (!device || device.familyId !== input.familyId || device.childId !== input.childId)
       throw new DomainError("device/child mismatch", "FORBIDDEN");
+
+    // THE TARGET IS THE CHILD'S INPUT, and it becomes the rule a parent's tap
+    // mints. This route is authenticated by a DEVICE token, so both fields cross
+    // the trust boundary from the person the product exists to constrain, and
+    // nothing used to check either one.
+    //
+    // A device could post { targetType: "URL_PATTERN", targetValue: "*" } under
+    // a title like "Khan Academy — Algebra 1 practice". The console shows the
+    // title as the headline with the real target inside a collapsed panel; the
+    // parent taps the green button; the temporary rule that appears is evaluated
+    // ABOVE every standing rule, so for the grant's lifetime the entire web was
+    // open — over their explicit domain blocks, their category blocks and a
+    // default-deny posture — and it could be renewed on every ask.
+    // { "CATEGORY", "adult" } and { "DOMAIN", "com" } were the same move.
+    //
+    // Enforced here rather than at the route so it holds for every caller, and
+    // it constrains only what a DEVICE may put in front of a parent: a parent
+    // authoring a rule directly keeps the full vocabulary.
+    const targetError = childRequestTargetError(input.targetType, input.targetValue);
+    if (targetError) throw new DomainError(targetError);
 
     // DEDUPE. A blocked page in a browser is not one request: the child reloads,
     // the page retries its sub-resources, a tab restores on wake. Each of those
@@ -1069,9 +1250,13 @@ export class ApprovalService {
         title: duplicate.title ?? input.title,
         url: duplicate.url ?? input.url,
         reason: duplicate.reason ?? input.reason,
+        // FIRST referrer wins, like the rest of this block. A re-file after the
+        // child has wandered elsewhere would otherwise rewrite where they were
+        // when they hit it, which is the one thing this field is for.
+        referrerHost: duplicate.referrerHost ?? normalizeReferrerHost(input.referrerHost),
       };
       const changed = enriched.title !== duplicate.title || enriched.url !== duplicate.url
-        || enriched.reason !== duplicate.reason;
+        || enriched.reason !== duplicate.reason || enriched.referrerHost !== duplicate.referrerHost;
       if (changed) await this.repo.updateAccessRequest(enriched);
       return enriched;
     }
@@ -1080,6 +1265,7 @@ export class ApprovalService {
       id: uid(), familyId: input.familyId, childId: input.childId, deviceId: input.deviceId,
       targetType: input.targetType, targetValue: input.targetValue,
       title: input.title, url: input.url, reason: input.reason,
+      referrerHost: normalizeReferrerHost(input.referrerHost),
       status: "PENDING", createdAt: now(),
     });
     await this.repo.addAuditEvent({
@@ -1179,6 +1365,28 @@ export class ApprovalService {
   }
 
   /** Parent decides. Server-authoritative; records who decided; produces a rule. */
+  /**
+   * Age out asks nobody answered.
+   *
+   * Lazy rather than a background job: this backend runs on Workers as well as
+   * a single binary, and a scheduled sweep exists on neither by default. Every
+   * read of the request list pays for its own tidying, which is cheap and — more
+   * to the point — cannot drift out of sync with what a parent is looking at.
+   *
+   * Returns the number expired, so a caller can decide whether to wake the feed.
+   */
+  async expireStaleRequests(familyId: string, nowMs = Date.now()): Promise<number> {
+    const pending = await this.repo.listAccessRequests(familyId, "PENDING");
+    let n = 0;
+    for (const r of pending) {
+      const age = nowMs - Date.parse(r.createdAt);
+      if (!Number.isFinite(age) || age < REQUEST_EXPIRES_AFTER_MS) continue;
+      await this.repo.updateAccessRequest({ ...r, status: "EXPIRED" });
+      n++;
+    }
+    return n;
+  }
+
   async decide(input: {
     familyId: string; requestId: string; decidedBy: string;
     decision: "ALLOW" | "BLOCK"; scope: ApprovalScope; duration: ApprovalDuration;

@@ -1,4 +1,5 @@
 {
+  "_comment": "An EXAMPLE. The extension ids are placeholders and the agent now refuses them: an id must be 32 letters a-p. A wrong id is worse than none, because ExtensionInstallBlocklist=* still applies \u2014 every extension blocked, ours not installed. install.ps1 writes this file; edit it by hand only to fix an id.",
   "chromeExtensionId": "REPLACE_WITH_CHROME_WEB_STORE_ID",
   "edgeExtensionId": "REPLACE_WITH_EDGE_ADDONS_ID",
   "backendUrl": "http://localhost:8787",

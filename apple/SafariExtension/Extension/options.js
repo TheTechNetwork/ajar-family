@@ -8,8 +8,8 @@
  */
 import { enroll, getConfig, clearConfig } from "./backend-client.js";
 import {
-  BUNDLED_BACKEND_URL, WORD_KEY, checkParentWord, clearTrustAnchor, decideUnenroll,
-  hasParentWord, isDevMode, readTrustAnchor, setParentWord,
+  BUNDLED_BACKEND_URL, NATIVE_APP_ID, WORD_KEY, checkParentWord, clearTrustAnchor,
+  decideUnenroll, hasParentWord, isDevMode, readTrustAnchor, setParentWord,
 } from "./trust-anchor.js";
 
 const ext = globalThis.browser ?? globalThis.chrome;
@@ -88,7 +88,55 @@ function friendlyEnrollError(err) {
 
 const CODE_RE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/;
 
+/**
+ * Is the containing app the policy source on this device?
+ *
+ * WHY THIS PAGE ASKS BEFORE OFFERING ANYTHING. On iOS the app enrols the device
+ * and the extension reads policy out of the shared App Group — it has no device
+ * identity of its own and must not get one. Connecting here would enrol the SAME
+ * phone a second time, so one child would hold two device identities: two
+ * heartbeats, two rows in the parent's device list, and a policy version the two
+ * halves disagree about.
+ *
+ * It is also the first half of redteam C2 (see the long comment above). This
+ * page is reachable by the child, and the strongest version of "the child
+ * cannot re-point this browser at their own server" is that the page does not
+ * offer to, on any device where the app is in charge.
+ *
+ * Absence of native messaging is the honest signal for "no containing app":
+ * a plain browser and the conformance harness have no sendNativeMessage at all,
+ * and that is exactly where the connect form is still the right answer.
+ */
+async function nativePolicySource() {
+  const send = globalThis.browser?.runtime?.sendNativeMessage;
+  if (typeof send !== "function") return null;
+  try {
+    const res = await globalThis.browser.runtime.sendNativeMessage(
+      NATIVE_APP_ID, { type: "GET_POLICY" },
+    );
+    return res?.ok ? res : null;
+  } catch {
+    // The app is not installed, or Safari refused the message. Either way this
+    // browser has no native policy source and the form below is correct.
+    return null;
+  }
+}
+
 async function render() {
+  const native = await nativePolicySource();
+  if (native) {
+    $("managed").hidden = false;
+    $("enrolled").hidden = true;
+    $("form").hidden = true;
+    $("managedState").textContent = native.tamperDetected
+      ? "Something changed the stored rules on this device, so Safari is blocking everything except a few safety sites. Open the Ajar app to fix it."
+      : native.provisioned
+        ? "Connected, and rules are arriving from the app."
+        : "The app is installed but no child has been set up yet. Finish setup in the Ajar app and this page will follow.";
+    return;
+  }
+  $("managed").hidden = true;
+
   const cfg = await getConfig();
   const pin = await readTrustAnchor();
   const wordSet = await hasParentWord();

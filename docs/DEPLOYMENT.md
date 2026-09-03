@@ -3,10 +3,11 @@
 > Status: **operational runbook** for the alpha backend. It reflects what is
 > actually in the repo today: a transport-agnostic app with a Workers `fetch`
 > adapter (`backend/src/worker.ts`) and a Node adapter (`backend/src/index.ts`),
-> WebCrypto Ed25519 signing, and an **in-memory store** that is explicitly **not
-> durable on Workers**. Cloudflare is the deploy *target*, not a dependency: the
-> same app runs on any Node host (ARCHITECTURE §7). Load-bearing claims carry
-> official URLs.
+> WebCrypto Ed25519 signing, and a **durable D1-backed store** — `wrangler.toml`
+> binds a real `database_id` and `worker.ts` selects `SqlStore` whenever `DB` is
+> present, falling back to the in-memory store only when it is not. Cloudflare is
+> the deploy *target*, not a dependency: the same app runs on any Node host
+> (ARCHITECTURE §7). Load-bearing claims carry official URLs.
 
 ---
 
@@ -23,20 +24,24 @@
   Ed25519** (`crypto.subtle`), which both Node 22 and Workers implement natively
   (ADR-010). Keys are **base64 of raw SPKI (public) / PKCS8 (private) DER** — see
   [§5](#5-generate-the-ed25519-signing-keypair).
-- **⚠️ Persistence — the alpha store is NOT durable on Workers.** The default
-  `MemoryStore` (`backend/src/store/memory.ts`) lives only for the lifetime of a
-  **warm isolate**; **each isolate is separate** and Cloudflare spins isolates up
-  and down freely, so writes are not shared or persisted. This is fine for a
-  **single-isolate demo / health-and-signing smoke test**, and wrong for anything
-  stateful.
-  - **Durable store (implemented):** `SqlStore` (`backend/src/store/sql/`) is a
-    `Repository` over SQLite, with a **node:sqlite** adapter (Node host, via
-    `DATABASE_FILE`) and a **D1** adapter (Workers). Same interface, same schema,
-    covered by a durability test. To make the Worker durable: `wrangler d1 create
-    ajar`, uncomment the **`[[d1_databases]]`** binding (`binding = "DB"`)
-    in `backend/wrangler.toml` with the returned id, and redeploy — `worker.ts`
-    auto-selects D1 when `env.DB` is bound and creates the schema on first use.
-    D1: <https://developers.cloudflare.com/d1/>.
+- **Persistence — durable, and already bound.** `SqlStore`
+  (`backend/src/store/sql/`) is a `Repository` over SQLite, with a
+  **node:sqlite** adapter (Node host, via `DATABASE_FILE`) and a **D1** adapter
+  (Workers). Same interface, same schema, covered by a durability test.
+  `backend/wrangler.toml` already binds `[[d1_databases]]` with a real
+  `database_id`, and `worker.ts` selects D1 whenever `env.DB` is present,
+  creating the schema on first use. D1:
+  <https://developers.cloudflare.com/d1/>.
+  - This section used to say the alpha store is **NOT durable**, and told you to
+    "uncomment the `[[d1_databases]]` binding" — which is not commented, and has
+    not been since the durable store landed. `RELEASE_CHECKLIST.md` had already
+    marked the same item done. A reader following this text either believed the
+    deployment loses data on every isolate recycle, or went looking for a comment
+    that is not there.
+  - `MemoryStore` is still the fallback when no `DB` binding and no
+    `DATABASE_FILE` are present, and it is genuinely not durable: it lives for
+    the lifetime of one warm isolate, and each isolate is separate. That is the
+    dev/smoke-test path, not the deployed one.
 
 ---
 

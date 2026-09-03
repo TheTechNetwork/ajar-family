@@ -44,11 +44,16 @@ Per `docs/APPLE_ACCOUNT_SETUP.md` — the **ALPHA column** of its §10 table:
       posture; entitlements are org-gated).
 - [ ] **Development signing works** — Apple Development cert + Team ID present;
       a dev build can be signed.
-- [ ] **App IDs registered** — parent (`com.<org>.parentfilter`), child agent
-      (`com.<org>.childfilter`), and the filter-data / filter-control / urlfilter
-      extension IDs with their NetworkExtension + Family Controls capabilities.
-- [ ] **App Group** `group.com.<org>.childfilter` registered and attached to the
-      child app + every child-side extension.
+- [ ] **App IDs registered** — the FOUR the projects actually build, not the
+      `com.<org>.*` placeholders this list used to carry (nothing in the repo has
+      ever been named that, so anyone registering them registered the wrong
+      things): `family.ajar.parent`, `family.ajar.filter`,
+      `family.ajar.filter.DataProvider`, `family.ajar.filter.ControlProvider`,
+      and `family.ajar.filter.SafariExtension`. Capabilities per App ID are in
+      `docs/APPLE_ACCOUNT_SETUP.md §4`.
+- [ ] **App Group** `group.family.ajar.filter` registered and attached to the
+      child app, both NetworkExtension providers and the Safari extension.
+      `node apple/check-app-group.mjs` fails if any target loses it.
 - [ ] **APNs `.p8` key** created; Key ID + Team ID recorded for the backend
       `Notifier`.
 
@@ -103,6 +108,8 @@ work continues on **new branches / new PRs after the merge** — including:
 - a real **APNs `Notifier`** behind the existing abstraction — `docs/APPLE_ACCOUNT_SETUP.md §7`;
 - **macOS** (PoC B) and **Windows** (PoC C) agents;
 - **`NEURLFilter` Identity & Trust** onboarding when the PoC-D blocklist layer ships — `docs/APPLE_ACCOUNT_SETUP.md §9`;
-- **production hardening** (auth → SIWA/passkeys + MFA, rate limiting, WS/SSE fan-out, audit retention).
+- **production hardening** — passkeys and rate limiting have SHIPPED
+  (`backend/src/domain/passkeys.ts`, `backend/src/http/rate-limit.ts`); what
+  remains here is WS/SSE fan-out and audit retention.
 
 Each is its own branch and PR; PR #1 is not held open for any of them.

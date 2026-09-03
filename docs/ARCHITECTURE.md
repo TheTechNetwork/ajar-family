@@ -338,11 +338,19 @@ specific bad videos). It is **not** the per-video-approval engine. Validated in
   documented fallback only, never the default. We do not add a VPN on Apple
   unless a PoC proves the native path cannot meet a concrete requirement.
 - **No TLS interception** anywhere on Apple.
-- **Not ManagedSettings `WebContentSettings`** as the URL engine — it is
+- **Never ManagedSettings `WebContentSettings`** — not as the URL engine, and
+  not as the "auxiliary coarse layer" this bullet used to recommend it as. It is
   domain-level and capped at **50 domains + 50 exceptions**
-  (<https://developer.apple.com/documentation/managedsettings/webcontentsettings>).
-  Useful as an auxiliary coarse layer (and it disables Safari private browsing),
-  not as the per-URL engine.
+  (<https://developer.apple.com/documentation/managedsettings/webcontentsettings>),
+  which is why it was never the engine. The reason it is now barred outright is
+  measured, not theoretical: **iOS disables every Safari extension while web
+  content is restricted**, and `WebContentSettings` is the programmatic form of
+  that restriction. Asserting it would switch off our own Safari extension —
+  the only mechanism that enforces per-request inside Safari on iOS (ADR-018) —
+  in exchange for a 50-domain blocklist. That trade is never worth making, and
+  it would present as the extension being installed and doing nothing. Found on
+  a device on 2026-09-03 (§13 item 7a), where a Screen Time web restriction the
+  device already had greyed the toggle out.
 
 ---
 
@@ -353,9 +361,21 @@ are **three distinct Apple postures**, and only one gives real anti-tamper:
 
 | Posture | How it arises | Anti-tamper | Per-video filtering |
 |---|---|---|---|
-| **Unsupervised device + FamilyControls `.child`** | Child signed in with a **real child Apple ID** that is a member of the parent's **Family Sharing** group; parent approves `requestAuthorization(for: .child)` | **Yes** — app can't be deleted, iCloud can't be signed out (FamilyControls). Content filter is unlocked on unsupervised iOS (TN3134). | **Yes** on iOS Safari via `NEFilterDataProvider` (PoC A) |
+| **Unsupervised device + FamilyControls `.child`** | Child signed in with a **real child Apple ID** that is a member of the parent's **Family Sharing** group; parent approves `requestAuthorization(for: .child)` | **Yes** — app can't be deleted, iCloud can't be signed out (FamilyControls). Content filter is unlocked on unsupervised iOS (TN3134). | **Per top-level NAVIGATION**, via `NEFilterDataProvider` + the Safari Web Extension. See the note under this table. |
 | **Self-controlled / adult account (`.individual`)** | Any adult approves on their own device via Face/Touch ID | **No** — self-restriction only; the same person can revoke it | Filter works while enabled, but the user can disable it |
 | **Supervised / MDM device** | Device enrolled in MDM (Apple Configurator / Apple Business/School Manager) | Strongest, but this is **not** the consumer product | Full content-filter + MDM URL-filter config; out of scope for MVP |
+
+> **What "per-video filtering" means here, precisely.** This column read "Yes on
+> iOS Safari via `NEFilterDataProvider` (PoC A)", and that is not what the
+> mechanism does. `NEFilterDataProvider` is asked once per FLOW: a top-level
+> navigation arrives as a browser flow carrying the full URL and is enforced
+> per-URL, while everything a page fetches for itself arrives as a socket flow
+> carrying a hostname and nothing else. So the filter ALONE enforces at HOST
+> level inside any single-page app — Reddit, X, Instagram, TikTok, Google
+> Search, YouTube — which its own source calls "the product's largest
+> enforcement gap, measured on device 2026-08-31" (`FilterDataProvider.swift`).
+> Per-URL inside a page is the Safari Web Extension's job (ADR-018), and it is
+> the one thing here that CI cannot verify.
 
 **Product rules that follow:**
 
@@ -615,8 +635,68 @@ vendor; documented in `docs/WINDOWS_FILTER_POC.md`.)
 - **Privacy**: minimize collection. Store the **blocked request that needs
   approval** + **decision metadata**, not full browsing history. `NEURLFilter` is
   privacy-preserving by construction (PIR + OHTTP: neither Apple nor we see
-  browsing). Activity reporting is opt-in. COPPA / GDPR-K / Apple child-safety
-  considerations are tracked in [§12](#12-compliance-notes-not-legal-advice).
+  browsing). COPPA / GDPR-K / Apple child-safety considerations are tracked in
+  [§12](#12-compliance-notes-not-legal-advice).
+- **But "no browsing history" is not the same as "private."** The server holds
+  every rule, every ask (target, title, URL, the child's reason, the referring
+  host) and an audit log — a listing of everything the family has an opinion
+  about, which is sensitive whether or not anyone watched a browser. The
+  candidate answer is to encrypt the values end-to-end and keep only the shapes,
+  which the on-device-decision architecture makes possible because the server
+  never evaluates policy; it is designed in `docs/ROADMAP.md` §5 and is **not
+  built**. Until it is, say what is true: we do not observe browsing, and we can
+  read the policy.
+
+### 10.1 Observation is off by default, and opt-in is scoped to a purpose
+
+**Nothing observes a child unless a parent turns it on for a stated reason, and
+it turns itself off again.** This is a product rule, not an aspiration, and it
+decides the shape of anything that would need to watch.
+
+Draw the line in the right place, or the rule becomes incoherent:
+
+| | Is it "collection"? |
+|---|---|
+| What a child **asked** to open, and what the parent decided | **No.** That is the product. A request the child made deliberately, to a parent, is not something being gathered about them behind their back. Not opt-in — turning it off would be turning Ajar off. |
+| The audit log of what a **parent** did | **No.** A record of the account holder's own actions. |
+| What a child **visited** — including everything that was never blocked and never asked about | **Yes, and this is the only thing the rule is about.** Off by default. Nothing in the product collects it today. |
+
+Rules that follow, for any future feature that wants that third row:
+
+- **Off by default, and off means the code does not run** — not gathered and
+  discarded, not held briefly. A switch that only stops the display is not a
+  switch.
+- **Opt-in is scoped to one purpose and one window**, never a blanket "allow
+  data collection". "Let Ajar watch what Sam uses for seven days so it can
+  suggest a starting point" is a thing a person can actually consent to; a
+  permanent global toggle is not.
+- **There is no permanent option, and not offering one is the point.** Every
+  opt-in carries a duration; "until I turn it off" is not one of the choices and
+  must not appear in the UI at all. A control that *can* be set to forever will
+  be set to forever — by a parent clearing a prompt, by a default someone
+  softens later, by a support script telling someone to just leave it on. The
+  guarantee has to be structural: if the shortest path to "always" is to
+  re-consent every window, the product cannot drift into permanent observation
+  no matter who is holding it.
+- **It expires with its purpose.** The strong version of "the parent can turn it
+  off when learning is done" is that it turns ITSELF off and staying on takes a
+  deliberate act — a setting a parent has to remember to disable is a setting
+  that stays on for years.
+- **The raw observations are deleted when the thing they were for is produced**,
+  and they never leave the device in the first place (see ROADMAP §3).
+- **The parent consents; the child is told.** The parent is the account holder
+  and consents on the child's behalf, but the terms say Ajar "is not hidden and
+  it is not a monitoring tool" and that "the whole design assumes they know".
+  Legal consent and honest disclosure are two obligations, not one.
+
+The first feature this governs is learn mode (`docs/ROADMAP.md` §3), which cannot
+run without that opt-in — deliberately, because it is the feature that makes the
+rule real rather than theoretical.
+
+This rule governs what we *observe*. It says nothing about what we *store*,
+which is the separate and currently unanswered problem above and in
+`docs/ROADMAP.md` §5. Both have to be true for the privacy claim to mean
+anything.
 
 ## 11. Anti-bypass checklist (documented, mitigated, non-invasive)
 
@@ -652,9 +732,18 @@ and in `docs/DECISIONS.md`.
 _Status 2026-08-27: the scaffold **builds clean for arm64 device** (Xcode 27.0 /
 iPhoneOS 27 SDK, deployment target iOS 26.0) as app + filter-data `.appex` +
 filter-control `.appex` — see `apple/AjarFilter/project.yml` and ADR-011.
-**Every numbered item below is still unproven**: no test was executed, because no
-iOS device and no signing identity were available (ADR-012). Compiling is not
-evidence of behaviour._
+**STALE — SUPERSEDED BY ADR-001's EVIDENCE BLOCK (2026-08-31).** This section is
+stamped 2026-08-27 and says nothing below it was ever run. Five days later
+tests A1-A3 WERE run, on an iPhone 16 Pro Max (iOS 27.0) with a
+development-signed build, and `docs/DECISIONS.md` ADR-001 records what they
+found — including the per-flow qualification that ADR-018 then acted on.
+Anyone reading only this section concluded the product's central premise was
+unverified, five days after it had been verified.
+
+Items 1-3 and 5 are settled by that evidence; item 4 is still unmeasured and item
+6 is still open. `docs/DECISIONS.md` is where the current status lives — this
+section is kept as the record of what was unknown before the device run, not as
+a statement about today._
 1. Default-deny YouTube while allowing exactly one video (another stays blocked) in Safari. — **UNPROVEN**
 2. Full URL/query visibility on WebKit flows in practice (incl. real YouTube URLs with extra params). — **UNPROVEN at runtime.** SDK-level support only: `NEFilterFlow.URL` is declared on the *base* `NEFilterFlow` class (`NEFilterFlow.h`, iOS 9.0+) documented as "The flow's HTTP request URL. Will be nil if the flow did not originate from WebKit." That matches the design assumption but says nothing about what YouTube's real navigations actually surface.
 3. Remediation "Request Access" block page actually renders in Safari and round-trips to the app. — **UNPROVEN**, and note a constraint found in the SDK headers: the remediation URL "should follow the scheme http or https" (`NEFilterProvider.h`). The block page is therefore a **remotely hosted** page, not an app-local one; the `NE_FLOW_URL` substitution carries the blocked URL to it, and the hop back into the containing app must be a universal link or custom scheme from that page. This adds a hosting dependency to the Request-Access flow that the §0 workflow should account for.
@@ -664,6 +753,39 @@ evidence of behaviour._
 
 **PoC B — macOS Safari Web Extension (+ native tamper controls):**
 7. Per-video allow/deny + Request-Access page in Safari without blocking Safari; force-install feasibility on consumer macOS; standard-account tamper resistance.
+
+**RESOLVED 2026-09-03 — and it left a hard constraint behind:**
+7a. **Why the Safari extension's toggle was greyed out.** Measured on device:
+    **Screen Time → Content & Privacy Restrictions → Content Restrictions → Web
+    Content** was restricted. Setting it to Unrestricted made the toggle
+    enableable immediately. iOS disables Safari extensions while web content is
+    restricted, so an extension cannot observe or bypass filtered browsing.
+
+    **The `NEFilterDataProvider` content filter is exonerated, and ADR-018
+    stands.** It had been proposed that an active content filter is itself such a
+    trigger, which would have made the filter and the extension mutually
+    exclusive on iOS and left the in-page/SPA gap unclosable. That is not what
+    the device showed, and no Apple documentation asserted it — every source for
+    the claim described Screen Time. The free check was run first precisely so
+    this conclusion was not reached on the strength of a plausible story.
+
+    **What it does leave, and this one is real.** The trigger is the web-content
+    restriction, and `ManagedSettings.WebContentSettings` is the programmatic
+    form of that same setting — which this document recommended two hundred
+    lines above as a "useful auxiliary coarse layer". It is not. Asserting it
+    would grey out our OWN Safari extension, which is the only mechanism on iOS
+    that enforces per-request inside Safari (ADR-018). See the amended bullet in
+    §6. The mutual exclusion is genuine; it is just between two of OUR choices
+    rather than between the filter and the extension.
+
+    **Follow-up, not yet built:** a family that has set Screen Time web
+    restrictions themselves — for perfectly good reasons, before ever installing
+    Ajar — silently disables our extension, and the product then looks installed
+    and enforcing while the in-page path is dead. iOS exposes no API to read
+    that setting, so the practical detection is a heartbeat: the extension
+    stamps the App Group when it runs, and the app warns when that stamp is
+    absent or stale. Until that exists, this failure is invisible, which is the
+    same shape as every other defect this repository keeps finding.
 
 **PoC C — Windows policy-installed extension + hardened service (no MITM by default):**
 8. `ExtensionInstallForcelist` + MV3 `webRequestBlocking` on clean, non-domain-joined Windows 11 Home; full-URL enforcement; service anti-tamper; block unsupported browsers; whether any concrete case forces the MITM fallback.

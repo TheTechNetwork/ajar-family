@@ -39,6 +39,11 @@
     background: var(--yes); color: var(--yes-ink); cursor: pointer; }
   button.primary:hover:not(:disabled) { background: var(--yes-strong); }
   button.primary:disabled { opacity: .55; cursor: default; }
+  .pastebox { margin-top: 1.25rem; text-align: left; }
+  .pastebox > summary { cursor: pointer; color: var(--ink-2); min-height: 44px;
+                        display: flex; align-items: center; }
+  .pastebox > summary:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+  .pastebox form { margin-top: .75rem; }
   button.link { background: none; border: 0; color: var(--ink-2); font: inherit; text-decoration: underline;
     text-underline-offset: 3px; cursor: pointer; padding: .75rem 0; min-height: 44px; }
 
@@ -106,6 +111,16 @@
          email that has not arrived. The link is what actually ships. -->
     <p class="note">We'll email you a link to confirm this address. Check it for typos — a wrong address means no link, and no account.</p>
     <button class="primary" type="submit">Create account</button>
+    <!-- THE CONSENT SURFACE. This form collects an email and, two screens later,
+         a child's first name, and there was no policy link anywhere on it — on a
+         product whose whole subject is other people's children. A sentence a
+         parent reads before they tap, not a tickbox they learn to click past. -->
+    <p class="note">
+      By creating an account you agree to our
+      <a href="/legal.html#terms">terms</a>, and to our
+      <a href="/legal.html#privacy">privacy notice</a> — which is mostly a list of
+      what Ajar does <em>not</em> keep.
+    </p>
     <button class="link" type="button" onclick="location.href='/parent/'">I already have an account</button>
   </form>
 
@@ -115,6 +130,27 @@
     <p class="sub" id="checkSub">We sent a link to confirm your address. Open it and we'll pick up right here.</p>
     <p class="note">Nothing has been created yet — the link is what makes the account. If it doesn't arrive in a few minutes, check spam, then try again.</p>
     <button class="link" type="button" id="resend">Send it again</button>
+
+    <!-- A PLACE TO TYPE THE CODE.
+         The confirmation mail carries a LINK only when VERIFY_EMAIL_URL is
+         configured; without it the body is a bare code and there was nowhere in
+         the entire product to put one — both redemption sites read it from the
+         address bar and neither had a field. A self-hosted deployment following
+         INSTALL.md therefore produced a valid code and no way to spend it, which
+         meant nobody could create an account at all.
+         It also covers an email client that mangles the link, which is common
+         enough on its own. -->
+    <details class="pastebox">
+      <summary>The email has a code, not a link</summary>
+      <form id="sPaste" novalidate>
+        <div class="field">
+          <label for="verifyCode">Paste it here</label>
+          <input id="verifyCode" name="verifyCode" type="text" autocomplete="one-time-code"
+                 spellcheck="false" autocapitalize="off" required>
+        </div>
+        <button class="primary" type="submit">Confirm my address</button>
+      </form>
+    </details>
   </div>
 
   <!-- 2 · passkey. Before the family, deliberately: the account that says yes

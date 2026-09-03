@@ -21,8 +21,14 @@ import { deflateSync } from "node:zlib";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const S = 1024;
-const SS = 3; // supersampling factor per axis
+// Geometry below is authored in a 1024 box; any output size samples that box,
+// so every icon is the same drawing rather than a resize of a bitmap.
+const BOX = 1024;
+
+// Supersampling per axis. A 16px icon covers 64 box-units per pixel, so the
+// three samples that are plenty at 1024 leave the door edge visibly ragged —
+// small sizes need more, and they are cheap precisely because they are small.
+const ssFor = (size) => (size >= 512 ? 3 : size >= 128 ? 4 : 8);
 
 // Straight from web/parent/tokens.css. Not eyeballed to something close.
 const PAPER = [0xf6, 0xf4, 0xee]; // --bg          Warm Paper
@@ -73,21 +79,27 @@ function sample(x, y, t) {
   return t.ground;
 }
 
-function render(theme) {
+function render(theme, size = BOX) {
   const t = THEMES[theme];
   if (!t) throw new Error(`unknown theme "${theme}" (have: ${Object.keys(THEMES).join(", ")})`);
+  const SS = ssFor(size);
+  const scale = BOX / size; // pixel -> box units
   // One filter byte (0 = None) per scanline, then RGB triples.
-  const raw = Buffer.alloc(S * (1 + S * 3));
+  const raw = Buffer.alloc(size * (1 + size * 3));
   const step = 1 / SS;
   const off = step / 2;
-  for (let py = 0; py < S; py++) {
-    const rowStart = py * (1 + S * 3);
+  for (let py = 0; py < size; py++) {
+    const rowStart = py * (1 + size * 3);
     raw[rowStart] = 0;
-    for (let px = 0; px < S; px++) {
+    for (let px = 0; px < size; px++) {
       let r = 0, g = 0, b = 0;
       for (let sy = 0; sy < SS; sy++) {
         for (let sx = 0; sx < SS; sx++) {
-          const c = sample(px + off + sx * step, py + off + sy * step, t);
+          const c = sample(
+            (px + off + sx * step) * scale,
+            (py + off + sy * step) * scale,
+            t,
+          );
           r += c[0]; g += c[1]; b += c[2];
         }
       }
@@ -125,10 +137,10 @@ function chunk(type, data) {
   return Buffer.concat([len, body, crc]);
 }
 
-function png(raw) {
+function png(raw, size = BOX) {
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(S, 0);
-  ihdr.writeUInt32BE(S, 4);
+  ihdr.writeUInt32BE(size, 0);
+  ihdr.writeUInt32BE(size, 4);
   ihdr[8] = 8; // bit depth
   ihdr[9] = 2; // colour type 2 = truecolour, NO alpha (see note above)
   return Buffer.concat([
@@ -139,11 +151,35 @@ function png(raw) {
   ]);
 }
 
-const [theme, catalog] = process.argv.slice(2);
-if (!theme || !catalog) {
+// Sizes a Safari web extension wants: `icons` uses the larger set (Apple's own
+// converter template ships 48/96/128/256/512) and the toolbar `action` uses the
+// small ones.
+const EXTENSION_SIZES = [16, 32, 48, 96, 128, 256, 512];
+
+const [theme, dest] = process.argv.slice(2);
+if (!theme || !dest) {
   console.error("usage: make-icon.mjs <filter|parent> <path/to/Assets.xcassets>");
+  console.error("       make-icon.mjs extension <path/to/Extension>");
   process.exit(2);
 }
+
+// Web-extension icons: FLAT FILES, no subdirectory. The extension's resources
+// are added to the appex individually and Copy Bundle Resources flattens them
+// to the bundle root (see apple/*/project.yml — a folder reference there put
+// manifest.json one level down and Safari never found it). An icons/ directory
+// would be collapsed the same way and every path in the manifest would break,
+// so these live beside manifest.json and are referenced by bare filename.
+if (theme === "extension") {
+  mkdirSync(dest, { recursive: true });
+  for (const size of EXTENSION_SIZES) {
+    const name = `icon-${size}.png`;
+    writeFileSync(join(dest, name), png(render("filter", size), size));
+    console.log(`wrote ${join(dest, name)}  (${size}x${size})`);
+  }
+  process.exit(0);
+}
+
+const catalog = dest;
 const set = join(catalog, "AppIcon.appiconset");
 mkdirSync(set, { recursive: true });
 writeFileSync(join(catalog, "Contents.json"), `{\n  "info" : { "author" : "xcode", "version" : 1 }\n}\n`);

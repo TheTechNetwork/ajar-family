@@ -11,7 +11,10 @@ PoC produces a result.
 ---
 
 ### ADR-001 — The per-video-approval engine on iOS is `NEFilterDataProvider`, not `NEURLFilter`
-**Status:** Proposed (confirm in PoC A)
+**Status:** ACCEPTED — confirmed on hardware 2026-08-31, with the qualification
+below. (This said "Proposed (confirm in PoC A)" directly above its own Evidence
+block recording that PoC A had been run, which is the one line a reader checks
+to know whether the product's central premise is settled.)
 **Context:** The headline requirement is default-deny YouTube with per-video
 approval in seconds. Research shows `NEURLFilter` is **blocklist-only** (dataset
 values are always `1`; sub-URL enumeration blocks a whole domain with no
@@ -607,4 +610,78 @@ be the product, which is why it keeps coming up short.
   since one extension target can serve both.
 - Nothing here changes the on-device posture: every layer above evaluates the
   signed snapshot locally. No design in this ADR sends a URL anywhere.
+
+### Amendment (2026-09-01) — packaged is not installed, and installed is not working
+
+Two corrections after the target existed:
+
+**The extension had no way to get policy.** `SafariWebExtensionHandler` answered
+every message with `native-host-not-implemented`, and `background.js` reached for
+`runtime.connectNative("com.example.youtubeguard.host")` — a Chrome/Firefox
+long-lived port, aimed at a placeholder id, **in a browser that does not
+implement `connectNative` at all**. The only working policy source was the
+options-page backend enrollment, which on a real install would mean enrolling one
+device twice and holding two device identities for one child. So the extension
+would install, hold no policy, and answer every request from the no-policy
+fallback. "Compiles and is installable" was not "working".
+
+Fixed by making the containing app the policy source over Safari's one-shot
+`sendNativeMessage`: the handler reads the signed snapshot `AjarFilter`'s app
+already wrote to the shared App Group `group.family.ajar.filter`, and the
+JavaScript re-verifies the Ed25519 signature before trusting a field of it. One
+enrollment, one device identity, one snapshot, two enforcement surfaces. The
+native side passes bytes; it does not vouch for them, and it cannot replace a
+pinned key. `apple/check-app-group.mjs` runs in CI because the handler cannot
+import `PolicyStore` and therefore duplicates the group name and four key names,
+and every way of drifting them is silent — a drifted copy reads nothing and looks
+exactly like a device nobody enrolled, which is the one state that allows
+everything.
+
+**The no-policy fallback was shaped like YouTube.** It failed CLOSED for YouTube
+and OPEN for everything else, so on an enrolled device that had lost its policy
+every site but one was wide open and deleting the cached snapshot was the bypass.
+What the absence of policy means has nothing to do with which site is being
+visited. It now mirrors `PolicyStore.state()`: never enrolled → allow (we do not
+claim to filter this device); enrolled and policy missing or unverifiable →
+block.
+
+Still true, and still the honest limit: CI compiles this target, it does not run
+Safari. Whether iOS Safari honours the `webNavigation` + content-script approach
+is unmeasured and needs a device.
+
+### Amendment 2 (2026-09-01) — one app on iOS, and it now has a way to ship
+
+The extension began as a separate app on both platforms. On iOS that was the
+wrong shape: a parent installed two apps, enrolled the same device twice, and the
+child carried two device identities. It also forced the duplication above — the
+shim could not import `PolicyStore` across Xcode projects, so it kept string
+copies of the App Group name and four storage keys.
+
+The extension sources now live at `apple/SafariExtension/` and are compiled by
+two hosts:
+
+| Platform | Container |
+|---|---|
+| iOS / iPadOS | the filter app itself, as its `SafariExtension` target |
+| macOS | `apple/AjarSafari`, its own app |
+
+macOS cannot join the iOS host: there is no FamilyControls there, and a macOS
+content filter is a system extension with a different container, entitlement and
+distribution channel. One copy of the extension, two containers, no second
+enrolment on the platform that matters most.
+
+Consequences:
+
+- The shim reads policy through `PolicyStore`. `apple/check-app-group.mjs` now
+  enforces the *absence* of the old string copies rather than their agreement.
+- The extension ships in the app `testflight.yml` already uploads, so it inherits
+  a distribution path instead of needing one. It had none: CI compiled it and
+  nothing archived, signed or uploaded it.
+- **It needs no restricted entitlement of its own** — only the App Group. Family
+  Controls gates the app's distribution, not this target's compilation.
+- The filter app's main screen now links to the enable steps and says plainly
+  that without the extension Ajar can close a whole site but not one page of it.
+  iOS gives an app no way to *check* whether its Safari extension is enabled
+  (`SFSafariExtensionManager` is macOS-only), so that is a standing prompt, never
+  a status tick.
 

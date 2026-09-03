@@ -119,3 +119,109 @@ test("only an OWNER can add parents", async () => {
     { email: "owner@e.com", role: "PARENT" }, coparent.accessToken);
   assert.equal(res.status, 403);
 });
+
+test("a LIMITED_GUARDIAN sees only their own child — requests, children, rules, audit", async () => {
+  // model.ts calls assignedChildIds "the children they may see/act on", and
+  // devices + decisions honoured that. The request feed, the child list, the
+  // rule list and the audit log did not, and each returned the whole family.
+  //
+  // An access request carries the URL, the title, and the child's own words
+  // about why they want it. So a babysitter, a step-parent or an ex-partner,
+  // given the deliberately narrow role, could read every other child's asks
+  // verbatim. That is the most sensitive data this product holds.
+  const { app, r, owner, coparent, famId, childId } = await fixture();
+  const other = (await call(r, "POST", `/v1/families/${famId}/children`,
+    { displayName: "Other" }, owner.accessToken)).body as { id: string };
+  await app.family.addParent(famId, owner.userId, coparent.userId, "LIMITED_GUARDIAN", [childId]);
+
+  // Both children file an ask.
+  const enrol = async (kid: string) => {
+    const tok = await app.enrollment.createToken(famId, owner.userId, kid, "WINDOWS");
+    return app.enrollment.redeem(tok.code, `pk-${kid}`, "PC");
+  };
+  const mine = await enrol(childId);
+  const theirs = await enrol(other.id);
+  await app.approvals.createRequest({
+    familyId: famId, childId, deviceId: mine.id,
+    targetType: "DOMAIN", targetValue: "mine.example", title: "mine",
+  });
+  await app.approvals.createRequest({
+    familyId: famId, childId: other.id, deviceId: theirs.id,
+    targetType: "URL", targetValue: "https://sensitive.example/help", title: "a private thing",
+    reason: "personal",
+  });
+
+  // A rule for each child, plus one for the whole family.
+  await app.policy.addRule(famId, owner.userId, {
+    target: "DOMAIN", value: "a.example", action: "BLOCK",
+    scope: { type: "CHILD", familyId: famId, childId },
+  });
+  await app.policy.addRule(famId, owner.userId, {
+    target: "DOMAIN", value: "b.example", action: "BLOCK",
+    scope: { type: "CHILD", familyId: famId, childId: other.id },
+  });
+  await app.policy.addRule(famId, owner.userId, {
+    target: "DOMAIN", value: "everyone.example", action: "BLOCK",
+    scope: { type: "FAMILY", familyId: famId },
+  });
+
+  const g = coparent.accessToken;
+
+  const reqs = (await call(r, "GET", `/v1/families/${famId}/requests`, undefined, g)).body as { childId: string }[];
+  assert.deepEqual(reqs.map((x) => x.childId), [childId], "only their child's asks");
+
+  const waited = (await call(r, "GET", `/v1/families/${famId}/requests/wait?count=1&timeout=0`, undefined, g))
+    .body as { requests: { childId: string }[] };
+  assert.deepEqual(waited.requests.map((x) => x.childId), [childId], "the long-poll feed is filtered too");
+
+  const kids = (await call(r, "GET", `/v1/families/${famId}/children`, undefined, g)).body as { id: string }[];
+  assert.deepEqual(kids.map((k) => k.id), [childId]);
+
+  const rules = (await call(r, "GET", `/v1/families/${famId}/rules`, undefined, g)).body as
+    { value: string }[];
+  assert.deepEqual(rules.map((x) => x.value).sort(), ["a.example", "everyone.example"],
+    "their child's rules and the family-wide ones; not the other child's");
+
+  const audit = await call(r, "GET", `/v1/families/${famId}/audit`, undefined, g);
+  assert.equal(audit.status, 403, "the family-wide log cannot be safely sliced, so it is refused");
+
+  // The owner still sees everything.
+  const allReqs = (await call(r, "GET", `/v1/families/${famId}/requests`, undefined, owner.accessToken))
+    .body as unknown[];
+  assert.equal(allReqs.length, 2);
+  assert.equal((await call(r, "GET", `/v1/families/${famId}/audit`, undefined, owner.accessToken)).status, 200);
+});
+
+test("one family cannot delete another family's rule", async () => {
+  // Both stores took a familyId and ignored it, so the tenancy check upstream —
+  // "are you a member of THIS family" — was the only thing standing between
+  // DELETE /v1/families/<mine>/rules/<yours> and a 200. It needed a known rule
+  // id, so it was never remotely exploitable; it was still a store not honouring
+  // an argument its own signature declares.
+  //
+  // ONE app, TWO families. An earlier version of this test built two fixtures,
+  // which are two separate App instances with separate stores — so the delete
+  // was a no-op for a reason that had nothing to do with tenancy, and the test
+  // passed against the bug.
+  const { app, r, owner: ownerA, famId: famA } = await fixture();
+  const registerB = async () => {
+    await app.auth.register("b@e.com", "correct-horse", "B");
+    return (await call(r, "POST", "/v1/auth/login", { email: "b@e.com", password: "correct-horse" }))
+      .body as { accessToken: string; userId: string };
+  };
+  const ownerB = await registerB();
+  const famB = (await call(r, "POST", "/v1/families", { name: "B" }, ownerB.accessToken)).body as { id: string };
+
+  const theirRule = (await call(r, "POST", `/v1/families/${famA}/rules`, {
+    target: "DOMAIN", value: "theirs.example", action: "BLOCK", scope: { type: "FAMILY" },
+  }, ownerA.accessToken)).body as { id: string };
+
+  // B's owner, acting inside B's own family, naming A's rule.
+  const res = await call(r, "DELETE", `/v1/families/${famB.id}/rules/${theirRule.id}`,
+    undefined, ownerB.accessToken);
+  assert.equal(res.status, 200, "nothing to delete is not an error");
+
+  const stillThere = (await call(r, "GET", `/v1/families/${famA}/rules`, undefined, ownerA.accessToken))
+    .body as { id: string }[];
+  assert.ok(stillThere.some((x) => x.id === theirRule.id), "their rule survives");
+});

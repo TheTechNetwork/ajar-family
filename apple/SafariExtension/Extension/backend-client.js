@@ -34,6 +34,23 @@ export async function clearConfig() {
   await store.remove(CFG_KEY);
 }
 
+/**
+ * Record the signing key the containing app enrolled with (Apple native path).
+ *
+ * Deliberately a no-op when this profile already trusts a key: a native answer
+ * must never be able to REPLACE a pin, or App-Group write access would become
+ * the way to re-point trust. Same refusal as PolicyStore.enrollSigningKey, and
+ * the reason a change of trust anchor still needs the parent setup word.
+ *
+ * @returns {Promise<boolean>} true if this call is what set the key.
+ */
+export async function adoptSigningKeyIfUnset(spkiB64) {
+  if (!spkiB64) return false;
+  if (await getVerifyingKey()) return false;
+  await setConfig({ signingKeyB64: spkiB64 });
+  return true;
+}
+
 function b64(bytes) {
   let s = "";
   const u = new Uint8Array(bytes);
@@ -232,13 +249,15 @@ export async function consumeGrant(ruleId) {
   }
 }
 
-export async function postAccessRequest({ targetType, targetValue, title, url, reason }) {
+export async function postAccessRequest({ targetType, targetValue, title, url, reason, referrerHost }) {
   const cfg = await getConfig();
   if (!cfg.backendUrl || !cfg.deviceToken) throw new Error("not enrolled");
   const res = await fetch(`${cfg.backendUrl}/v1/requests`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${cfg.deviceToken}` },
-    body: JSON.stringify({ targetType, targetValue, title, url, reason }),
+    // `referrerHost` is the HOST the child was on, not the URL — display context
+    // for the parent, never an input to any decision (docs/ROADMAP.md §4).
+    body: JSON.stringify({ targetType, targetValue, title, url, reason, referrerHost }),
   });
   if (!res.ok) throw new Error(`request failed: ${res.status}`);
   return res.json();

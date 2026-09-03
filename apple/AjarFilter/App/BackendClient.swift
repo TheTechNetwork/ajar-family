@@ -229,7 +229,98 @@ final class BackendClient {
         if let held { comps.queryItems = [URLQueryItem(name: "since", value: String(held))] }
 
         let data = try await send(URLRequest(url: comps.url!), authenticated: true)
-        return try install(policyResponse: data, deviceId: deviceId)
+        let installed = try install(policyResponse: data, deviceId: deviceId)
+        // Tell the server about any "just once" grant this device has spent.
+        // Piggy-backed on the sync the app already performs rather than given a
+        // timer of its own: the report is not urgent (the grant is already dead
+        // locally, and its TTL bounds the server-side window), and a filter
+        // extension that wakes the network on its own is a battery complaint.
+        await reportSpentGrants(deviceId: deviceId)
+        // And post anything the Safari extension queued. Same reasoning as the
+        // line above: piggy-backed on a sync the app already does, because the
+        // extension cannot post for itself and should not be given an identity
+        // that would let it.
+        await postQueuedAccessRequests()
+        return installed
+    }
+
+    /// Report spent one-time grants, best-effort.
+    ///
+    /// The server cannot know when the one allowed load happened — only the
+    /// device can tell it, which `ApprovalService.consumeGrant` documents as
+    /// client-attested. A failure leaves the id unreported and the next sync
+    /// tries again; the grant is already unusable on THIS device either way,
+    /// so nothing the child sees depends on this call.
+    func reportSpentGrants(deviceId: String) async {
+        let store = PolicyStore.shared
+        let pending = store.unreportedSpentGrantIds()
+        guard !pending.isEmpty, let base = Self.baseURL else { return }
+        for ruleId in pending {
+            var req = URLRequest(url: base.appendingPathComponent(
+                "v1/devices/\(deviceId)/grants/\(ruleId)/consume"))
+            req.httpMethod = "POST"
+            do {
+                _ = try await send(req, authenticated: true)
+                store.markGrantReported(ruleId)
+            } catch {
+                // Deliberately not retried in a loop here: the next sync will.
+                // Retrying now could spend a grant the child never got to use if
+                // the failure was on our side of the request.
+                return
+            }
+        }
+    }
+
+    /// Post the "ask a parent" requests the Safari extension queued.
+    ///
+    /// The extension has no device identity and must not get one — enrolling it
+    /// separately would give one child two devices for one phone. It writes into
+    /// the App Group; this posts as the device the app already enrolled.
+    ///
+    /// Best-effort and order-preserving: on the first failure it stops and
+    /// leaves the rest queued for the next sync, rather than hammering a backend
+    /// that is already refusing. Nothing a child sees depends on the timing —
+    /// the block page has already told them their parent was asked, which is
+    /// true the moment the request is queued, since the queue survives a restart
+    /// and a flat battery.
+    ///
+    /// An entry is dropped only once the backend has ACCEPTED it. The server
+    /// dedupes identical pending asks (`createRequest`), so a retry after an
+    /// ambiguous failure costs a parent nothing.
+    func postQueuedAccessRequests() async {
+        let store = PolicyStore.shared
+        for entry in store.pendingAccessRequests() {
+            guard let id = entry["id"],
+                  let targetType = entry["targetType"],
+                  let targetValue = entry["targetValue"] else {
+                // Malformed — anything with App-Group access can write here, so
+                // drop it rather than retrying it forever.
+                if let id = entry["id"] { store.removeAccessRequest(id: id) }
+                continue
+            }
+            do {
+                try await createRequest(targetType: targetType,
+                                        targetValue: targetValue,
+                                        url: entry["url"],
+                                        title: entry["title"],
+                                        reason: entry["reason"])
+                store.removeAccessRequest(id: id)
+            } catch BackendError.http(let status, _) where status == 400 || status == 422 {
+                // The server refused the CONTENT itself: a target a device may
+                // not request (DomainError defaults to BAD_REQUEST, which is
+                // what childRequestTargetError raises), or a malformed one.
+                // Retrying cannot change the answer, and a stuck entry would
+                // block every later ask behind it.
+                //
+                // Deliberately NOT every 4xx. 401 means the token lapsed and 403
+                // may mean the same after a re-enrolment; discarding a child's
+                // question because of an auth blip would lose the one thing the
+                // queue exists to protect. 429 is explicitly "come back later".
+                store.removeAccessRequest(id: id)
+            } catch {
+                return // transport or server-side; the next sync tries again
+            }
+        }
     }
 
     /// Long-poll for the next policy change (test A4's fast path). Returns true

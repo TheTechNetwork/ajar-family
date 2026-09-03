@@ -35,7 +35,7 @@ above it, and the two marked ⏳ have waiting attached — start them early.
 | 2 | Note the **Team ID**, set roles | §2 | every later step |
 | 3 | ~~Request the Family Controls distribution entitlement~~ ✅ **granted** | §6 | was the long pole; no longer blocks anything |
 | 3b | **Create a child Apple Account in a Family Sharing group** | §2.1 | **A6 tamper tests only** — A1–A5 do not need it (measured; an earlier version of this table said otherwise) |
-| 4 | Register 3 App IDs + 1 App Group | §4 | signing anything |
+| 4 | Register 4 App IDs + 1 App Group | §4 | signing anything |
 | 5 | Create the **App Store Connect API key** (App Manager) | §8.1 | CI signing + upload |
 | 6 | Set 3 GitHub secrets + 1 variable | §8.1 | CI signing + upload |
 | 7 | Create the App Store Connect **app record** | §8 | the upload has nowhere to land |
@@ -239,6 +239,7 @@ Enable exactly the capabilities listed. `<org>` is the reverse-DNS org prefix.
 | `family.ajar.filter` | **Ajar Filter** — the filtered device's app (iOS, iPadOS, macOS) | **Family Controls**; **Network Extensions**; **App Groups** |
 | `family.ajar.filter.DataProvider` | Content-**filter data** provider (`NEFilterDataProvider`) | **Network Extensions**; **App Groups** |
 | `family.ajar.filter.ControlProvider` | Content-**filter control** provider (`NEFilterControlProvider`) | **Network Extensions**; **App Groups** |
+| `family.ajar.filter.SafariExtension` | **Safari Web Extension** — the per-request surface (ADR-018). Needs no restricted entitlement of its own; Family Controls gates the app's distribution, not this target. | **App Groups** |
 | `family.ajar.parent` | **Ajar Parent** — the approving app (iOS, iPadOS, macOS) | **Push Notifications**; **Sign in with Apple** |
 
 The first three are hardcoded in `apple/AjarFilter/project.yml` and its
@@ -286,6 +287,7 @@ that value in its array. `FC` = `com.apple.developer.family-controls`.
 | `family.ajar.filter` | `FC`, `NE[content-filter-provider]`, `AG` | ✅ in repo |
 | `family.ajar.filter.DataProvider` | `NE[content-filter-provider]`, `AG` | ✅ in repo |
 | `family.ajar.filter.ControlProvider` | `NE[content-filter-provider]`, `AG` | ✅ in repo |
+| `family.ajar.filter.SafariExtension` | `AG` | ✅ in repo |
 
 **B. `NEURLFilter` category blocklist — `apple/poc-urlfilter/` (PoC D, NOT merged)**
 
@@ -395,6 +397,7 @@ force SIWA. Enable it on a parent App ID only if/when a parent iOS app exists AN
 | `family.ajar.filter` | `APPLE_PROFILE_APP` | `testflight.yml` |
 | `family.ajar.filter.DataProvider` | `APPLE_PROFILE_DATA` | `testflight.yml` |
 | `family.ajar.filter.ControlProvider` | `APPLE_PROFILE_CONTROL` | `testflight.yml` |
+| `family.ajar.filter.SafariExtension` | `APPLE_PROFILE_SAFARI` | `testflight.yml` |
 | `family.ajar.parent` | `APPLE_PROFILE_PARENT` | `testflight-parent.yml` |
 
 The two apps are separate workflows, so three-of-four is green until the day you
@@ -543,6 +546,7 @@ passwords and Fastlane Match; it both mints signing profiles and uploads).
 | `APPLE_PROFILE_APP` | secret | App Store profile for `family.ajar.filter`, **base64** |
 | `APPLE_PROFILE_DATA` | secret | profile for `family.ajar.filter.DataProvider`, **base64** |
 | `APPLE_PROFILE_CONTROL` | secret | profile for `family.ajar.filter.ControlProvider`, **base64** |
+| `APPLE_PROFILE_SAFARI` | secret | profile for `family.ajar.filter.SafariExtension`, **base64** |
 | `APPLE_PROFILE_PARENT` | secret | App Store profile for `family.ajar.parent`, **base64** |
 | `APPLE_TEAM_ID` | **variable** | the 10-char Team ID (§2) |
 
@@ -629,7 +633,7 @@ a few minutes before the build appears to internal testers.
 2. **App Manager role.** A key created with the Developer role archives fine and
    then fails to create a provisioning profile.
 3. **Unregistered bundle ids.** The ids in §8.4 must exist in the developer
-   account before anything can sign — all three App IDs plus the App Group, with
+   account before anything can sign — all four App IDs plus the App Group, with
    Family Controls, Network Extensions and App Groups enabled.
 4. **~~Export compliance~~ — fixed in code.** This used to park every upload in
    App Store Connect waiting for someone to answer the encryption questions.

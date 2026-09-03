@@ -11,7 +11,8 @@ import { issueToken, verifyToken, type Principal } from "../auth/tokens.js";
 import { openapiDocument } from "./openapi.js";
 import { RateLimiter, clientKey } from "./rate-limit.js";
 import * as v from "./validate.js";
-import type { ApprovalDuration } from "../domain/model.js";
+import type { AccessRequest, ApprovalDuration } from "../domain/model.js";
+import { CATEGORY_DATA_ATTRIBUTION } from "@ajar/shared/categories";
 
 /**
  * Every route that reads a body reads it through one of these. Before this, a
@@ -85,6 +86,10 @@ const bodies = {
     targetType: v.oneOf(TARGET_VALUES), targetValue: v.str({ max: 2048 }),
     title: v.optional(v.str({ max: 512 })), url: v.optional(v.str({ max: 2048 })),
     reason: v.optional(v.str({ max: 1024 })),
+    // A HOST, so the cap is a host's length and not a URL's. See
+    // AccessRequest.referrerHost: display only, normalized server-side, and a
+    // value that fails to look like a host is dropped rather than shown.
+    referrerHost: v.optional(v.str({ max: 253 })),
   }),
   decide: v.object({
     decision: v.oneOf(ACTION_VALUES), scope: v.oneOf(APPROVAL_SCOPE_VALUES),
@@ -360,7 +365,8 @@ export function buildRouter(app: App): Router {
   const authLimiter = new RateLimiter(10, 60_000);    // 10/min per client for auth
   const enrollLimiter = new RateLimiter(20, 60_000);  // 20/min per client for redeem
   const limited = (lim: RateLimiter, req: HttpRequest) =>
-    !lim.allow(clientKey(req.headers)) ? err(429, "too many attempts — slow down", "RATE_LIMITED") : null;
+    !lim.allow(clientKey(req.headers, app.trustProxyHeaders))
+      ? err(429, "too many attempts — slow down", "RATE_LIMITED") : null;
   r.before((req) => limited(globalLimiter, req));
 
   r.get("/v1/health", async () => ok({ status: "ok", version: "0.0.0-alpha" }));
@@ -637,6 +643,12 @@ ${safe ? `<script>
     await requireUser(app, req);
     return ok({ version: await app.categories.version(), categories: await app.categories.listCategories() });
   });
+  // The credit the category data's licence requires, served so a public page can
+  // render it from the SAME constant the compiled filter set carries. It was
+  // only ever inside the signed asset — technically travelling with the data,
+  // and visible to nobody. CC BY-SA attribution is a distribution obligation.
+  // Public: it is a credit, and gating a credit behind a login defeats it.
+  r.get("/v1/categories/attribution", async () => ok(CATEGORY_DATA_ATTRIBUTION));
   r.get("/v1/categories/lookup", async (req) => {
     await requireUser(app, req);
     const host = (req.query.get("host") ?? "").trim();
@@ -943,8 +955,9 @@ ${safe ? `<script>
   });
   r.get("/v1/families/:familyId/children", async (req) => {
     const userId = await requireUser(app, req);
-    await app.family.membership(req.params.familyId!, userId);
-    return ok(await app.repo.listChildren(req.params.familyId!));
+    const visible = await app.family.visibleChildIds(req.params.familyId!, userId);
+    const children = await app.repo.listChildren(req.params.familyId!);
+    return ok(visible ? children.filter((c) => visible.has(c.id)) : children);
   });
   // Devices with liveness: `lastSeenAt`, the version each one actually pulled,
   // and a `stale` flag. This is how a parent finds out that protection stopped
@@ -958,13 +971,27 @@ ${safe ? `<script>
     await app.devices.remove(req.params.familyId!, userId, req.params.deviceId!);
     return ok({ deleted: true });
   });
+  // The audit log is FAMILY-WIDE and its `detail` is free-form, so it cannot be
+  // filtered per child with any confidence — an event about one child routinely
+  // names another. A LIMITED_GUARDIAN is the deliberately narrow role, so it does
+  // not get a log it cannot be safely shown a slice of. Owners and parents do.
   r.get("/v1/families/:familyId/audit", async (req) => {
     const userId = await requireUser(app, req);
-    await app.family.membership(req.params.familyId!, userId);
+    const m = await app.family.membership(req.params.familyId!, userId);
+    if (m.role === "LIMITED_GUARDIAN") {
+      return err(403, "FORBIDDEN", "this role cannot read the family activity log");
+    }
     return ok(await app.repo.listAuditEvents(req.params.familyId!));
   });
 
   // --- policy ---
+  // What a child is on right now. There was a PUT and no GET, so a console had
+  // no way to show the control's current value — one reason nothing ever called
+  // the setter and every child stayed on the hardcoded posture.
+  r.get("/v1/families/:familyId/children/:childId/defaults", async (req) => {
+    const userId = await requireUser(app, req);
+    return ok(await app.policy.getDefaults(req.params.familyId!, userId, req.params.childId!));
+  });
   r.add("PUT" as string, "/v1/families/:familyId/children/:childId/defaults", async (req) => {
     const userId = await requireUser(app, req);
     const d = await v.readBody(req, bodies.defaults);
@@ -980,6 +1007,18 @@ ${safe ? `<script>
     });
     return ok(rule, 201);
   });
+  // Live temporary grants, and a way to take one back before it runs out. A
+  // permanent decision could always be deleted; a timed one could not, so a
+  // misfired "30 minutes" had to be waited out.
+  r.get("/v1/families/:familyId/grants", async (req) => {
+    const userId = await requireUser(app, req);
+    return ok(await app.policy.listActiveGrants(req.params.familyId!, userId));
+  });
+  r.del("/v1/families/:familyId/grants/:grantId", async (req) => {
+    const userId = await requireUser(app, req);
+    await app.policy.revokeGrant(req.params.familyId!, userId, req.params.grantId!);
+    return ok({ revoked: true });
+  });
   r.del("/v1/families/:familyId/rules/:ruleId", async (req) => {
     const userId = await requireUser(app, req);
     await app.policy.removeRule(req.params.familyId!, userId, req.params.ruleId!);
@@ -987,8 +1026,21 @@ ${safe ? `<script>
   });
   r.get("/v1/families/:familyId/rules", async (req) => {
     const userId = await requireUser(app, req);
-    await app.family.membership(req.params.familyId!, userId);
-    return ok(await app.repo.listRules(req.params.familyId!));
+    const visible = await app.family.visibleChildIds(req.params.familyId!, userId);
+    const rules = await app.repo.listRules(req.params.familyId!);
+    if (!visible) return ok(rules);
+    // Family-wide rules apply to their child too, so they stay. A rule naming
+    // another child, or a device belonging to one, does not.
+    const devices = await app.repo.listDevices(req.params.familyId!);
+    const childOfDevice = new Map(devices.map((d) => [d.id, d.childId]));
+    return ok(rules.filter((rule) => {
+      if (rule.scope.childId) return visible.has(rule.scope.childId);
+      if (rule.scope.deviceId) {
+        const owner = childOfDevice.get(rule.scope.deviceId);
+        return owner ? visible.has(owner) : false;
+      }
+      return true;
+    }));
   });
 
   // --- enrollment ---
@@ -1012,15 +1064,21 @@ ${safe ? `<script>
     const b = await v.readBody(req, bodies.createRequest);
     const reqRec = await app.approvals.createRequest({
       familyId: dev.familyId, childId: dev.childId, deviceId: dev.deviceId,
-      targetType: b.targetType, targetValue: b.targetValue, title: b.title, url: b.url, reason: b.reason,
+      targetType: b.targetType, targetValue: b.targetValue, title: b.title, url: b.url,
+      reason: b.reason, referrerHost: b.referrerHost,
     });
     return ok(reqRec, 201);
   });
   r.get("/v1/families/:familyId/requests", async (req) => {
     const userId = await requireUser(app, req);
-    await app.family.membership(req.params.familyId!, userId);
+    const visible = await app.family.visibleChildIds(req.params.familyId!, userId);
     const status = req.query.get("status") ?? undefined;
-    return ok(await app.repo.listAccessRequests(req.params.familyId!, status));
+    // Age out asks nobody answered, before answering. `EXPIRED` has been a
+    // published status since the model was written and nothing ever set it, so
+    // "Waiting on you" only ever grew.
+    await app.approvals.expireStaleRequests(req.params.familyId!);
+    const list = await app.repo.listAccessRequests(req.params.familyId!, status);
+    return ok(visible ? list.filter((x) => visible.has(x.childId)) : list);
   });
   // Long-poll the pending-request feed: returns the current PENDING list the
   // instant a child files a request or a parent decides one (woken via the hub),
@@ -1029,7 +1087,12 @@ ${safe ? `<script>
   // if it already differs we return immediately. Cross-runtime (no streaming).
   r.get("/v1/families/:familyId/requests/wait", async (req) => {
     const userId = await requireUser(app, req);
-    await app.family.membership(req.params.familyId!, userId);
+    // The feed a LIMITED_GUARDIAN actually watches — filtered like the list
+    // above, and for the same reason: an ask carries a URL, a title and the
+    // child's own words about why they want it.
+    const visible = await app.family.visibleChildIds(req.params.familyId!, userId);
+    const forThisUser = (list: AccessRequest[]) =>
+      (visible ? list.filter((x) => visible.has(x.childId)) : list);
     const known = Number(req.query.get("count") ?? "-1");
     const timeout = Math.min(Math.max(Number(req.query.get("timeout") ?? "25000"), 0), 60000);
     const deadline = Date.now() + timeout;
@@ -1037,13 +1100,18 @@ ${safe ? `<script>
     // knows; otherwise park until a create/decide wakes us (return the fresh list
     // on any wake, so a simultaneous decide+create that nets to the same length is
     // still delivered) or the deadline passes.
-    const pending = await app.repo.listAccessRequests(req.params.familyId!, "PENDING");
+    //
+    // `count` is compared against the FILTERED list, so a guardian does not get
+    // woken — or told they are out of date — by an ask about a child they cannot
+    // see, which would leak its existence through the length alone.
+    await app.approvals.expireStaleRequests(req.params.familyId!);
+    const pending = forThisUser(await app.repo.listAccessRequests(req.params.familyId!, "PENDING"));
     if (pending.length !== known) return ok({ requests: pending });
     const remaining = deadline - Date.now();
     if (remaining <= 0) return ok({ requests: pending, upToDate: true });
     const woken = await app.hub.wait(`family:${req.params.familyId}`, remaining);
     if (!woken) return ok({ requests: pending, upToDate: true });
-    return ok({ requests: await app.repo.listAccessRequests(req.params.familyId!, "PENDING") });
+    return ok({ requests: forThisUser(await app.repo.listAccessRequests(req.params.familyId!, "PENDING")) });
   });
   r.post("/v1/families/:familyId/requests/:requestId/decide", async (req) => {
     const userId = await requireUser(app, req);
@@ -1065,7 +1133,9 @@ ${safe ? `<script>
       // Heartbeat on EVERY poll, including "you're already current" — a device
       // that is up to date is still alive, and that is precisely what the parent
       // needs to see. Record the version it actually holds.
-      await app.devices.heartbeat(dev.deviceId, snap ? snap.version : since);
+      // Never record a version the device merely CLAIMS: see syncSince's clamp.
+      await app.devices.heartbeat(dev.deviceId,
+        snap ? snap.version : await app.policy.clampSyncedVersion(dev.deviceId, since));
       return snap ? ok(snap) : ok({ upToDate: true });
     }
     const full = await app.policy.buildSnapshot(dev.familyId, dev.childId, dev.deviceId);
@@ -1160,7 +1230,7 @@ ${safe ? `<script>
     const timeout = Math.min(Math.max(Number(req.query.get("timeout") ?? "25000"), 0), 60000);
     const deadline = Date.now() + timeout;
     // Wake on this device's nudges; loop to absorb spurious wakes until deadline.
-    await app.devices.heartbeat(dev.deviceId, since);
+    await app.devices.heartbeat(dev.deviceId, await app.policy.clampSyncedVersion(dev.deviceId, since));
     for (;;) {
       const snap = await app.policy.syncSince(dev.familyId, dev.childId, dev.deviceId, since);
       if (snap) {

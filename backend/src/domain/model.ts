@@ -128,6 +128,25 @@ export interface AccessRequest {
   title?: string;
   url?: string;
   reason?: string;
+  /**
+   * The HOST the child was on when they hit this — "classroom.google.com", not
+   * the page. Optional: `NEFilterDataProvider` has no referrer to give (a
+   * browser flow carries the URL and nothing else), so on iOS this arrives only
+   * from the Safari extension.
+   *
+   * DISPLAY ONLY. It is supplied by the child's device and it must never widen a
+   * rule, satisfy a match, or promote anything automatically — see
+   * docs/ROADMAP.md §4. Any approved domain that hosts user content is a
+   * laundering surface: put the link there, follow it, and the referrer honestly
+   * names an approved domain without anyone forging anything. It is evidence for
+   * a person, not an input to the evaluator, and it deliberately does not appear
+   * in `EvalContext`.
+   *
+   * The HOST and not the URL because the product's claim is that only the thing
+   * a child explicitly asks about is ever sent. "From reddit.com" is the signal a
+   * parent needs; the rest of that URL is not ours to move.
+   */
+  referrerHost?: string;
   status: AccessRequestStatus;
   createdAt: string;
 }

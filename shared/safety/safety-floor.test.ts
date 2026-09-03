@@ -45,7 +45,19 @@ test("the floor holds under total lockdown — no rule can close it", () => {
   assert.equal(evaluate(snap, ctx("https://example.com/")).action, "BLOCK");
 });
 
-test("the floor covers CNAME-resolved names too", () => {
+test("the floor does NOT read the CNAME chain — that was a total bypass", () => {
+  // This test used to assert the opposite, and the opposite was the hole.
+  //
+  // `resolvedHosts` is DNS from the CHILD'S OWN DEVICE: a Wi-Fi resolver, a DoH
+  // profile, a hosts file — none of which needs admin rights or a jailbreak. The
+  // floor returns ALLOW above every rule, above default-deny, and is deliberately
+  // never reported. So one crafted CNAME answer naming any floor domain opened
+  // any URL on the web and left a parent nothing to see.
+  //
+  // Everywhere else the chain can only ADD a block, which is why it is safe
+  // there. The floor was the one tier where the same untrusted list produced an
+  // ALLOW. A crisis line reached through a CNAME the product cannot verify is
+  // not worth that.
   const snap: DevicePolicySnapshot = {
     version: 1, familyId: "f", childId: "c", deviceId: "d",
     defaults: { webDefault: "BLOCK", youTubeDefault: "BLOCK" },
@@ -55,7 +67,16 @@ test("the floor covers CNAME-resolved names too", () => {
     url: "https://help.example.org/", childId: "c", deviceId: "d", nowMs: Date.now(),
     resolvedHosts: ["chat.988lifeline.org"],
   });
-  assert.equal(res.action, "ALLOW");
+  assert.equal(res.action, "BLOCK", "a claimed CNAME must not open the floor");
+  assert.notEqual(res.reason, "safety-floor");
+
+  // The real thing still works: the floor is about the host being VISITED.
+  const direct = evaluate(snap, {
+    url: "https://chat.988lifeline.org/", childId: "c", deviceId: "d", nowMs: Date.now(),
+    resolvedHosts: [],
+  });
+  assert.equal(direct.action, "ALLOW");
+  assert.equal(direct.reason, "safety-floor");
 });
 
 test("a trailing root dot cannot slip past the floor", () => {

@@ -650,8 +650,14 @@ async function selectFamily(fid) {
   $("childrenBox").classList.remove("hide");
   $("requestsCard").classList.remove("hide");
   $("rulesCard").classList.remove("hide");
+  $("defaultsCard").classList.remove("hide");
+  $("devicesCard").classList.remove("hide");
   await refreshChildren();
   refreshRules();
+  refreshGrants();
+  refreshDefaults();
+  refreshDevices();
+  fillRuleWho();
   startLiveRequests();
   try { renderFamilyPick((await api("/v1/me")).families); } catch { /* picker is cosmetic */ }
 }
@@ -960,12 +966,33 @@ function renderRequest(r) {
   return `<li class="req" id="req-${id}" aria-labelledby="reqt-${id}">
     <p class="who-asked">${escapeHtml(who)} · ${escapeHtml(ago(r.createdAt))}</p>
     <h3 class="t" id="reqt-${id}">${ctx}</h3>
+    <!-- THE TARGET, ALWAYS VISIBLE, never only inside Details.
+
+         The title is free text FROM THE CHILD'S DEVICE, and it was the headline
+         while what a tap would actually open sat folded away. That is the wrong
+         way round: a parent is deciding about the target, and the title is how
+         the ask was described to them. The device can no longer name a wildcard
+         (shared/policy/target-validate.ts), but "Khan Academy - Algebra 1" over
+         a link to somewhere else needs no wildcard to mislead.
+
+         Shown as a second line rather than replacing the title, because the
+         title is genuinely the useful part when it is honest.
+         (No backticks in this comment: it lives inside a template literal.) -->
+    <p class="target">${escapeHtml(TYPE_LABEL[r.targetType] ?? r.targetType)} — <span class="target-value">${escapeHtml(r.targetValue)}</span></p>
+    <!-- WHERE THEY WERE. The single most useful piece of context for a decision
+         made in fifteen seconds on a phone, and the product used to throw it
+         away: the same video reached from a school page and from a search
+         results page looked identical here.
+
+         Absent is normal, not an error — iOS's content filter has no referrer
+         to give — so nothing is rendered rather than "unknown", which would
+         read as a finding about the child. -->
+    ${r.referrerHost ? `<p class="fromline">from <strong>${escapeHtml(r.referrerHost)}</strong></p>` : ""}
     ${r.reason ? `<p class="quote">“${escapeHtml(r.reason)}”</p>` : ""}
-    <details>
+    ${r.url && r.url !== r.targetValue ? `<details>
       <summary>Details</summary>
-      <p class="meta">${escapeHtml(TYPE_LABEL[r.targetType] ?? r.targetType)} — ${escapeHtml(r.targetValue)}</p>
-      ${r.url ? `<p class="meta">${escapeHtml(r.url)}</p>` : ""}
-    </details>
+      <p class="meta">${escapeHtml(r.url)}</p>
+    </details>` : ""}
     <div class="actions">
       <button type="button" class="btn-yes" data-yes="${id}">Open ${escapeHtml(noun)} · ${defLabel}<span class="sr-only"> — ${ctx}</span></button>
       <button type="button" data-notnow="${id}">Not now<span class="sr-only"> — ${ctx}</span></button>
@@ -1080,6 +1107,7 @@ async function decide(r, decision, scope, duration) {
 // ---------------------------------------------------------------------------
 async function refreshRules() {
   if (!state.familyId) return;
+  refreshGrants();
   const box = $("rules");
   box.setAttribute("aria-busy", "true");
   let rules = [];
@@ -1204,4 +1232,287 @@ if (verifyCode) {
       announceAlert(friendly(e));
     }
   });
+}
+
+
+// ---------------------------------------------------------------------------
+// CLOSING SOMETHING WITHOUT BEING ASKED, and the posture underneath it
+//
+// `POST /v1/families/:id/rules` and `PUT .../defaults` have existed — tested,
+// in the OpenAPI, reachable — since the policy engine landed, and NO CLIENT
+// EVER CALLED EITHER. So every child sat on the hardcoded posture written at
+// `services.ts` addChild (websites open, YouTube closed), the only thing a
+// parent could do was answer asks, and this console could delete rules it had
+// no way to create. "Block all social media" was unreachable from any screen in
+// the product.
+// ---------------------------------------------------------------------------
+
+// `classifyRuleInput` lives in classify.js so it can be exercised by a test
+// without a DOM. index.html loads it before this file.
+
+function fillRuleWho() {
+  const sel = $("ruleWho");
+  if (!sel) return;
+  const kids = Object.entries(state.childName);
+  sel.innerHTML = `<option value="">Everyone</option>`
+    + kids.map(([id, name]) => `<option value="${escapeAttr(id)}">${escapeHtml(name)}</option>`).join("");
+}
+
+function previewRule() {
+  const out = $("rulePreview");
+  if (!out) return null;
+  const hit = classifyRuleInput($("ruleValue").value);
+  const closing = $("ruleAction").value === "BLOCK";
+  if (!hit) { out.textContent = ""; return null; }
+  out.textContent = `${closing ? "Closes" : "Opens"} ${hit.label}: ${hit.value}`;
+  return hit;
+}
+
+if ($("ruleValue")) {
+  $("ruleValue").oninput = previewRule;
+  $("ruleAction").onchange = previewRule;
+}
+
+if ($("addRuleForm")) $("addRuleForm").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const input = $("ruleValue"), errEl = $("ruleErr"), btn = $("btnAddRule");
+  errEl.textContent = "";
+  const hit = classifyRuleInput(input.value);
+  if (!hit) {
+    input.setAttribute("aria-invalid", "true");
+    errEl.textContent = "That doesn't look like a website or a link. Try tiktok.com, or paste the address.";
+    input.focus();
+    return;
+  }
+  input.removeAttribute("aria-invalid");
+  const childId = $("ruleWho").value || undefined;
+  const action = $("ruleAction").value;
+  btn.dataset.busy = "1"; btn.setAttribute("aria-disabled", "true");
+  try {
+    await api(`/v1/families/${state.familyId}/rules`, {
+      method: "POST",
+      body: {
+        target: hit.target, value: hit.value, action,
+        scope: childId ? { type: "CHILD", childId } : { type: "FAMILY" },
+      },
+    });
+    input.value = ""; previewRule();
+    const who = childId ? (state.childName[childId] || "them") : "everyone";
+    toast(`${action === "BLOCK" ? "Closed" : "Opened"} ${hit.value} for ${who}`);
+    announce(`${hit.value} is now ${action === "BLOCK" ? "closed" : "open"} for ${who}`);
+    await refreshRules();
+  } catch (e) {
+    const m = friendly(e); errEl.textContent = m; announceAlert(m);
+  } finally {
+    delete btn.dataset.busy; btn.removeAttribute("aria-disabled");
+  }
+};
+
+/**
+ * The posture each child is on, and a way to change it.
+ *
+ * Two switches per child rather than one family-wide pair, because that is how
+ * the data is stored (per child) and because a nine-year-old and a fifteen-
+ * year-old are not the same question.
+ */
+async function refreshDefaults() {
+  const box = $("defaults");
+  if (!box || !state.familyId) return;
+  box.setAttribute("aria-busy", "true");
+  const kids = Object.entries(state.childName);
+  if (!kids.length) {
+    box.removeAttribute("aria-busy");
+    box.innerHTML = `<li class="empty">Add a kid first — the starting point is set per child.</li>`;
+    return;
+  }
+  let rows = [];
+  try {
+    rows = await Promise.all(kids.map(async ([id, name]) => {
+      const d = await api(`/v1/families/${state.familyId}/children/${id}/defaults`);
+      return { id, name, ...d };
+    }));
+  } catch (e) {
+    box.removeAttribute("aria-busy");
+    box.innerHTML = `<li class="muted">Couldn't load these. ${escapeHtml(friendly(e))}</li>`;
+    return;
+  }
+  box.removeAttribute("aria-busy");
+  box.innerHTML = rows.map((r) => {
+    const id = escapeAttr(r.id);
+    const pick = (field, current, label) => `
+      <label class="sr-only" for="def-${field}-${id}">${escapeHtml(label)} for ${escapeHtml(r.name)}</label>
+      <select id="def-${field}-${id}" data-def="${id}" data-field="${field}">
+        <option value="ALLOW"${current === "ALLOW" ? " selected" : ""}>Open</option>
+        <option value="BLOCK"${current === "BLOCK" ? " selected" : ""}>Closed</option>
+      </select>`;
+    return `<li>
+      <span class="grow"><span class="rt">${escapeHtml(r.name)}</span></span>
+      <span class="muted">Websites</span>${pick("webDefault", r.webDefault, "Websites")}
+      <span class="muted">YouTube</span>${pick("youTubeDefault", r.youTubeDefault, "YouTube")}
+    </li>`;
+  }).join("");
+  box.querySelectorAll("[data-def]").forEach((sel) => (sel.onchange = () => saveDefault(sel, rows)));
+}
+
+async function saveDefault(sel, rows) {
+  const childId = sel.dataset.def;
+  const row = rows.find((r) => r.id === childId);
+  if (!row) return;
+  const next = { webDefault: row.webDefault, youTubeDefault: row.youTubeDefault, [sel.dataset.field]: sel.value };
+  const previous = row[sel.dataset.field];
+  sel.setAttribute("aria-disabled", "true");
+  try {
+    await api(`/v1/families/${state.familyId}/children/${childId}/defaults`, { method: "PUT", body: next });
+    row.webDefault = next.webDefault; row.youTubeDefault = next.youTubeDefault;
+    const what = sel.dataset.field === "webDefault" ? "Websites" : "YouTube";
+    toast(`${what} now start ${sel.value === "BLOCK" ? "closed" : "open"} for ${row.name}`);
+    announce(`${what} start ${sel.value === "BLOCK" ? "closed" : "open"} for ${row.name}`);
+  } catch (e) {
+    sel.value = previous;   // put the control back, rather than lying about state
+    const m = friendly(e); toast(m); announceAlert(m);
+  } finally {
+    sel.removeAttribute("aria-disabled");
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// IS IT ACTUALLY RUNNING?
+//
+// The backend has tracked `lastSeenAt`, `lastSyncedVersion`, `upToDate` and a
+// `stale` flag per device since heartbeats landed, and no client ever read any
+// of it — not this console, not the iOS app. So a deleted app, a Safari
+// extension switched off in Settings, a laptop that has not phoned home in
+// three weeks, and a quiet week all looked exactly the same: nothing.
+//
+// A parent who believes the filter is running when it is not is worse off than
+// one who knows it is off, because the second one can do something.
+// ---------------------------------------------------------------------------
+
+async function refreshDevices() {
+  const box = $("devices");
+  if (!box || !state.familyId) return;
+  box.setAttribute("aria-busy", "true");
+  let devices = [];
+  try { devices = await api(`/v1/families/${state.familyId}/devices`); }
+  catch (e) {
+    box.removeAttribute("aria-busy");
+    box.innerHTML = `<li class="muted">Couldn't check. ${escapeHtml(friendly(e))}</li>`;
+    return;
+  }
+  box.removeAttribute("aria-busy");
+  if (!devices.length) {
+    box.innerHTML = `<li class="empty">No devices set up yet. Until one is, Ajar isn't filtering anything.</li>`;
+    return;
+  }
+  devices.sort((a, b) => Number(b.stale) - Number(a.stale) || (a.displayName || "").localeCompare(b.displayName || ""));
+  box.innerHTML = devices.map((d) => {
+    const who = state.childName[d.childId] || "a kid";
+    const seen = d.lastSeenAt ? ago(d.lastSeenAt) : `set up ${ago(d.enrolledAt)}`;
+    // Three states, and they are genuinely different things to tell someone.
+    //  stale       — we have not heard from it at all. Something is wrong.
+    //  !upToDate   — it is alive but has not picked up your latest decision.
+    //  otherwise   — running, current.
+    const state_ = d.stale
+      ? { tag: "Not checking in", cls: "tag-warn",
+          sub: `Last heard from ${seen}. Ajar may have been turned off or removed on this device.` }
+      : !d.upToDate
+        ? { tag: "Catching up", cls: "tag-warn",
+            sub: `Seen ${seen}, but it hasn't picked up your latest change yet.` }
+        : { tag: "Running", cls: "tag-ok", sub: `Seen ${seen}.` };
+    return `<li>
+      <span class="grow">
+        <span class="rt">${escapeHtml(d.displayName || "A device")}</span>
+        <span class="sub2">${escapeHtml(who)} · ${escapeHtml(String(d.platform || "").toLowerCase())} · ${escapeHtml(state_.sub)}</span>
+      </span>
+      <span class="tag ${state_.cls}">${escapeHtml(state_.tag)}</span>
+      <button type="button" class="btn-danger" data-rmdev="${escapeAttr(d.id)}"
+              data-label="${escapeAttr(d.displayName || "this device")}">Remove<span class="sr-only"> ${escapeHtml(d.displayName || "this device")}</span></button>
+    </li>`;
+  }).join("");
+  box.querySelectorAll("[data-rmdev]").forEach((b) => (b.onclick = () => removeDevice(b)));
+
+  const bad = devices.filter((d) => d.stale).length;
+  if (bad) announce(`${bad} ${bad === 1 ? "device is" : "devices are"} not checking in`);
+}
+
+async function removeDevice(btn) {
+  const id = btn.dataset.rmdev, label = btn.dataset.label;
+  if (!confirm(`Remove ${label}?\n\nAjar stops filtering it, and its setup, grants and asks are deleted. `
+             + `You can set it up again with a new code.`)) return;
+  btn.dataset.busy = "1"; btn.setAttribute("aria-disabled", "true");
+  try {
+    await api(`/v1/families/${state.familyId}/devices/${id}`, { method: "DELETE" });
+    toast(`Removed ${label}`);
+    await refreshDevices();
+  } catch (e) {
+    const m = friendly(e); toast(m); announceAlert(m);
+    delete btn.dataset.busy; btn.removeAttribute("aria-disabled");
+  }
+}
+
+if ($("btnRefreshDevices")) $("btnRefreshDevices").onclick = () => refreshDevices();
+
+
+// ---------------------------------------------------------------------------
+// TAKING BACK A LIVE GRANT
+//
+// "the API can delete a rule, but a timed grant has no removal endpoint" — a
+// comment this file used to carry, describing the thing a parent needs most at
+// the moment they realise they got it wrong. There is an endpoint now.
+// ---------------------------------------------------------------------------
+
+/** "in 4 minutes" / "in about an hour" — a countdown, not a timestamp. */
+function until(iso) {
+  const ms = Date.parse(iso) - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return "any moment";
+  const mins = Math.round(ms / 60000);
+  if (mins < 1) return "in under a minute";
+  if (mins < 60) return `in ${mins} minute${mins === 1 ? "" : "s"}`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `in ${hrs} hour${hrs === 1 ? "" : "s"}`;
+  const days = Math.round(hrs / 24);
+  return `in ${days} day${days === 1 ? "" : "s"}`;
+}
+
+async function refreshGrants() {
+  const box = $("grants"), wrap = $("grantsBox");
+  if (!box || !wrap || !state.familyId) return;
+  let grants = [];
+  try { grants = await api(`/v1/families/${state.familyId}/grants`); }
+  catch { wrap.classList.add("hide"); return; }   // never a blocker on this card
+  if (!grants.length) { wrap.classList.add("hide"); box.innerHTML = ""; return; }
+  wrap.classList.remove("hide");
+  box.innerHTML = grants.map((g) => {
+    const who = g.scope?.childId ? (state.childName[g.scope.childId] || "one kid")
+      : g.scope?.deviceId ? "one device" : "everyone";
+    const open = g.action === "ALLOW";
+    return `<li>
+      <span class="grow">
+        <span class="rt">${escapeHtml(g.value)}</span>
+        <span class="sub2">${escapeHtml(TYPE_LABEL[g.target] ?? g.target)} · for ${escapeHtml(who)} · ${open ? "closes" : "reopens"} ${escapeHtml(until(g.expiresAt))}</span>
+      </span>
+      <span class="tag ${open ? "tag-open" : "tag-closed"}">${open ? "Open" : "Closed"}</span>
+      <button type="button" class="btn-danger" data-rmg="${escapeAttr(g.id)}"
+              data-label="${escapeAttr(g.value)}" data-open="${open ? "1" : ""}">
+        ${open ? "Close it now" : "Undo"}<span class="sr-only"> — ${escapeHtml(g.value)}</span></button>
+    </li>`;
+  }).join("");
+  box.querySelectorAll("[data-rmg]").forEach((b) => (b.onclick = () => revokeGrant(b)));
+}
+
+async function revokeGrant(btn) {
+  const id = btn.dataset.rmg, label = btn.dataset.label, wasOpen = !!btn.dataset.open;
+  btn.dataset.busy = "1"; btn.setAttribute("aria-disabled", "true");
+  try {
+    await api(`/v1/families/${state.familyId}/grants/${id}`, { method: "DELETE" });
+    // The device is told by the version bump the server does; say so plainly
+    // rather than implying it is already gone from the kid's screen.
+    toast(wasOpen ? `${label} is closing on their device now` : `${label} is back on your defaults`);
+    announce(wasOpen ? `${label} closed` : `${label} back on your defaults`);
+    await refreshGrants();
+  } catch (e) {
+    const m = friendly(e); toast(m); announceAlert(m);
+    delete btn.dataset.busy; btn.removeAttribute("aria-disabled");
+  }
 }
