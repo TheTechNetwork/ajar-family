@@ -338,11 +338,19 @@ specific bad videos). It is **not** the per-video-approval engine. Validated in
   documented fallback only, never the default. We do not add a VPN on Apple
   unless a PoC proves the native path cannot meet a concrete requirement.
 - **No TLS interception** anywhere on Apple.
-- **Not ManagedSettings `WebContentSettings`** as the URL engine — it is
+- **Never ManagedSettings `WebContentSettings`** — not as the URL engine, and
+  not as the "auxiliary coarse layer" this bullet used to recommend it as. It is
   domain-level and capped at **50 domains + 50 exceptions**
-  (<https://developer.apple.com/documentation/managedsettings/webcontentsettings>).
-  Useful as an auxiliary coarse layer (and it disables Safari private browsing),
-  not as the per-URL engine.
+  (<https://developer.apple.com/documentation/managedsettings/webcontentsettings>),
+  which is why it was never the engine. The reason it is now barred outright is
+  measured, not theoretical: **iOS disables every Safari extension while web
+  content is restricted**, and `WebContentSettings` is the programmatic form of
+  that restriction. Asserting it would switch off our own Safari extension —
+  the only mechanism that enforces per-request inside Safari on iOS (ADR-018) —
+  in exchange for a 50-domain blocklist. That trade is never worth making, and
+  it would present as the extension being installed and doing nothing. Found on
+  a device on 2026-09-03 (§13 item 7a), where a Screen Time web restriction the
+  device already had greyed the toggle out.
 
 ---
 
@@ -746,39 +754,38 @@ a statement about today._
 **PoC B — macOS Safari Web Extension (+ native tamper controls):**
 7. Per-video allow/deny + Request-Access page in Safari without blocking Safari; force-install feasibility on consumer macOS; standard-account tamper resistance.
 
-**BLOCKING, AND IT DECIDES WHETHER ADR-018 SURVIVES ON iOS:**
-7a. **Does an active `NEFilterDataProvider` content filter make iOS grey out
-    Safari extensions?** Reported 2026-09-03 from a device: the Ajar extension
-    appears in Settings → Safari → Extensions but its toggle cannot be turned
-    on. iOS is known to disable Safari extensions while web content is
-    restricted; the documented, vendor-confirmed trigger is **Screen Time →
-    Content Restrictions → Web Content set to anything but Unrestricted**
-    (also Lockdown Mode, also an MDM profile). Whether a NetworkExtension
-    content filter is *also* such a trigger is **UNVERIFIED** — the sources
-    saying so are ad-blocker support pages about Screen Time, not Apple
-    documentation about `NEFilterDataProvider`.
+**RESOLVED 2026-09-03 — and it left a hard constraint behind:**
+7a. **Why the Safari extension's toggle was greyed out.** Measured on device:
+    **Screen Time → Content & Privacy Restrictions → Content Restrictions → Web
+    Content** was restricted. Setting it to Unrestricted made the toggle
+    enableable immediately. iOS disables Safari extensions while web content is
+    restricted, so an extension cannot observe or bypass filtered browsing.
 
-    **Why it is blocking rather than a nuisance.** If the filter is a trigger,
-    then on iOS the content filter and the Safari extension are mutually
-    exclusive, and ADR-018's mechanism cannot run on a device that is also
-    filtered. The remedy is NOT "move the per-URL logic into the filter": ADR-018
-    records why that is impossible (a socket flow carries a hostname, its bytes
-    are TLS ciphertext, and this architecture excludes TLS interception
-    unconditionally). It has now been proposed three times. What would actually
-    follow is narrower and worse: **iOS gets host-level filtering OR per-request
-    Safari enforcement, never both**, and the in-page/SPA gap ADR-018 exists to
-    close cannot be closed on iOS at all.
+    **The `NEFilterDataProvider` content filter is exonerated, and ADR-018
+    stands.** It had been proposed that an active content filter is itself such a
+    trigger, which would have made the filter and the extension mutually
+    exclusive on iOS and left the in-page/SPA gap unclosable. That is not what
+    the device showed, and no Apple documentation asserted it — every source for
+    the claim described Screen Time. The free check was run first precisely so
+    this conclusion was not reached on the strength of a plausible story.
 
-    **The experiment, cheapest first — do not skip step 1.** (1) Settings →
-    Screen Time → Content & Privacy Restrictions → Content Restrictions → Web
-    Content. If it is not "Unrestricted", that is the cause and the filter is
-    exonerated. (2) Only then: disable the Ajar filter, force-quit Safari, and
-    re-check the toggle. It becoming enableable is what implicates the filter.
-    (3) Confirm which authorization the device actually holds — TN3134 says the
-    filter runs on iOS only under supervision/MDM or FamilyControls `.child`, so
-    on an ordinary personal device the filter should not be running at all, and
-    a claim that it is greying out the toggle is in tension with a claim that it
-    cannot start. Both cannot be load-bearing at once.
+    **What it does leave, and this one is real.** The trigger is the web-content
+    restriction, and `ManagedSettings.WebContentSettings` is the programmatic
+    form of that same setting — which this document recommended two hundred
+    lines above as a "useful auxiliary coarse layer". It is not. Asserting it
+    would grey out our OWN Safari extension, which is the only mechanism on iOS
+    that enforces per-request inside Safari (ADR-018). See the amended bullet in
+    §6. The mutual exclusion is genuine; it is just between two of OUR choices
+    rather than between the filter and the extension.
+
+    **Follow-up, not yet built:** a family that has set Screen Time web
+    restrictions themselves — for perfectly good reasons, before ever installing
+    Ajar — silently disables our extension, and the product then looks installed
+    and enforcing while the in-page path is dead. iOS exposes no API to read
+    that setting, so the practical detection is a heartbeat: the extension
+    stamps the App Group when it runs, and the app warns when that stamp is
+    absent or stale. Until that exists, this failure is invisible, which is the
+    same shape as every other defect this repository keeps finding.
 
 **PoC C — Windows policy-installed extension + hardened service (no MITM by default):**
 8. `ExtensionInstallForcelist` + MV3 `webRequestBlocking` on clean, non-domain-joined Windows 11 Home; full-URL enforcement; service anti-tamper; block unsupported browsers; whether any concrete case forces the MITM fallback.
