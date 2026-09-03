@@ -289,17 +289,27 @@ public final class PolicyStore {
     /// consumption to the backend exactly once.
     @discardableResult
     public func spendGrant(_ grantId: String) -> Bool {
+        // READ THE POLICY FIRST, OUTSIDE THE LOCK. `state()` takes this same
+        // `lock`, and NSLock is not recursive — calling it from inside the
+        // critical section deadlocked the calling thread on the very first spend
+        // of a "just once" grant. In the Safari handler that means
+        // `completeRequest` is never called and the extension hangs; in the
+        // filter provider it is a wedged flow. Hoisting the read also keeps the
+        // critical section to the part that actually needs to be atomic.
+        //
+        // The window this opens is harmless: pruning is housekeeping, so a
+        // snapshot that changes between here and the write costs at worst one
+        // stale id that the next spend removes.
+        var live: Set<String>?
+        if case let .verified(snap) = state() { live = Set(snap.temporaryRules.map(\.id)) }
+
         lock.lock(); defer { lock.unlock() }
         var ids = Set(defaults?.stringArray(forKey: spentGrantsKey) ?? [])
         guard !ids.contains(grantId) else { return false }
         ids.insert(grantId)
         // Forget ids the policy no longer carries, so the set cannot grow for
-        // the life of the install. Done on write rather than on read: reads are
-        // on the hot path of every flow.
-        if case let .verified(snap) = state() {
-            let live = Set(snap.temporaryRules.map(\.id))
-            ids = ids.intersection(live.union([grantId]))
-        }
+        // the life of the install.
+        if let live { ids = ids.intersection(live.union([grantId])) }
         defaults?.set(Array(ids), forKey: spentGrantsKey)
         return true
     }
@@ -321,6 +331,94 @@ public final class PolicyStore {
         ids.insert(grantId)
         ids = ids.intersection(spentGrantIds)   // never outlive the spend record
         defaults?.set(Array(ids), forKey: key)
+    }
+
+    // MARK: - "Ask a parent", from Safari
+
+    /// Requests the Safari extension has filed and the containing app has not
+    /// posted yet.
+    ///
+    /// WHY A QUEUE AND NOT A DIRECT POST. The extension has no device identity
+    /// and must not acquire one. Enrolling it separately would give one child
+    /// two device identities for one phone, which is what the options-page path
+    /// does and why it is a dev fallback (SafariWebExtensionHandler). The app is
+    /// already enrolled, already holds the token, and already syncs — so the
+    /// extension writes here and the app posts, exactly as spent grants already
+    /// travel in the same direction.
+    ///
+    /// This is the ONLY thing besides a spent grant that crosses from the
+    /// extension into the App Group, and it is the one payload that legitimately
+    /// carries a URL: it is the page the child chose to ask about, which is the
+    /// product, not observation (ARCHITECTURE.md §10.1).
+    ///
+    /// TRUST. Anything with App-Group access can write this queue, so a forged
+    /// entry could ask a parent to approve anything. That is bounded on the
+    /// server, not here: `childRequestTargetError` rejects a target a device is
+    /// not allowed to request — the check that exists because an unvalidated
+    /// `targetType` once opened the entire web. This side only bounds SIZE.
+    private let pendingRequestsKey = "policy_pending_access_requests"
+
+    /// Enough that a child on a bad connection keeps their asks, small enough
+    /// that a stuck queue cannot grow without limit in a shared container.
+    private static let maxPendingRequests = 32
+    /// A title or reason is for a parent to read on a phone, not a place to put
+    /// a page's worth of text into shared storage.
+    private static let maxFieldLength = 512
+
+    /// File a request. Returns false if it was dropped, so the caller can tell
+    /// the child rather than showing "asked" when nobody was.
+    ///
+    /// An identical target already queued is treated as already asked: a blocked
+    /// page a child reloads four times is one question, and the server dedupes
+    /// pending asks the same way.
+    @discardableResult
+    public func enqueueAccessRequest(
+        targetType: String,
+        targetValue: String,
+        url: String?,
+        title: String?,
+        reason: String?
+    ) -> Bool {
+        guard !targetType.isEmpty, !targetValue.isEmpty else { return false }
+        let stamp = ISO8601DateFormatter().string(from: nowUTC()) // outside the lock, per spendGrant
+        lock.lock(); defer { lock.unlock() }
+
+        var queue = (defaults?.array(forKey: pendingRequestsKey) as? [[String: String]]) ?? []
+        if queue.contains(where: { $0["targetType"] == targetType && $0["targetValue"] == targetValue }) {
+            return true // already asked, and saying so is the truth
+        }
+        guard queue.count < Self.maxPendingRequests else { return false }
+
+        let clip = { (v: String?) -> String? in
+            guard let v, !v.isEmpty else { return nil }
+            return String(v.prefix(Self.maxFieldLength))
+        }
+        var entry: [String: String] = [
+            "id": UUID().uuidString,
+            "targetType": targetType,
+            "targetValue": String(targetValue.prefix(Self.maxFieldLength)),
+            "createdAt": stamp,
+        ]
+        if let u = clip(url) { entry["url"] = u }
+        if let t = clip(title) { entry["title"] = t }
+        if let r = clip(reason) { entry["reason"] = r }
+
+        queue.append(entry)
+        defaults?.set(queue, forKey: pendingRequestsKey)
+        return true
+    }
+
+    /// What the app still has to post.
+    public func pendingAccessRequests() -> [[String: String]] {
+        (defaults?.array(forKey: pendingRequestsKey) as? [[String: String]]) ?? []
+    }
+
+    /// Drop one after the backend has accepted it. Keyed on the entry's own id
+    /// rather than its position: the extension can append while the app posts.
+    public func removeAccessRequest(id: String) {
+        lock.lock(); defer { lock.unlock() }
+        let queue = (defaults?.array(forKey: pendingRequestsKey) as? [[String: String]]) ?? []
+        defaults?.set(queue.filter { $0["id"] != id }, forKey: pendingRequestsKey)
     }
 
     /// Convenience for callers that only want the policy when it is trustworthy.

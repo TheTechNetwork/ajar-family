@@ -29,12 +29,19 @@ import os.log
 /// (docs/DECISIONS.md ADR-018). Moving the decision here would put a message
 /// round trip on the hot path of every navigation to arrive at the same answer.
 ///
-/// It writes exactly one thing: that a "just once" grant has been SPENT. That
-/// state has to be shared with the content filter or "just once" means once per
-/// surface — watch it in Safari, then watch it again through a top-level
-/// navigation the filter sees, because neither knows what the other spent. It is
-/// a set of opaque grant ids, it only ever grows within a policy version, and
-/// spending something twice is a no-op, so the write cannot loosen anything.
+/// IT WRITES TWO THINGS, both of which only ever tighten or queue.
+///
+/// 1. That a "just once" grant has been SPENT. That state has to be shared with
+///    the content filter or "just once" means once per surface — watch it in
+///    Safari, then watch it again through a top-level navigation the filter
+///    sees, because neither knows what the other spent. It is a set of opaque
+///    grant ids, it only ever grows within a policy version, and spending
+///    something twice is a no-op, so the write cannot loosen anything.
+/// 2. That a child ASKED for something. The extension has no device identity and
+///    must not get one, so it queues into the App Group and the containing app —
+///    already enrolled, already syncing — posts it. Nothing here grants
+///    anything; a request is a question, and the answer arrives as a signed
+///    snapshot like every other policy change.
 ///
 /// TRUST BOUNDARY. Anything with App-Group access can write those bytes — the
 /// boundary `PolicyStore` already documents. That is why the signature is
@@ -60,12 +67,15 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             payload = Self.policyPayload()
         case "SPEND_GRANT":
             payload = Self.spendGrant(message?["grantId"] as? String)
+        case "REQUEST_ACCESS":
+            payload = Self.requestAccess(message)
         default:
             payload = [
                 "ok": false,
                 // Named so a JS caller can branch on it rather than parse prose.
                 "error": "unknown-message-type",
-                "detail": "Ajar for Safari serves GET_POLICY; decisions are made in the extension.",
+                "detail": "Ajar for Safari serves GET_POLICY, SPEND_GRANT and REQUEST_ACCESS; "
+                    + "decisions are made in the extension.",
             ]
         }
 
@@ -86,6 +96,43 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         }
         let firstTime = PolicyStore.shared.spendGrant(grantId)
         return ["ok": true, "spent": firstTime]
+    }
+
+    /// Queue "ask a parent" for the containing app to post.
+    ///
+    /// WHY IT DOES NOT POST FROM HERE. The extension has no device identity and
+    /// must not get one: enrolling it separately would hand one child two device
+    /// identities for one phone — precisely what the options-page path does, and
+    /// why that path is a dev fallback. The app is enrolled, holds the token and
+    /// already syncs, so this writes to the App Group and the app sends it. A
+    /// blocked child on a train also keeps their question that way, instead of
+    /// losing it to a failed request.
+    ///
+    /// Until this existed the block page's Ask button fell through to the
+    /// backend path, which needs an enrolment the extension does not have — so
+    /// on iOS the one screen where the product must work returned an error.
+    ///
+    /// `targetValue` must be the CANONICAL id, not the raw URL: the console and
+    /// the policy engine both key on canonical ids, so `watch?v=X&t=90` and
+    /// `youtu.be/X` have to arrive as one question. `background.js` canonicalises
+    /// before it gets here; `url` carries the original for a parent to read.
+    static func requestAccess(_ message: [String: Any]?) -> [String: Any] {
+        guard let targetType = message?["targetType"] as? String,
+              let targetValue = message?["targetValue"] as? String,
+              !targetType.isEmpty, !targetValue.isEmpty else {
+            return ["ok": false, "error": "missing-target"]
+        }
+        let queued = PolicyStore.shared.enqueueAccessRequest(
+            targetType: targetType,
+            targetValue: targetValue,
+            url: message?["url"] as? String,
+            title: message?["title"] as? String,
+            reason: message?["reason"] as? String
+        )
+        // A full queue is reported rather than swallowed: the block page has to
+        // be able to say "we could not ask" instead of telling a child their
+        // parent was asked when nobody was.
+        return queued ? ["ok": true] : ["ok": false, "error": "queue-full"]
     }
 
     /// This device's policy as the JavaScript needs it.

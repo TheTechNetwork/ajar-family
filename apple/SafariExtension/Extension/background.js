@@ -244,15 +244,42 @@ function startNativeSync() {
   }
 }
 
-/** Round-trip a blocked canonical id to the app as an AccessRequest (B2).
+/** Hand a blocked canonical id to the containing app as an AccessRequest (B2).
  *
- *  NOT BUILT: the containing app serves GET_POLICY and nothing else, so this
- *  says so instead of posting into a void. The block page falls back to the
- *  backend path, and `REQUEST_ACCESS` below reports the failure to it rather
- *  than telling a child their parent was asked when nobody was.
+ *  The app is the one enrolled with the backend; this extension has no device
+ *  identity and must not acquire one, or a parent ends up with two devices for
+ *  one phone. So the ask is queued into the shared App Group and the app posts
+ *  it on its next sync — which also means a child who is offline, or on a train,
+ *  keeps their question instead of losing it to a failed request.
+ *
+ *  `targetType`/`targetValue` are split from the canonical key here rather than
+ *  in Swift so both policy sources agree on the split: the backend path a few
+ *  lines below does exactly the same thing.
  */
-async function sendAccessRequest(_req) {
-  return { ok: false, error: "native-request-not-implemented" };
+async function sendAccessRequest(req) {
+  if (typeof browser?.runtime?.sendNativeMessage !== "function") {
+    return { ok: false, error: "no-native-messaging" };
+  }
+  const [targetType, targetValue] = req.canonicalKey
+    ? req.canonicalKey.split(/:(.+)/)
+    : ["URL", req.url];
+  if (!targetValue) return { ok: false, error: "no-target" };
+  try {
+    const res = await browser.runtime.sendNativeMessage(NATIVE_APP_ID, {
+      type: "REQUEST_ACCESS",
+      targetType,
+      targetValue,
+      url: req.url || undefined,
+      title: req.title || undefined,
+      reason: req.reason || undefined,
+    });
+    // The handler answers {ok:false,error:"queue-full"} rather than swallowing
+    // it, so a child is told we could not ask instead of being told their parent
+    // was asked when nobody was.
+    return res?.ok ? { ok: true } : { ok: false, error: res?.error || "native-request-failed" };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -891,13 +918,12 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
         return { ok: false, error: String(e) };
       }
     }
-    // Native mode. The containing app serves policy and nothing else yet, so
-    // this reports the failure rather than returning ok — the block page tells a
-    // child their parent has been asked, and it must not say that when no
-    // request was sent anywhere.
+    // Native mode: queue it with the containing app, which posts it as the
+    // device it already enrolled. childId/deviceId are deliberately NOT sent —
+    // the app knows who it is, and a value supplied by the extension would be a
+    // device-supplied identity the server would have to distrust anyway.
     return await sendAccessRequest({
-      canonicalKey: key, url: msg.url, reason: msg.reason || "",
-      childId: snapshot?.childId, deviceId: snapshot?.deviceId, requestedAt: new Date().toISOString(),
+      canonicalKey: key, url: msg.url, title: msg.title || "", reason: msg.reason || "",
     });
   }
 
