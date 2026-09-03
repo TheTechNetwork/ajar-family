@@ -55,6 +55,31 @@ for (const ws of ["", ...(rootPkg.workspaces ?? [])]) {
   }
 }
 
+// Every workspace symlink must point at an entry that exists.
+//
+// npm calls this EMISSINGTARGET — 'Missing target in lock file: "backend" is
+// referenced by "node_modules/@ajar/backend" but does not exist' — and its
+// advice is to delete package-lock.json and reinstall, which throws away every
+// pinned transitive version to repair one broken pointer. `npm install` alone
+// rewrites the entry in place. This catches it before either is necessary.
+for (const [path, entry] of Object.entries(lockPackages)) {
+  if (!entry || !entry.link || typeof entry.resolved !== "string") continue;
+  checked++;
+  if (lockPackages[entry.resolved] === undefined) {
+    problems.push(
+      `the lockfile links "${path}" to "${entry.resolved}", which it has no entry for.\n` +
+      `      npm refuses with EMISSINGTARGET. Repair with \`npm install\` — NOT by\n` +
+      `      deleting the lockfile, which would re-resolve every transitive version.`,
+    );
+  } else if (!existsSync(join(root, entry.resolved))) {
+    problems.push(
+      `the lockfile links "${path}" to "${entry.resolved}", which is not a directory in this checkout.\n` +
+      `      A partial or sparse checkout produces this; so does a workspace removed from disk\n` +
+      `      but left in package.json's "workspaces".`,
+    );
+  }
+}
+
 if (problems.length > 0) {
   console.error("package.json and package-lock.json disagree:\n");
   for (const p of problems) console.error(`  ${p}`);
