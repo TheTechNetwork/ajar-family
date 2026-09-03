@@ -243,7 +243,8 @@ public final class PolicyStore {
 
         let computed = evaluateState(raw: raw)
         lock.lock(); memoDigest = digest; memoState = computed; lock.unlock()
-        if case .untrusted = computed, recordsDiagnostics { defaults?.set(true, forKey: tamperKey) }
+        // `defaults` is the unwrapped local from the guard above, not the optional property.
+        if case .untrusted = computed, recordsDiagnostics { defaults.set(true, forKey: tamperKey) }
         return computed
     }
 
