@@ -396,11 +396,38 @@ force SIWA. Enable it on a parent App ID only if/when a parent iOS app exists AN
 
 ## 5. Provisioning profiles
 
-> **Created by hand, like the certificate (§3.1).** **Four** App Store profiles —
-> one per target — supplied to CI as base64 secrets (§8.1). Generate each AFTER
-> its App ID's capabilities are enabled (§4.1): a profile bakes in the
-> entitlements present at generation time, so enabling a capability later means
-> regenerating the profile, not just editing the `.entitlements` file.
+> **Run `node tools/apple/setup-ci.mjs`.** It creates the distribution
+> certificate from the local CSR, builds the `.p12`, registers any App ID the
+> team does not have yet, enables App Groups on it, mints one App Store profile
+> per target bound to that certificate, and sets every GitHub secret and
+> variable the TestFlight workflows read. It is idempotent — re-running reuses
+> the certificate and replaces the profiles.
+>
+> **This section used to say "created by hand", and that was never what
+> happened.** The script ran from `~/.ajar-signing` on one laptop, so nothing in
+> this repository recorded that provisioning was automated at all. When the
+> Safari extension became a fourth signable target, TestFlight stopped at
+> `Not configured: APPLE_PROFILE_SAFARI(secret)` and this page offered a portal
+> walkthrough nobody had ever performed. The script is now in the repository, so
+> adding a target is a code change in `TARGETS` rather than a click somewhere
+> undocumented.
+>
+> **Credentials stay out of the tree.** `~/.ajar-signing` still holds the CSR,
+> its private key, the `.p12` and the ASC `.p8`; the script reads them from
+> there (`AJAR_SIGNING_DIR` to relocate) and never copies them in. What is
+> committed is the procedure, not the material.
+>
+> **One profile per App ID, always.** A profile carries exactly one
+> `application-identifier` — `testflight.yml` reads it back to decide which
+> target a profile belongs to — and the wildcard App ID that would span several
+> cannot carry App Groups, which is the entitlement three of these targets exist
+> to use. Five targets, five profiles, five secrets, one shared certificate.
+>
+> A profile bakes in the entitlements present at generation time, so enabling a
+> capability later means regenerating the profile, not just editing the
+> `.entitlements` file. The script asserts this rather than trusting it: a
+> profile minted without `group.family.ajar.filter` fails the run instead of
+> failing `codesign` twenty minutes into an archive.
 
 | Target | Secret | Workflow that reads it |
 |---|---|---|
