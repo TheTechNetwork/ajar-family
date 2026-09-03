@@ -1,6 +1,36 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
+  "extends": ["config:recommended"],
+
+  "_comment_lockfile": [
+    "This repo is npm workspaces (shared, backend) with ONE root package-lock.json.",
+    "Renovate edits a workspace's package.json and updates the root lock as a",
+    "SEPARATE step; when that step fails it still opens the PR, which then cannot",
+    "install at all — `npm ci` refuses on a lock that does not satisfy",
+    "package.json. That is what happened to @simplewebauthn/server 13.3.3 -> 14.0.0.",
+    "npmDedupe makes Renovate run npm against the lock after the edit rather than",
+    "relying on the version-rewrite alone, and lockFileMaintenance re-resolves the",
+    "whole lock on a schedule so drift does not accumulate silently between bumps."
+  ],
+  "postUpdateOptions": ["npmDedupe"],
+  "lockFileMaintenance": { "enabled": true, "schedule": ["before 5am on monday"] },
+
+  "_comment_pin": [
+    "Dependencies here are pinned to exact versions (see backend/package.json).",
+    "Saying so explicitly keeps Renovate from reintroducing ^ ranges on a major,",
+    "which is how a lock and a package.json drift apart without anyone editing both."
+  ],
+  "rangeStrategy": "pin",
+
+  "_comment_major": [
+    "A major bump of the WebAuthn library changes the API the passkey path is",
+    "written against, so it gets its own PR and a human read rather than riding",
+    "along in a batch."
+  ],
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    }
   ]
 }

@@ -38,6 +38,9 @@ settings:
     DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
+    # See AjarFilter/project.yml for why this is here and not accepted
+    # in Xcode's "Validate Project Settings" dialog.
+    DEAD_CODE_STRIPPING: "YES"
     # Defaults; CI overrides CURRENT_PROJECT_VERSION on the xcodebuild command
     # line with the next build number App Store Connect will accept. Ported from
     # AjarFilter, where it was learned by rejection rather than by design:

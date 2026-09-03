@@ -35,6 +35,13 @@ jobs:
           node-version: "24"
           cache: "npm"
 
+      # Before `npm ci`, because npm's refusal is correct but unreadable: sixty
+      # lines of usage text around one sentence, and no fix. Renovate opens PRs
+      # that edit a workspace package.json without updating the root lock, and
+      # the failure lands on whoever reads CI rather than on the bot.
+      - name: package.json and the lockfile agree
+        run: node tools/conformance/check-lockfile-sync.mjs
+
       - name: Install (workspaces)
         run: npm ci
 

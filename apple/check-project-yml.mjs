@@ -131,6 +131,55 @@ if (existsSync(join(extDir, WEBEXT_MARKER))) {
   }
 }
 
+// 4. No duplicate mapping key at the same indent inside a project.yml.
+//    YAML takes the LAST one and discards the rest without a word, so a second
+//    `base:` under `settings:` throws away every build setting in the first.
+//    That happened while adding DEAD_CODE_STRIPPING: the file read correctly,
+//    xcodegen would have been happy, and the setting simply would not exist.
+//    Neither Xcode nor the build says anything about a setting that is absent.
+for (const proj of projects) {
+  const rel = relative(ROOT, proj);
+  const lines = readFileSync(proj, "utf8").split("\n");
+  /** indent -> Set of keys seen since that indent was last (re)entered. */
+  const seen = new Map();
+  let prevIndent = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim() || line.trim().startsWith("#")) continue;
+
+    // A new list item starts a FRESH mapping, so its keys are not duplicates of
+    // the previous item's. Without this, two `- path:` entries that both set
+    // `buildPhase` read as a duplicate — which is how this check first reported
+    // apple/poc-urlfilter, wrongly.
+    const item = line.match(/^(\s*)- /);
+    if (item) {
+      for (const k of [...seen.keys()]) if (k > item[1].length) seen.delete(k);
+      // `- path: x` also declares a key; fall through so it is recorded at the
+      // item's own indent rather than skipped.
+    }
+    const m = line.replace(/^(\s*)- /, "$1  ").match(/^(\s*)([A-Za-z_][A-Za-z0-9_.-]*):(\s|$)/);
+    if (!m) continue;
+    const indent = m[1].length;
+    const key = m[2];
+
+    // Dedenting closes every deeper scope; a sibling list item reopens one.
+    if (indent < prevIndent) for (const k of [...seen.keys()]) if (k > indent) seen.delete(k);
+    prevIndent = indent;
+
+    if (!seen.has(indent)) seen.set(indent, new Set());
+    const at = seen.get(indent);
+    if (at.has(key)) {
+      problems.push(
+        `${rel}:${i + 1} — duplicate key "${key}" at the same level.\n` +
+        `    YAML keeps the last one and silently drops the earlier block, so every\n` +
+        `    setting under the first copy disappears with no error anywhere.`,
+      );
+    }
+    at.add(key);
+  }
+}
+
 if (problems.length > 0) {
   console.error("XcodeGen project problems that leave the build green:\n");
   for (const p of problems) console.error(`  ${p}\n`);

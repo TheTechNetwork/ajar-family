@@ -68,6 +68,23 @@ settings:
     DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
+    # Xcode's "Validate Project Settings" offers recommendations and writes them
+    # into the .xcodeproj. Accepting there is pointless: the project is
+    # GENERATED, so the next `xcodegen generate` discards the edit and the dialog
+    # comes back. Anything worth having belongs here.
+    #
+    # DEAD_CODE_STRIPPING is the one worth taking: it is what Xcode asks for, it
+    # costs nothing, and unreferenced code should not ship.
+    #
+    # Deliberately NOT taken from that dialog:
+    #   REGISTER_APP_GROUPS — auto-adds every `group.`-prefixed entitlement to the
+    #     macOS provisioning profile. CI signs manually against explicit profiles
+    #     (AJAR_PROFILE_*); letting the toolchain rewrite what a profile grants is
+    #     the opposite of that, for the entitlement this product depends on.
+    #   Asset symbol / String Catalog symbol generation — there are no String
+    #     Catalogs and no symbol-based asset lookups here, so both would generate
+    #     code nothing reads.
+    DEAD_CODE_STRIPPING: "YES"
     TARGETED_DEVICE_FAMILY: "1,2"
     # Defaults. CI overrides CURRENT_PROJECT_VERSION on the xcodebuild command
     # line with the next build number App Store Connect will accept; the
