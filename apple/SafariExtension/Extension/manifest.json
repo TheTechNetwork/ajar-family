@@ -3,6 +3,13 @@
   "name": "Ajar",
   "version": "0.0.1",
   "description": "Ajar — per-video YouTube approvals in Safari, consuming the shared policy model. Experiment scaffold — not production.",
+  "icons": {
+    "48": "icon-48.png",
+    "96": "icon-96.png",
+    "128": "icon-128.png",
+    "256": "icon-256.png",
+    "512": "icon-512.png"
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -52,6 +59,11 @@
     }
   ],
   "action": {
-    "default_title": "Ajar"
+    "default_title": "Ajar",
+    "default_icon": {
+      "16": "icon-16.png",
+      "32": "icon-32.png",
+      "48": "icon-48.png"
+    }
   }
 }

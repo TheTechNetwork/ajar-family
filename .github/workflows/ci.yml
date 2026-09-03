@@ -99,6 +99,13 @@ jobs:
       - name: XcodeGen projects hold their invariants
         run: node apple/check-project-yml.mjs
 
+      # Icons are generated, not drawn — regenerate and fail if the tree drifts, so
+      # nobody hand-edits a PNG that a command owns.
+      - name: Extension icons match the generator
+        run: |
+          node tools/appicon/make-icon.mjs extension apple/SafariExtension/Extension
+          git diff --exit-code -- 'apple/SafariExtension/Extension/icon-*.png'
+
       # The parent console's JavaScript is not compiled, not linted, and not run
       # by any test, so a syntax error in it reaches a parent as a blank page and
       # a message only devtools shows. That happened — a backtick inside an HTML

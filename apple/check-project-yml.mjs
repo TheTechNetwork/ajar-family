@@ -95,6 +95,42 @@ for (const proj of projects) {
   }
 }
 
+// 3. Every path the manifest names must exist, and must be a bare filename.
+//    Resources are flattened into the appex root (that is the whole point of not
+//    using a folder reference), so `images/icon-48.png` would arrive as
+//    `icon-48.png` and the manifest's path would resolve to nothing. Safari does
+//    not report a missing icon or content script; the extension just behaves as
+//    though the file were empty.
+const extDir = join(ROOT, "apple", "SafariExtension", "Extension");
+if (existsSync(join(extDir, WEBEXT_MARKER))) {
+  const manifest = JSON.parse(readFileSync(join(extDir, WEBEXT_MARKER), "utf8"));
+  const referenced = new Set();
+  const walk = (v) => {
+    if (typeof v === "string") {
+      if (/\.(js|html|png|css|json)$/i.test(v)) referenced.add(v);
+    } else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") Object.values(v).forEach(walk);
+  };
+  walk(manifest);
+
+  for (const ref of [...referenced].sort()) {
+    if (ref.includes("/")) {
+      problems.push(
+        `manifest.json references "${ref}", which is inside a directory.\n` +
+        `    Copy Bundle Resources flattens the extension into the appex root, so\n` +
+        `    that path cannot resolve. Move the file up beside manifest.json, or\n` +
+        `    give its directory its own folder reference in both project.yml files.`,
+      );
+    } else if (!existsSync(join(extDir, ref))) {
+      problems.push(
+        `manifest.json references "${ref}" but apple/SafariExtension/Extension/${ref}\n` +
+        `    does not exist. Safari reports nothing for a missing resource — the\n` +
+        `    extension simply behaves as though the file were empty.`,
+      );
+    }
+  }
+}
+
 if (problems.length > 0) {
   console.error("XcodeGen project problems that leave the build green:\n");
   for (const p of problems) console.error(`  ${p}\n`);
