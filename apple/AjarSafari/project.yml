@@ -108,10 +108,12 @@ targets:
     sources:
       - path: ../SafariExtension/ExtensionShim
         excludes: ["*.entitlements"]
-      # The MV3 resources, copied in whole rather than listed file by file — a
-      # new .js added to the extension must not need a project edit to ship.
+      # The MV3 resources. NOT `type: folder` — see the same block in
+      # ../AjarFilter/project.yml: a folder reference lands manifest.json at
+      # Resources/Extension/ and Safari only looks at the resources root, so the
+      # extension silently never appears. XcodeGen re-globs without it, so a new
+      # .js still needs no project edit to ship.
       - path: ../SafariExtension/Extension
-        type: folder
         buildPhase: resources
       - path: ../AjarFilter/Shared
     settings:

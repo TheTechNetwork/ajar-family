@@ -251,10 +251,21 @@ targets:
     sources:
       - path: ../SafariExtension/ExtensionShim
         excludes: ["*.entitlements"]
-      # The MV3 resources, copied in whole rather than listed file by file, so a
-      # new .js added to the extension does not need a project edit to ship.
+      # The MV3 resources. NOT `type: folder`: a folder reference copies the
+      # directory ITSELF into the appex, so the bundle gets
+      # Resources/Extension/manifest.json. Safari looks for manifest.json at the
+      # RESOURCES ROOT and finds nothing, so the extension never appears in
+      # Safari Settings at all — which reads as "it didn't get bundled" rather
+      # than as a path problem, and the build stays green throughout.
+      #
+      # Without `type`, XcodeGen adds each file to the resources phase and Copy
+      # Bundle Resources flattens them to the root, which is what Safari wants.
+      # It re-globs on every `xcodegen generate`, so the property this started
+      # out protecting still holds: a new .js needs no project edit to ship.
+      # (Every file here is flat and the manifest references them root-relative;
+      # a subdirectory WOULD need its own folder reference, since flattening
+      # would otherwise collapse it.)
       - path: ../SafariExtension/Extension
-        type: folder
         buildPhase: resources
       - path: Shared          # PolicyStore et al — the point of the move
     settings:

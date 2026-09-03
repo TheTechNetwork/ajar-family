@@ -91,6 +91,14 @@ jobs:
       - name: No DEBUG-only member is used from Release code
         run: node apple/check-debug-symbols.mjs
 
+      # Two XcodeGen mistakes that leave the build GREEN: a web-extension resource
+      # directory added as a folder reference (manifest.json lands under
+      # Resources/Extension/, Safari only reads the resources root, so the
+      # extension silently never appears), and a generated Info.plist that is not
+      # ignored (shows up untracked, reads as 'forgot to commit', gets committed).
+      - name: XcodeGen projects hold their invariants
+        run: node apple/check-project-yml.mjs
+
       # The parent console's JavaScript is not compiled, not linted, and not run
       # by any test, so a syntax error in it reaches a parent as a blank page and
       # a message only devtools shows. That happened — a backtick inside an HTML
