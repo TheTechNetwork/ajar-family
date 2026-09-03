@@ -746,6 +746,40 @@ a statement about today._
 **PoC B — macOS Safari Web Extension (+ native tamper controls):**
 7. Per-video allow/deny + Request-Access page in Safari without blocking Safari; force-install feasibility on consumer macOS; standard-account tamper resistance.
 
+**BLOCKING, AND IT DECIDES WHETHER ADR-018 SURVIVES ON iOS:**
+7a. **Does an active `NEFilterDataProvider` content filter make iOS grey out
+    Safari extensions?** Reported 2026-09-03 from a device: the Ajar extension
+    appears in Settings → Safari → Extensions but its toggle cannot be turned
+    on. iOS is known to disable Safari extensions while web content is
+    restricted; the documented, vendor-confirmed trigger is **Screen Time →
+    Content Restrictions → Web Content set to anything but Unrestricted**
+    (also Lockdown Mode, also an MDM profile). Whether a NetworkExtension
+    content filter is *also* such a trigger is **UNVERIFIED** — the sources
+    saying so are ad-blocker support pages about Screen Time, not Apple
+    documentation about `NEFilterDataProvider`.
+
+    **Why it is blocking rather than a nuisance.** If the filter is a trigger,
+    then on iOS the content filter and the Safari extension are mutually
+    exclusive, and ADR-018's mechanism cannot run on a device that is also
+    filtered. The remedy is NOT "move the per-URL logic into the filter": ADR-018
+    records why that is impossible (a socket flow carries a hostname, its bytes
+    are TLS ciphertext, and this architecture excludes TLS interception
+    unconditionally). It has now been proposed three times. What would actually
+    follow is narrower and worse: **iOS gets host-level filtering OR per-request
+    Safari enforcement, never both**, and the in-page/SPA gap ADR-018 exists to
+    close cannot be closed on iOS at all.
+
+    **The experiment, cheapest first — do not skip step 1.** (1) Settings →
+    Screen Time → Content & Privacy Restrictions → Content Restrictions → Web
+    Content. If it is not "Unrestricted", that is the cause and the filter is
+    exonerated. (2) Only then: disable the Ajar filter, force-quit Safari, and
+    re-check the toggle. It becoming enableable is what implicates the filter.
+    (3) Confirm which authorization the device actually holds — TN3134 says the
+    filter runs on iOS only under supervision/MDM or FamilyControls `.child`, so
+    on an ordinary personal device the filter should not be running at all, and
+    a claim that it is greying out the toggle is in tension with a claim that it
+    cannot start. Both cannot be load-bearing at once.
+
 **PoC C — Windows policy-installed extension + hardened service (no MITM by default):**
 8. `ExtensionInstallForcelist` + MV3 `webRequestBlocking` on clean, non-domain-joined Windows 11 Home; full-URL enforcement; service anti-tamper; block unsupported browsers; whether any concrete case forces the MITM fallback.
 
