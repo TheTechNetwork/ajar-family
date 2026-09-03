@@ -128,6 +128,11 @@ async function render() {
     $("managed").hidden = false;
     $("enrolled").hidden = true;
     $("form").hidden = true;
+    // The page's own title and intro are setup instructions. Leaving them up
+    // told a parent to enter a code immediately above the line saying there is
+    // nothing to enter.
+    $("pageTitle").textContent = "Ajar in Safari";
+    $("pageLede").hidden = true;
     $("managedState").textContent = native.tamperDetected
       ? "Something changed the stored rules on this device, so Safari is blocking everything except a few safety sites. Open the Ajar app to fix it."
       : native.provisioned
@@ -136,6 +141,7 @@ async function render() {
     return;
   }
   $("managed").hidden = true;
+  $("pageLede").hidden = false;
 
   const cfg = await getConfig();
   const pin = await readTrustAnchor();

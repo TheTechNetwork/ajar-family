@@ -325,8 +325,11 @@ code { font-family: var(--font-mono); font-size: var(--t-sm);
 </head>
 <body>
   <main>
-    <h1>Set up ajar on Safari</h1>
-    <p>
+    <!-- Hidden when the containing app is the policy source: telling someone to
+         enter a code directly above "there is nothing to enter here" is worse
+         than either message alone. options.js render() owns both. -->
+    <h1 id="pageTitle">Set up ajar on Safari</h1>
+    <p id="pageLede">
       Enter the 8-character code from your parent's ajar screen. This links just
       this browser — nothing else on the device changes.
     </p>

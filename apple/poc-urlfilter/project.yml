@@ -23,6 +23,9 @@ settings:
     DEVELOPMENT_TEAM: $(DEVELOPMENT_TEAM)
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
+    # See AjarFilter/project.yml for why this is here and not accepted
+    # in Xcode's "Validate Project Settings" dialog.
+    DEAD_CODE_STRIPPING: "YES"
     TARGETED_DEVICE_FAMILY: "1,2"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 
