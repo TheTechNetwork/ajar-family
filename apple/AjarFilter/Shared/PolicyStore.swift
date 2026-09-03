@@ -24,6 +24,18 @@ import Foundation
 /// | present but unverifiable / rolled back  | BLOCK everything except the safety floor |
 /// | absent AND device was provisioned       | BLOCK everything except the safety floor |
 /// | absent AND never provisioned            | ALLOW (unenrolled device stays usable)   |
+/// | App Group unreachable                   | BLOCK everything except the safety floor |
+///
+/// That last row used to be missing, and its absence was the worst bug this
+/// type could have. `UserDefaults(suiteName:)` returns nil when the App Group
+/// entitlement is not actually granted at runtime — a provisioning profile
+/// without the capability, a signing mismatch, a renamed group. Every read then
+/// yields nil, so `isProvisioned` was false and `state()` returned `.absent`,
+/// which is the ALLOW row. A misconfigured build was therefore INDISTINGUISHABLE
+/// from a brand-new unenrolled device, and both let everything through: the
+/// filter silently enforced nothing while the app reported an ordinary
+/// not-yet-enrolled device. A configuration mistake must never be the one that
+/// fails open.
 ///
 /// The tamper posture is deliberately harsh: it is recoverable by the app
 /// re-fetching a valid snapshot, and `tamperDetected` lets the UI say so.
@@ -84,6 +96,9 @@ public final class PolicyStore {
     }
 
     private let defaults: UserDefaults?
+    /// Kept so an unreachable group can name itself in the reason string — the
+    /// one diagnostic that turns "nothing is blocked" into something fixable.
+    private let appGroup: String
     private let snapshotKey = "device_policy_snapshot_raw_v2"   // raw signed bytes
     private let legacyKey = "device_policy_snapshot_v1"         // pre-verification blob
     private let enrolledKeyKey = "policy_signing_key_spki_b64"
@@ -113,6 +128,7 @@ public final class PolicyStore {
     private var memoState: SnapshotState?
 
     public init(appGroup: String) {
+        self.appGroup = appGroup
         self.defaults = UserDefaults(suiteName: appGroup)
         // A snapshot written by the pre-verification build was never
         // signature-checked, so it is not trusted bytes. It is simply never read
@@ -206,7 +222,18 @@ public final class PolicyStore {
 
     /// The verified snapshot, or why there isn't one.
     public func state() -> SnapshotState {
-        guard let raw = defaults?.data(forKey: snapshotKey) else {
+        // Before anything else: can we read the App Group at all? A nil suite is
+        // not an empty one. Falling through would land on the `.absent` branch,
+        // which for an unprovisioned device means ALLOW — so a broken
+        // entitlement would quietly disable the filter. Fail closed to the
+        // safety floor and say why, which is the same posture this type already
+        // takes for a snapshot that disappears after provisioning.
+        guard let defaults else {
+            return .untrusted(reason: "app group \(appGroup) is unreachable — "
+                + "the filter cannot read policy (check the App Group entitlement "
+                + "and the provisioning profile)")
+        }
+        guard let raw = defaults.data(forKey: snapshotKey) else {
             return isProvisioned ? .untrusted(reason: "snapshot missing after provisioning") : .absent
         }
         let digest = Digest.sha256(raw)
