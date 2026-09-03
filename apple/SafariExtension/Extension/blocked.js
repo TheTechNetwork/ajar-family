@@ -188,6 +188,10 @@ function answerIn(snapshot, askedMs) {
 let mode = "idle";
 let askedAtIso = null;
 let askedAtMs = 0;
+/** True when the ask is only in the shared container, not yet at the server.
+ *  Native mode hands the ask to the containing app, which posts it on its next
+ *  sync — so "sent" is not yet true and this page must not say it is. */
+let queuedOnly = false;
 
 function showAsking() {
   mode = "asking";
@@ -244,7 +248,17 @@ function renderAskedNote() {
   } else {
     $("askedNote").textContent =
       `You asked ${ago(askedAtIso)}. Nothing else to do — you can leave this page open or come back to it.`;
-    setStatus("✓ Sent. Waiting on a parent.", "wait");
+    // Two different truths. In backend mode the ask has reached the server, so a
+    // parent can already see it. In native mode it is in the shared container
+    // and the Ajar app posts it when it next runs — telling a child their parent
+    // has it would be a guess, and the whole product rests on this screen not
+    // lying to them.
+    setStatus(
+      queuedOnly
+        ? "✓ Saved. It reaches your parent when the Ajar app next opens."
+        : "✓ Sent. Waiting on a parent.",
+      "wait",
+    );
   }
 }
 function showApproved() {
@@ -326,6 +340,7 @@ requestBtn.addEventListener("click", async () => {
       // already showing a retry, and flipping it to "Asked" underneath a
       // child who is mid-tap is worse than the honest failure.
       delivered = res !== timedOut && !!(res && res.ok);
+      queuedOnly = delivered && res.queued === true;
     }
   } catch (e) {
     console.warn("[ajar] background message failed:", e);

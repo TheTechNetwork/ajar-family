@@ -24,6 +24,7 @@ import { isExclusiveMediaHost, isPlaybackSupportHost, normalizeYouTube, youTubeP
 import { adoptSigningKeyIfUnset, getConfig, getVerifyingKey, startPolicySync, startCategoryFilterSync, postAccessRequest, consumeGrant, getAnswers } from "./backend-client.js";
 import { verifySnapshotSignature, verifyCanonicalSignature } from "./policy-verify.js";
 import { makeResolver } from "./cname-resolve.js";
+import { NATIVE_APP_ID } from "./trust-anchor.js";
 
 // On-device CNAME resolver (anti-cloaking); async + cached, read synchronously.
 const CNAME = makeResolver();
@@ -159,7 +160,7 @@ browser.storage.onChanged.addListener((changes, area) => {
  * the pinned Ed25519 key here, exactly like the backend path. The native side
  * passes bytes; it does not vouch for them.
  */
-const NATIVE_APP_ID = "family.ajar.safari.Extension";
+// NATIVE_APP_ID is imported from trust-anchor.js — one definition, two callers.
 
 /** How often to re-ask the app for policy in native mode. An approval must land
  *  in seconds, and this is the only pull there is, so it is deliberately short;
@@ -276,7 +277,13 @@ async function sendAccessRequest(req) {
     // The handler answers {ok:false,error:"queue-full"} rather than swallowing
     // it, so a child is told we could not ask instead of being told their parent
     // was asked when nobody was.
-    return res?.ok ? { ok: true } : { ok: false, error: res?.error || "native-request-failed" };
+    // `queued` is the honest distinction. The handler wrote the ask into the
+    // App Group; the containing app posts it on its next sync. Until the app
+    // runs, nothing has reached a parent, and the block page must not say it
+    // has (see blocked.js setStatus).
+    return res?.ok
+      ? { ok: true, queued: true }
+      : { ok: false, error: res?.error || "native-request-failed" };
   } catch (e) {
     return { ok: false, error: String(e) };
   }

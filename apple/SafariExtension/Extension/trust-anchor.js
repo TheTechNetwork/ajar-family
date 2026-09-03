@@ -42,6 +42,21 @@ const ext = globalThis.browser ?? globalThis.chrome;
  */
 export const BUNDLED_BACKEND_URL = "https://api.ajar.family";
 
+/**
+ * The application id passed to `sendNativeMessage`.
+ *
+ * IT CANNOT BE THE BUNDLE ID, because there are two: this same extension ships
+ * as `family.ajar.filter.SafariExtension` inside the iOS filter app and as
+ * `family.ajar.safari.Extension` inside the macOS container. Safari does not
+ * route on this value — it delivers to the containing app's
+ * SFSafariWebExtensionHandler whichever host it is running in — so the argument
+ * exists to satisfy the API, not to select a target.
+ *
+ * Kept in one place anyway, and imported by background.js and options.js, so
+ * nobody "corrects" one copy to a bundle id and leaves the other behind.
+ */
+export const NATIVE_APP_ID = "family.ajar.safari.Extension";
+
 /** Storage keys. The anchor and the setup word both OUTLIVE Disconnect. */
 export const ANCHOR_KEY = "ajarTrustAnchor";
 export const WORD_KEY = "ajarParentLock";   // name kept for installs that have one
